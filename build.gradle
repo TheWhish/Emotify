@@ -1,0 +1,146 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'idea'
+    id 'net.neoforged.moddev'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = mod_version
+group = mod_group_id
+
+String dataGenerationModId = providers.gradleProperty('mod_id').get()
+
+base {
+    archivesName = mod_id
+}
+
+repositories {
+    maven {
+        name = 'KotlinForForge'
+        url = uri('https://thedarkcolour.github.io/KotlinForForge/')
+        content {
+            includeGroup 'thedarkcolour'
+        }
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+neoForge {
+    version = neo_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_mappings_version
+    }
+
+    runs {
+        client {
+            client()
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+        }
+
+        data {
+            data()
+            programArgument '--mod'
+            programArgument dataGenerationModId
+            programArgument '--all'
+            programArgument '--output'
+            programArgument file('src/generated/resources').absolutePath
+            programArgument '--existing'
+            programArgument file('src/main/resources').absolutePath
+        }
+
+        configureEach {
+            logLevel = org.slf4j.event.Level.INFO
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation "thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version}"
+}
+
+def modMetadataProperties = [
+    minecraft_version_range: minecraft_version_range,
+    neo_version_range: neo_version_range,
+    loader_version_range: loader_version_range,
+    mod_id: mod_id,
+    mod_name: mod_name,
+    mod_license: mod_license,
+    mod_version: mod_version,
+    mod_authors: mod_authors,
+    mod_description: mod_description
+]
+
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    inputs.properties modMetadataProperties
+    expand modMetadataProperties
+    from 'src/main/templates'
+    rename 'neoforge[.]mods[.]toml[.]template', 'neoforge.mods.toml'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+
+sourceSets.main.resources {
+    srcDir 'src/generated/resources'
+    srcDir generateModMetadata
+    exclude '**/*.bbmodel', '**/.cache/**'
+}
+
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+    includeEmptyDirs = false
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def embeddedLicenseName = "LICENSE_${mod_id}"
+
+tasks.named('jar', Jar) {
+    from('LICENSE') {
+        rename { embeddedLicenseName }
+    }
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}
