@@ -4,9 +4,11 @@
 /out/
 /repo/
 /run/
-/run-data/
+/run-*/
 /src/generated/resources/
 /docs/
+/§b§lAllure Emoji Pack§r§0/
+/assets/
 
 /.idea/
 /.fleet/

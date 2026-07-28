@@ -51,15 +51,18 @@ neoForge {
     runs {
         client {
             client()
+            gameDirectory = layout.projectDirectory.dir('run-client')
         }
 
         server {
             server()
+            gameDirectory = layout.projectDirectory.dir('run-server')
             programArgument '--nogui'
         }
 
         data {
             data()
+            gameDirectory = layout.projectDirectory.dir('run-data')
             programArgument '--mod'
             programArgument dataGenerationModId
             programArgument '--all'
@@ -79,10 +82,19 @@ neoForge {
             sourceSet sourceSets.main
         }
     }
+
+    unitTest {
+        testedMod = mods.named(mod_id)
+        enable()
+    }
 }
 
 dependencies {
     implementation "thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version}"
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation "io.kotest:kotest-property:${kotest_version}"
 }
 
 def modMetadataProperties = [
@@ -122,6 +134,10 @@ tasks.withType(JavaCompile).configureEach {
 tasks.withType(ProcessResources).configureEach {
     filteringCharset = 'UTF-8'
     includeEmptyDirs = false
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
 }
 
 tasks.withType(Jar).configureEach {

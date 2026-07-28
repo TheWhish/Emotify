@@ -1,0 +1,859 @@
+{
+  "schemaVersion": 4,
+  "source": {
+    "name": "Happy's Better Emojis",
+    "author": "Happy_AlexRO",
+    "url": "https://modrinth.com/resourcepack/happys-emojis",
+    "license": "CC-BY-4.0"
+  },
+  "categories": [
+    {
+      "id": "faces",
+      "translationKey": "category.emotify.faces"
+    },
+    {
+      "id": "animals",
+      "translationKey": "category.emotify.animals"
+    }
+  ],
+  "defaultFavorites": [
+    "emotify:happy",
+    "emotify:sad",
+    "emotify:angry",
+    "emotify:surprised",
+    "emotify:love",
+    "emotify:confused"
+  ],
+  "atlases": [
+    {
+      "category": "faces",
+      "texture": "emotify:textures/emotions/faces.png",
+      "textureWidth": 128,
+      "textureHeight": 72,
+      "spriteWidth": 8,
+      "spriteHeight": 8,
+      "emotions": [
+        {
+          "slot": 0,
+          "id": "emotify:grinning_face",
+          "glyph": "😀"
+        },
+        {
+          "slot": 1,
+          "id": "emotify:beaming_face",
+          "glyph": "😁"
+        },
+        {
+          "slot": 2,
+          "id": "emotify:tears_of_joy",
+          "glyph": "😂"
+        },
+        {
+          "slot": 3,
+          "id": "emotify:rolling_laugh",
+          "glyph": "🤣"
+        },
+        {
+          "slot": 4,
+          "id": "emotify:smiling_face",
+          "glyph": "😃"
+        },
+        {
+          "slot": 5,
+          "id": "emotify:happy",
+          "glyph": "😄"
+        },
+        {
+          "slot": 6,
+          "id": "emotify:smiling_with_sweat",
+          "glyph": "😅"
+        },
+        {
+          "slot": 7,
+          "id": "emotify:squinting_laugh",
+          "glyph": "😆"
+        },
+        {
+          "slot": 8,
+          "id": "emotify:wink",
+          "glyph": "😉"
+        },
+        {
+          "slot": 9,
+          "id": "emotify:warm_smile",
+          "glyph": "😊"
+        },
+        {
+          "slot": 10,
+          "id": "emotify:savoring_food",
+          "glyph": "😋"
+        },
+        {
+          "slot": 11,
+          "id": "emotify:cool",
+          "glyph": "😎"
+        },
+        {
+          "slot": 12,
+          "id": "emotify:love",
+          "glyph": "😍"
+        },
+        {
+          "slot": 13,
+          "id": "emotify:blowing_kiss",
+          "glyph": "😘"
+        },
+        {
+          "slot": 14,
+          "id": "emotify:surrounded_by_hearts",
+          "glyph": "🥰"
+        },
+        {
+          "slot": 15,
+          "id": "emotify:kissing",
+          "glyph": "😗"
+        },
+        {
+          "slot": 16,
+          "id": "emotify:kissing_smile",
+          "glyph": "😙"
+        },
+        {
+          "slot": 17,
+          "id": "emotify:smiling_with_tear",
+          "glyph": "🥲"
+        },
+        {
+          "slot": 18,
+          "id": "emotify:kissing_closed_eyes",
+          "glyph": "😚"
+        },
+        {
+          "slot": 19,
+          "id": "emotify:relaxed",
+          "glyph": "☺️"
+        },
+        {
+          "slot": 20,
+          "id": "emotify:slight_smile",
+          "glyph": "🙂"
+        },
+        {
+          "slot": 21,
+          "id": "emotify:hug",
+          "glyph": "🤗"
+        },
+        {
+          "slot": 22,
+          "id": "emotify:star_struck",
+          "glyph": "🤩"
+        },
+        {
+          "slot": 23,
+          "id": "emotify:thinking",
+          "glyph": "🤔"
+        },
+        {
+          "slot": 24,
+          "id": "emotify:salute",
+          "glyph": "🫡"
+        },
+        {
+          "slot": 25,
+          "id": "emotify:raised_eyebrow",
+          "glyph": "🤨"
+        },
+        {
+          "slot": 26,
+          "id": "emotify:neutral",
+          "glyph": "😐"
+        },
+        {
+          "slot": 27,
+          "id": "emotify:expressionless",
+          "glyph": "😑"
+        },
+        {
+          "slot": 28,
+          "id": "emotify:no_mouth",
+          "glyph": "😶"
+        },
+        {
+          "slot": 29,
+          "id": "emotify:dotted_line",
+          "glyph": "🫥"
+        },
+        {
+          "slot": 30,
+          "id": "emotify:face_in_clouds",
+          "glyph": "😶‍🌫️"
+        },
+        {
+          "slot": 31,
+          "id": "emotify:eye_roll",
+          "glyph": "🙄"
+        },
+        {
+          "slot": 32,
+          "id": "emotify:smirk",
+          "glyph": "😏"
+        },
+        {
+          "slot": 33,
+          "id": "emotify:persevering",
+          "glyph": "😣"
+        },
+        {
+          "slot": 34,
+          "id": "emotify:sad_but_relieved",
+          "glyph": "😥"
+        },
+        {
+          "slot": 35,
+          "id": "emotify:surprised",
+          "glyph": "😮"
+        },
+        {
+          "slot": 36,
+          "id": "emotify:zipper_mouth",
+          "glyph": "🤐"
+        },
+        {
+          "slot": 37,
+          "id": "emotify:hushed",
+          "glyph": "😯"
+        },
+        {
+          "slot": 38,
+          "id": "emotify:sleepy",
+          "glyph": "😪"
+        },
+        {
+          "slot": 39,
+          "id": "emotify:tired",
+          "glyph": "😫"
+        },
+        {
+          "slot": 40,
+          "id": "emotify:yawning",
+          "glyph": "🥱"
+        },
+        {
+          "slot": 41,
+          "id": "emotify:sleeping",
+          "glyph": "😴"
+        },
+        {
+          "slot": 42,
+          "id": "emotify:relieved",
+          "glyph": "😌"
+        },
+        {
+          "slot": 43,
+          "id": "emotify:tongue",
+          "glyph": "😛"
+        },
+        {
+          "slot": 44,
+          "id": "emotify:wink_tongue",
+          "glyph": "😜"
+        },
+        {
+          "slot": 45,
+          "id": "emotify:squinting_tongue",
+          "glyph": "😝"
+        },
+        {
+          "slot": 46,
+          "id": "emotify:drooling",
+          "glyph": "🤤"
+        },
+        {
+          "slot": 47,
+          "id": "emotify:unamused",
+          "glyph": "😒"
+        },
+        {
+          "slot": 48,
+          "id": "emotify:cold_sweat",
+          "glyph": "😓"
+        },
+        {
+          "slot": 49,
+          "id": "emotify:pensive",
+          "glyph": "😔"
+        },
+        {
+          "slot": 50,
+          "id": "emotify:confused",
+          "glyph": "😕"
+        },
+        {
+          "slot": 51,
+          "id": "emotify:diagonal_mouth",
+          "glyph": "🫤"
+        },
+        {
+          "slot": 52,
+          "id": "emotify:upside_down",
+          "glyph": "🙃"
+        },
+        {
+          "slot": 53,
+          "id": "emotify:melting",
+          "glyph": "🫠"
+        },
+        {
+          "slot": 54,
+          "id": "emotify:money_mouth",
+          "glyph": "🤑"
+        },
+        {
+          "slot": 55,
+          "id": "emotify:astonished",
+          "glyph": "😲"
+        },
+        {
+          "slot": 56,
+          "id": "emotify:frowning",
+          "glyph": "☹️"
+        },
+        {
+          "slot": 57,
+          "id": "emotify:slight_frown",
+          "glyph": "🙁"
+        },
+        {
+          "slot": 58,
+          "id": "emotify:confounded",
+          "glyph": "😖"
+        },
+        {
+          "slot": 59,
+          "id": "emotify:disappointed",
+          "glyph": "😞"
+        },
+        {
+          "slot": 60,
+          "id": "emotify:worried",
+          "glyph": "😟"
+        },
+        {
+          "slot": 61,
+          "id": "emotify:steam_from_nose",
+          "glyph": "😤"
+        },
+        {
+          "slot": 62,
+          "id": "emotify:sad",
+          "glyph": "😢"
+        },
+        {
+          "slot": 63,
+          "id": "emotify:loudly_crying",
+          "glyph": "😭"
+        },
+        {
+          "slot": 64,
+          "id": "emotify:frowning_open_mouth",
+          "glyph": "😦"
+        },
+        {
+          "slot": 65,
+          "id": "emotify:anguished",
+          "glyph": "😧"
+        },
+        {
+          "slot": 66,
+          "id": "emotify:fearful",
+          "glyph": "😨"
+        },
+        {
+          "slot": 67,
+          "id": "emotify:weary",
+          "glyph": "😩"
+        },
+        {
+          "slot": 68,
+          "id": "emotify:exploding_head",
+          "glyph": "🤯"
+        },
+        {
+          "slot": 69,
+          "id": "emotify:grimacing",
+          "glyph": "😬"
+        },
+        {
+          "slot": 70,
+          "id": "emotify:exhaling",
+          "glyph": "😮‍💨"
+        },
+        {
+          "slot": 71,
+          "id": "emotify:anxious_with_sweat",
+          "glyph": "😰"
+        },
+        {
+          "slot": 72,
+          "id": "emotify:screaming",
+          "glyph": "😱"
+        },
+        {
+          "slot": 73,
+          "id": "emotify:hot",
+          "glyph": "🥵"
+        },
+        {
+          "slot": 74,
+          "id": "emotify:cold",
+          "glyph": "🥶"
+        },
+        {
+          "slot": 75,
+          "id": "emotify:flushed",
+          "glyph": "😳"
+        },
+        {
+          "slot": 76,
+          "id": "emotify:zany",
+          "glyph": "🤪"
+        },
+        {
+          "slot": 77,
+          "id": "emotify:dizzy",
+          "glyph": "😵"
+        },
+        {
+          "slot": 78,
+          "id": "emotify:spiral_eyes",
+          "glyph": "😵‍💫"
+        },
+        {
+          "slot": 79,
+          "id": "emotify:woozy",
+          "glyph": "🥴"
+        },
+        {
+          "slot": 80,
+          "id": "emotify:angry",
+          "glyph": "😠"
+        },
+        {
+          "slot": 81,
+          "id": "emotify:furious",
+          "glyph": "😡"
+        },
+        {
+          "slot": 82,
+          "id": "emotify:swearing",
+          "glyph": "🤬"
+        },
+        {
+          "slot": 83,
+          "id": "emotify:medical_mask",
+          "glyph": "😷"
+        },
+        {
+          "slot": 84,
+          "id": "emotify:thermometer",
+          "glyph": "🤒"
+        },
+        {
+          "slot": 85,
+          "id": "emotify:head_bandage",
+          "glyph": "🤕"
+        },
+        {
+          "slot": 86,
+          "id": "emotify:nauseated",
+          "glyph": "🤢"
+        },
+        {
+          "slot": 87,
+          "id": "emotify:vomiting",
+          "glyph": "🤮"
+        },
+        {
+          "slot": 88,
+          "id": "emotify:sneezing",
+          "glyph": "🤧"
+        },
+        {
+          "slot": 89,
+          "id": "emotify:halo",
+          "glyph": "😇"
+        },
+        {
+          "slot": 90,
+          "id": "emotify:party",
+          "glyph": "🥳"
+        },
+        {
+          "slot": 91,
+          "id": "emotify:disguised",
+          "glyph": "🥸"
+        },
+        {
+          "slot": 92,
+          "id": "emotify:pleading",
+          "glyph": "🥺"
+        },
+        {
+          "slot": 93,
+          "id": "emotify:holding_back_tears",
+          "glyph": "🥹"
+        },
+        {
+          "slot": 94,
+          "id": "emotify:cowboy",
+          "glyph": "🤠"
+        },
+        {
+          "slot": 95,
+          "id": "emotify:clown",
+          "glyph": "🤡"
+        },
+        {
+          "slot": 96,
+          "id": "emotify:lying",
+          "glyph": "🤥"
+        },
+        {
+          "slot": 97,
+          "id": "emotify:shaking",
+          "glyph": "🫨"
+        },
+        {
+          "slot": 98,
+          "id": "emotify:shaking_head_horizontally",
+          "glyph": "🙂‍↔️"
+        },
+        {
+          "slot": 99,
+          "id": "emotify:shaking_head_vertically",
+          "glyph": "🙂‍↕️"
+        },
+        {
+          "slot": 100,
+          "id": "emotify:shushing",
+          "glyph": "🤫"
+        },
+        {
+          "slot": 101,
+          "id": "emotify:hand_over_mouth",
+          "glyph": "🤭"
+        },
+        {
+          "slot": 102,
+          "id": "emotify:shocked_hand_over_mouth",
+          "glyph": "🫢"
+        },
+        {
+          "slot": 103,
+          "id": "emotify:peeking",
+          "glyph": "🫣"
+        },
+        {
+          "slot": 104,
+          "id": "emotify:monocle",
+          "glyph": "🧐"
+        },
+        {
+          "slot": 105,
+          "id": "emotify:nerd",
+          "glyph": "🤓"
+        },
+        {
+          "slot": 106,
+          "id": "emotify:smiling_devil",
+          "glyph": "😈"
+        },
+        {
+          "slot": 107,
+          "id": "emotify:angry_devil",
+          "glyph": "👿"
+        },
+        {
+          "slot": 108,
+          "id": "emotify:ogre",
+          "glyph": "👹"
+        },
+        {
+          "slot": 109,
+          "id": "emotify:goblin",
+          "glyph": "👺"
+        },
+        {
+          "slot": 110,
+          "id": "emotify:skull",
+          "glyph": "💀"
+        },
+        {
+          "slot": 111,
+          "id": "emotify:skull_and_crossbones",
+          "glyph": "☠"
+        },
+        {
+          "slot": 112,
+          "id": "emotify:ghost",
+          "glyph": "👻"
+        },
+        {
+          "slot": 113,
+          "id": "emotify:alien",
+          "glyph": "👽"
+        },
+        {
+          "slot": 114,
+          "id": "emotify:alien_monster",
+          "glyph": "👾"
+        },
+        {
+          "slot": 115,
+          "id": "emotify:robot",
+          "glyph": "🤖"
+        },
+        {
+          "slot": 116,
+          "id": "emotify:poop",
+          "glyph": "💩"
+        },
+        {
+          "slot": 117,
+          "id": "emotify:smiling_cat",
+          "glyph": "😺"
+        },
+        {
+          "slot": 118,
+          "id": "emotify:grinning_cat",
+          "glyph": "😸"
+        },
+        {
+          "slot": 119,
+          "id": "emotify:laughing_cat",
+          "glyph": "😹"
+        },
+        {
+          "slot": 120,
+          "id": "emotify:loving_cat",
+          "glyph": "😻"
+        },
+        {
+          "slot": 121,
+          "id": "emotify:smirking_cat",
+          "glyph": "😼"
+        },
+        {
+          "slot": 122,
+          "id": "emotify:kissing_cat",
+          "glyph": "😽"
+        },
+        {
+          "slot": 123,
+          "id": "emotify:weary_cat",
+          "glyph": "🙀"
+        },
+        {
+          "slot": 124,
+          "id": "emotify:crying_cat",
+          "glyph": "😿"
+        },
+        {
+          "slot": 125,
+          "id": "emotify:angry_cat",
+          "glyph": "😾"
+        },
+        {
+          "slot": 126,
+          "id": "emotify:see_no_evil",
+          "glyph": "🙈"
+        },
+        {
+          "slot": 127,
+          "id": "emotify:hear_no_evil",
+          "glyph": "🙉"
+        },
+        {
+          "slot": 128,
+          "id": "emotify:speak_no_evil",
+          "glyph": "🙊"
+        },
+        {
+          "slot": 129,
+          "id": "emotify:bags_under_eyes",
+          "glyph": "🫩"
+        }
+      ]
+    },
+    {
+      "category": "animals",
+      "texture": "emotify:textures/emotions/animals.png",
+      "textureWidth": 128,
+      "textureHeight": 16,
+      "spriteWidth": 8,
+      "spriteHeight": 8,
+      "emotions": [
+        {
+          "slot": 0,
+          "id": "emotify:monkey_face",
+          "glyph": "🐵"
+        },
+        {
+          "slot": 1,
+          "id": "emotify:dog",
+          "glyph": "🐶"
+        },
+        {
+          "slot": 2,
+          "id": "emotify:wolf",
+          "glyph": "🐺"
+        },
+        {
+          "slot": 3,
+          "id": "emotify:cat",
+          "glyph": "🐱"
+        },
+        {
+          "slot": 4,
+          "id": "emotify:lion",
+          "glyph": "🦁"
+        },
+        {
+          "slot": 5,
+          "id": "emotify:tiger",
+          "glyph": "🐯"
+        },
+        {
+          "slot": 6,
+          "id": "emotify:giraffe",
+          "glyph": "🦒"
+        },
+        {
+          "slot": 7,
+          "id": "emotify:fox",
+          "glyph": "🦊"
+        },
+        {
+          "slot": 8,
+          "id": "emotify:raccoon",
+          "glyph": "🦝"
+        },
+        {
+          "slot": 9,
+          "id": "emotify:cow",
+          "glyph": "🐮"
+        },
+        {
+          "slot": 10,
+          "id": "emotify:pig",
+          "glyph": "🐷"
+        },
+        {
+          "slot": 11,
+          "id": "emotify:boar",
+          "glyph": "🐗"
+        },
+        {
+          "slot": 12,
+          "id": "emotify:mouse",
+          "glyph": "🐭"
+        },
+        {
+          "slot": 13,
+          "id": "emotify:hamster",
+          "glyph": "🐹"
+        },
+        {
+          "slot": 14,
+          "id": "emotify:rabbit",
+          "glyph": "🐰"
+        },
+        {
+          "slot": 15,
+          "id": "emotify:bear",
+          "glyph": "🐻"
+        },
+        {
+          "slot": 16,
+          "id": "emotify:polar_bear",
+          "glyph": "🐻‍❄️"
+        },
+        {
+          "slot": 17,
+          "id": "emotify:koala",
+          "glyph": "🐨"
+        },
+        {
+          "slot": 18,
+          "id": "emotify:panda",
+          "glyph": "🐼"
+        },
+        {
+          "slot": 19,
+          "id": "emotify:frog",
+          "glyph": "🐸"
+        },
+        {
+          "slot": 20,
+          "id": "emotify:zebra",
+          "glyph": "🦓"
+        },
+        {
+          "slot": 21,
+          "id": "emotify:horse",
+          "glyph": "🐴"
+        },
+        {
+          "slot": 22,
+          "id": "emotify:moose",
+          "glyph": "🫎"
+        },
+        {
+          "slot": 23,
+          "id": "emotify:donkey",
+          "glyph": "🫏"
+        },
+        {
+          "slot": 24,
+          "id": "emotify:unicorn",
+          "glyph": "🦄"
+        },
+        {
+          "slot": 25,
+          "id": "emotify:chicken",
+          "glyph": "🐔"
+        },
+        {
+          "slot": 26,
+          "id": "emotify:dragon",
+          "glyph": "🐲"
+        },
+        {
+          "slot": 27,
+          "id": "emotify:pig_nose",
+          "glyph": "🐽"
+        },
+        {
+          "slot": 28,
+          "id": "emotify:paw_prints",
+          "glyph": "🐾"
+        },
+        {
+          "slot": 29,
+          "id": "emotify:monkey",
+          "glyph": "🐒"
+        },
+        {
+          "slot": 30,
+          "id": "emotify:gorilla",
+          "glyph": "🦍"
+        },
+        {
+          "slot": 31,
+          "id": "emotify:orangutan",
+          "glyph": "🦧"
+        }
+      ]
+    }
+  ]
+}

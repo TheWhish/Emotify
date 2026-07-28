@@ -1,0 +1,18 @@
+Happy's Better Emojis assets used by Emotify
+
+Project: Happy's Better Emojis
+Author: Happy_AlexRO
+Source: https://modrinth.com/resourcepack/happys-emojis
+License: Creative Commons Attribution 4.0 International
+License URI: https://creativecommons.org/licenses/by/4.0/
+
+Emotify includes the original faces.png and animals.png atlases without visual modification. The built-in catalog indexes all 162 available 8x8 icons: 130 face icons and 32 animal icons.
+
+Changes made by Emotify:
+
+- the atlases were moved from the minecraft namespace to the emotify namespace;
+- stable Emotify IDs, English and Russian translations, categories, Unicode metadata, and source slots were assigned;
+- all regions are selected through Emotify's manifest and UV mapping;
+- the visual artwork itself was not modified.
+
+Emotify's MIT License applies to the project code and original project material. The Happy's Better Emojis atlases remain licensed under Creative Commons Attribution 4.0 International.
