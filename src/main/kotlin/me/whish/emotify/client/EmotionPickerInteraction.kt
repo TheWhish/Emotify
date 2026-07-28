@@ -25,6 +25,9 @@ internal object EmotionLabelTruncation {
 }
 
 internal object EmotionPickerToggleGuard {
-    fun shouldClose(matchesBinding: Boolean, bindingDown: Boolean): Boolean =
-        matchesBinding && !bindingDown
+    fun shouldClose(
+        matchesBinding: Boolean,
+        bindingDown: Boolean,
+        textInputFocused: Boolean,
+    ): Boolean = matchesBinding && !bindingDown && !textInputFocused
 }

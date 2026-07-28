@@ -17,8 +17,25 @@ class EmotionPickerInteractionTest : FunSpec({
     }
 
     test("picker toggle closes only on a fresh matching press") {
-        EmotionPickerToggleGuard.shouldClose(matchesBinding = true, bindingDown = false) shouldBe true
-        EmotionPickerToggleGuard.shouldClose(matchesBinding = true, bindingDown = true) shouldBe false
-        EmotionPickerToggleGuard.shouldClose(matchesBinding = false, bindingDown = false) shouldBe false
+        EmotionPickerToggleGuard.shouldClose(
+            matchesBinding = true,
+            bindingDown = false,
+            textInputFocused = false,
+        ) shouldBe true
+        EmotionPickerToggleGuard.shouldClose(
+            matchesBinding = true,
+            bindingDown = true,
+            textInputFocused = false,
+        ) shouldBe false
+        EmotionPickerToggleGuard.shouldClose(
+            matchesBinding = false,
+            bindingDown = false,
+            textInputFocused = false,
+        ) shouldBe false
+        EmotionPickerToggleGuard.shouldClose(
+            matchesBinding = true,
+            bindingDown = false,
+            textInputFocused = true,
+        ) shouldBe false
     }
 })

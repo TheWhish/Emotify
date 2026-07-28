@@ -33,10 +33,15 @@ object EmotionPickerController {
     internal fun matchesPickerKey(keyCode: Int, scanCode: Int): Boolean =
         openPickerKey.matches(keyCode, scanCode)
 
-    internal fun shouldClosePicker(keyCode: Int, scanCode: Int): Boolean =
+    internal fun shouldClosePicker(
+        keyCode: Int,
+        scanCode: Int,
+        textInputFocused: Boolean,
+    ): Boolean =
         EmotionPickerToggleGuard.shouldClose(
             matchesPickerKey(keyCode, scanCode),
             openPickerKey.isDown,
+            textInputFocused,
         )
 
     private fun onClientTickPre(event: ClientTickEvent.Pre) {

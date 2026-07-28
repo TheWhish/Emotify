@@ -39,9 +39,12 @@ class EmotionPickerGeometryTest : FunSpec({
         geometry.rowWidth shouldBe 222
         geometry.cellWidths shouldContainExactly listOf(68, 68, 67)
         geometry.gridWidth shouldBe 211
-        geometry.gridX shouldBe geometry.listX + 4
+        geometry.gridX shouldBe geometry.listX + EmotionPickerListMetrics.SIDE_PADDING
         geometry.gridX + geometry.gridWidth shouldBe
-            geometry.listX + geometry.listWidth - 19
+            geometry.listX + geometry.listWidth -
+            EmotionPickerListMetrics.SCROLLBAR_GAP -
+            EmotionPickerListMetrics.SCROLLBAR_WIDTH -
+            EmotionPickerListMetrics.SCROLLBAR_RIGHT_PADDING
         geometry.searchFieldX shouldBe geometry.contentX
         geometry.searchFieldWidth shouldBe geometry.listWidth
         EmotionPickerListMetrics.SIDE_PADDING - EmotionPickerVisualMetrics.FRAME_THICKNESS shouldBe
@@ -59,6 +62,16 @@ class EmotionPickerGeometryTest : FunSpec({
             EmotionPickerListMetrics.SCROLLBAR_GAP +
             EmotionPickerListMetrics.SCROLLBAR_WIDTH +
             EmotionPickerListMetrics.SCROLLBAR_RIGHT_PADDING
+        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = true) shouldBe 211
+        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = false) shouldBe 222
+        EmotionPickerGridMetrics.cellWidths(
+            geometry.listWidth,
+            scrollbarVisible = true,
+        ) shouldContainExactly listOf(68, 68, 67)
+        EmotionPickerGridMetrics.cellWidths(
+            geometry.listWidth,
+            scrollbarVisible = false,
+        ) shouldContainExactly listOf(72, 71, 71)
     }
 
     test("minimum panel preserves usable group widths and reserves search input space") {
@@ -95,7 +108,7 @@ class EmotionPickerGeometryTest : FunSpec({
         EmotionPickerEdgeFade.alphaAt(0, 0.0) shouldBe 0
         EmotionPickerEdgeFade.alphaAt(0, 1.0) shouldBe 112
         EmotionPickerListMetrics.fadeLeft(100) shouldBe 102
-        EmotionPickerListMetrics.fadeRight(334) shouldBe 317
+        EmotionPickerListMetrics.fadeRight(334) shouldBe 332
     }
 
     test("visual search field uses one half-open hit area") {
@@ -110,5 +123,14 @@ class EmotionPickerGeometryTest : FunSpec({
         EmotionPickerScrollMath.draggedAmount(195.0, 5.0, 200.0, 100) shouldBe 200.0
         EmotionPickerScrollMath.draggedAmount(5.0, -5.0, 200.0, 100) shouldBe 0.0
         EmotionPickerScrollMath.draggedAmount(0.0, 20.0, 0.0, 100) shouldBe 0.0
+    }
+
+    test("smooth wheel scrolling reaches both boundaries without an asymptotic tail") {
+        val firstFrame = EmotionPickerScrollMath.animatedAmount(0.0, 32.0, 1.0 / 60.0)
+
+        (firstFrame in 0.0..<32.0) shouldBe true
+        EmotionPickerScrollMath.animatedAmount(198.0, 200.0, 1.0 / 60.0) shouldBe 200.0
+        EmotionPickerScrollMath.animatedAmount(2.0, 0.0, 1.0 / 60.0) shouldBe 0.0
+        EmotionPickerScrollMath.animatedAmount(40.0, 40.0, 1.0 / 60.0) shouldBe 40.0
     }
 })

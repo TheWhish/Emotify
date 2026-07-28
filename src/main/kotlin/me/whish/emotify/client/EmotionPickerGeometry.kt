@@ -1,6 +1,8 @@
 package me.whish.emotify.client
 
+import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 internal data class EmotionPickerTabBounds(
@@ -76,6 +78,25 @@ internal object EmotionPickerScrollMath {
         require(travel > 0) { "Scrollbar travel must be positive: $travel" }
         return (current + dragY * maximum / travel).coerceIn(0.0, maximum)
     }
+
+    fun animatedAmount(current: Double, target: Double, elapsedSeconds: Double): Double {
+        require(elapsedSeconds >= 0.0) { "Scroll elapsed time must not be negative: $elapsedSeconds" }
+        val distance = target - current
+        val absoluteDistance = abs(distance)
+        if (absoluteDistance <= SNAP_DISTANCE) {
+            return target
+        }
+        val easedStep = absoluteDistance * (1.0 - exp(-RESPONSE * elapsedSeconds))
+        val step = max(easedStep, MINIMUM_SPEED * elapsedSeconds)
+        if (step >= absoluteDistance) {
+            return target
+        }
+        return current + if (distance > 0.0) step else -step
+    }
+
+    private const val RESPONSE = 15.0
+    private const val MINIMUM_SPEED = 120.0
+    private const val SNAP_DISTANCE = 0.05
 }
 
 internal object EmotionPickerListMetrics {
@@ -96,8 +117,33 @@ internal object EmotionPickerListMetrics {
 
     fun fadeLeft(listX: Int): Int = listX + SCISSOR_INSET
 
-    fun fadeRight(listRight: Int): Int =
-        listRight - SCROLLBAR_RIGHT_INSET - SCROLLBAR_GAP
+    fun fadeRight(listRight: Int): Int = listRight - SCISSOR_INSET
+}
+
+internal object EmotionPickerGridMetrics {
+    fun gridWidth(listWidth: Int, scrollbarVisible: Boolean): Int {
+        val reservedWidth = if (scrollbarVisible) {
+            EmotionPickerListMetrics.SIDE_PADDING +
+                EmotionPickerListMetrics.SCROLLBAR_GAP +
+                EmotionPickerListMetrics.SCROLLBAR_WIDTH +
+                EmotionPickerListMetrics.SCROLLBAR_RIGHT_PADDING
+        } else {
+            EmotionPickerListMetrics.SIDE_PADDING * 2
+        }
+        return (listWidth - reservedWidth).coerceAtLeast(EmotionPickerGridLayout.COLUMNS)
+    }
+
+    fun cellWidths(listWidth: Int, scrollbarVisible: Boolean): List<Int> {
+        val availableWidth = (
+            gridWidth(listWidth, scrollbarVisible) -
+                (EmotionPickerGridLayout.COLUMNS - 1) * EmotionPickerListMetrics.CELL_GAP
+            ).coerceAtLeast(EmotionPickerGridLayout.COLUMNS)
+        val baseWidth = (availableWidth / EmotionPickerGridLayout.COLUMNS).coerceAtLeast(1)
+        val remainder = (availableWidth - baseWidth * EmotionPickerGridLayout.COLUMNS).coerceAtLeast(0)
+        return List(EmotionPickerGridLayout.COLUMNS) { index ->
+            baseWidth + if (index < remainder) 1 else 0
+        }
+    }
 }
 
 internal object EmotionPickerLayoutMetrics {
@@ -143,7 +189,7 @@ internal data class EmotionPickerGeometry(
     fun listHeight(searching: Boolean): Int = if (searching) searchListHeight else normalListHeight
 
     val gridX: Int
-        get() = listX + (listWidth - rowWidth) / 2 - EmotionPickerListMetrics.VANILLA_ROW_BIAS
+        get() = listX + (listWidth - rowWidth) / 2
 
     val gridWidth: Int
         get() = cellWidths.sum() + (EmotionPickerGridLayout.COLUMNS - 1) * EmotionPickerListMetrics.CELL_GAP
@@ -171,17 +217,7 @@ internal data class EmotionPickerGeometry(
             val searchListHeight = (listBottom - searchListY).coerceAtLeast(EmotionPickerGridLayout.ROW_STRIDE)
             val rowWidth = (contentWidth - EmotionPickerListMetrics.SIDE_PADDING * 2)
                 .coerceAtLeast(EmotionPickerGridLayout.COLUMNS)
-            val gridWidth = (
-                contentWidth -
-                    EmotionPickerListMetrics.SIDE_PADDING -
-                    EmotionPickerListMetrics.SCROLLBAR_GAP -
-                    EmotionPickerListMetrics.SCROLLBAR_WIDTH -
-                    EmotionPickerListMetrics.SCROLLBAR_RIGHT_PADDING
-                ).coerceAtLeast(EmotionPickerGridLayout.COLUMNS)
-            val cellWidths = distributeWidth(
-                gridWidth - (EmotionPickerGridLayout.COLUMNS - 1) * EmotionPickerListMetrics.CELL_GAP,
-                EmotionPickerGridLayout.COLUMNS,
-            )
+            val cellWidths = EmotionPickerGridMetrics.cellWidths(contentWidth, scrollbarVisible = true)
             return EmotionPickerGeometry(
                 panelX,
                 panelY,

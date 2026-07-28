@@ -13,7 +13,6 @@ import net.minecraft.client.gui.narration.NarrationElementOutput
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.ResourceLocation
 import kotlin.math.abs
-import kotlin.math.exp
 
 internal enum class EmotionTabIcon {
     NONE,
@@ -71,7 +70,7 @@ internal class EmotionGridList(
     height: Int,
     y: Int,
     private val rowWidth: Int,
-    private val cellWidths: List<Int>,
+    private val scrollingCellWidths: List<Int>,
     private val onSelected: (EmotionPresentation) -> Unit,
     private val isFavorite: (EmotionPresentation) -> Boolean,
     private val onFavoriteToggled: (EmotionPresentation) -> Unit,
@@ -89,6 +88,9 @@ internal class EmotionGridList(
     private var bottomFadeVisibility = 0.0
     private var lastFadeFrameNanos = 0L
     private var draggingScrollbar = false
+    private var expandedCellWidths = EmotionPickerGridMetrics.cellWidths(width, scrollbarVisible = false)
+    private var activeCellWidths = scrollingCellWidths
+    private val cellWidthsProvider: () -> List<Int> = { activeCellWidths }
 
     init {
         setRenderHeader(true, EmotionPickerListMetrics.ROW_HEADER_HEIGHT)
@@ -101,7 +103,7 @@ internal class EmotionGridList(
         setDragging(false)
         replaceEntries(
             emotions.chunked(EmotionPickerGridLayout.COLUMNS).map { row ->
-                EmotionGridRow(row, cellWidths, onSelected, isFavorite, onFavoriteToggled)
+                EmotionGridRow(row, cellWidthsProvider, onSelected, isFavorite, onFavoriteToggled)
             },
         )
         snapToScroll(if (resetScroll) 0.0 else retainedScroll)
@@ -113,6 +115,7 @@ internal class EmotionGridList(
         setDragging(false)
         updateSizeAndPosition(width, height, y)
         setX(x)
+        expandedCellWidths = EmotionPickerGridMetrics.cellWidths(width, scrollbarVisible = false)
         snapToScroll(retainedScroll)
     }
 
@@ -133,6 +136,7 @@ internal class EmotionGridList(
 
     override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         advanceScrollAnimation()
+        activeCellWidths = if (scrollbarVisible()) scrollingCellWidths else expandedCellWidths
         super.renderWidget(guiGraphics, mouseX, mouseY, partialTick)
     }
 
@@ -200,10 +204,13 @@ internal class EmotionGridList(
     }
 
     override fun renderDecorations(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int) {
-        renderEdgeFades(guiGraphics)
-        if (!scrollbarVisible()) {
-            return
+        if (scrollbarVisible()) {
+            renderScrollbar(guiGraphics)
         }
+        renderEdgeFades(guiGraphics)
+    }
+
+    private fun renderScrollbar(guiGraphics: GuiGraphics) {
         val scrollbarX = getScrollbarPosition()
         val scrollbarTop = y + EmotionPickerListMetrics.EDGE_PADDING
         val scrollbarBottom = bottom - EmotionPickerListMetrics.EDGE_PADDING
@@ -285,12 +292,11 @@ internal class EmotionGridList(
         }
         val elapsedSeconds = ((now - lastFrameNanos) / NANOS_PER_SECOND).coerceAtMost(MAX_FRAME_SECONDS)
         lastFrameNanos = now
-        val distance = targetScrollAmount - animatedScrollAmount
-        animatedScrollAmount = if (abs(distance) <= SCROLL_SNAP_DISTANCE) {
-            targetScrollAmount
-        } else {
-            animatedScrollAmount + distance * (1.0 - exp(-SCROLL_RESPONSE * elapsedSeconds))
-        }
+        animatedScrollAmount = EmotionPickerScrollMath.animatedAmount(
+            animatedScrollAmount,
+            targetScrollAmount,
+            elapsedSeconds,
+        )
         super.setScrollAmount(animatedScrollAmount)
     }
 
@@ -379,8 +385,6 @@ internal class EmotionGridList(
         private const val MINIMUM_THUMB_HEIGHT = 36
         private const val THUMB_VERTICAL_MARGIN = 8
         private const val WHEEL_SCROLL_DISTANCE = 32.0
-        private const val SCROLL_RESPONSE = 15.0
-        private const val SCROLL_SNAP_DISTANCE = 0.05
         private const val EXTERNAL_SCROLL_EPSILON = 0.1
         private const val MAX_FRAME_SECONDS = 0.05
         private const val NANOS_PER_SECOND = 1_000_000_000.0
@@ -390,7 +394,7 @@ internal class EmotionGridList(
 
 internal class EmotionGridRow(
     presentations: List<EmotionPresentation>,
-    private val cellWidths: List<Int>,
+    private val cellWidths: () -> List<Int>,
     onSelected: (EmotionPresentation) -> Unit,
     isFavorite: (EmotionPresentation) -> Boolean,
     onFavoriteToggled: (EmotionPresentation) -> Unit,
@@ -431,8 +435,9 @@ internal class EmotionGridRow(
         partialTick: Float,
     ) {
         var cellX = left - EmotionPickerListMetrics.VANILLA_ROW_BIAS
+        val currentCellWidths = cellWidths()
         cells.forEachIndexed { column, cell ->
-            val cellWidth = cellWidths[column]
+            val cellWidth = currentCellWidths[column]
             cell.emotionButton.x = cellX
             cell.emotionButton.y = top
             cell.emotionButton.width = cellWidth

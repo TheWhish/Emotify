@@ -167,10 +167,13 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
         if (EmotionPickerController.matchesPickerKey(keyCode, scanCode)) {
-            if (EmotionPickerController.shouldClosePicker(keyCode, scanCode)) {
+            val textInputFocused = isSearchInputFocused()
+            if (EmotionPickerController.shouldClosePicker(keyCode, scanCode, textInputFocused)) {
                 onClose()
             }
-            return true
+            if (!textInputFocused) {
+                return true
+            }
         }
         if (allowsMovementInput() && EmotionPickerMovement.isMovementKey(minecraft, keyCode, scanCode)) {
             return true
@@ -199,7 +202,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
         if (!isSearching()) {
             return true
         }
-        return ::searchBox.isInitialized && !searchBox.isFocused
+        return !isSearchInputFocused()
     }
 
     internal fun refreshResources() {
@@ -298,6 +301,9 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
 
     private fun isSearching(): Boolean =
         model.section(state).kind == EmotionPickerSectionKind.SEARCH
+
+    private fun isSearchInputFocused(): Boolean =
+        isSearching() && ::searchBox.isInitialized && searchBox.isFocused
 
     private fun renderStatusMessage(guiGraphics: GuiGraphics, message: String) {
         val availableWidth = geometry.gridWidth - STATUS_HORIZONTAL_PADDING * 2
