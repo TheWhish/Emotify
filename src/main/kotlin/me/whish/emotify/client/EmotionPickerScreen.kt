@@ -1,10 +1,15 @@
 package me.whish.emotify.client
 
+import me.whish.emotify.domain.MonotonicTimeSource
+import me.whish.emotify.domain.SystemMonotonicTimeSource
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 
-class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
+class EmotionPickerScreen(
+    initialContext: EmotionPickerContext,
+    private val timeSource: MonotonicTimeSource = SystemMonotonicTimeSource,
+) : Screen(
     Component.translatable("screen.emotify.emotion_picker"),
 ) {
     private var context = initialContext
@@ -12,7 +17,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
     private var model = createModel(initialContext)
     private var state = requireNotNull(model.initialState()) { "Emotion picker requires at least one section" }
     private var displayedEmotions = model.emotions(state)
-    private var statusText: String? = null
+    private var notice: EmotionPickerNotice? = null
     private lateinit var geometry: EmotionPickerGeometry
     private lateinit var grid: EmotionGridList
     private lateinit var searchBox: EmotionSearchBox
@@ -90,6 +95,8 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
         if (currentContext.allowedEmotions != context.allowedEmotions) {
             applyPolicy(currentContext)
         }
+        val nowNanos = timeSource.nowNanos()
+        notice = notice?.takeUnless { current -> current.isFinished(nowNanos) }
     }
 
     override fun renderBackground(
@@ -145,7 +152,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
                 false,
             )
         }
-        statusText?.let { value -> renderStatusMessage(guiGraphics, value) }
+        notice?.let { current -> renderNotice(guiGraphics, current, timeSource.nowNanos()) }
     }
 
     override fun isPauseScreen(): Boolean = false
@@ -215,7 +222,6 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
             return
         }
         state = nextState
-        statusText = null
         displayedEmotions = model.emotions(state)
         grid.replaceEmotions(displayedEmotions)
         configureSearchMode()
@@ -227,7 +233,6 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
             return
         }
         state = nextState
-        statusText = null
         displayedEmotions = model.emotions(state)
         grid.replaceEmotions(displayedEmotions)
     }
@@ -243,7 +248,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
             onClose()
             return
         }
-        statusText = result.userMessage().string
+        notice = EmotionPickerNotice.show(notice, result.userMessage().string, timeSource.nowNanos())
     }
 
     private fun applyPolicy(updatedContext: EmotionPickerContext) {
@@ -263,7 +268,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
             EmotionPickerState(retainedSection.id, 0, state.query)
         }
         displayedEmotions = model.emotions(state)
-        statusText = null
+        notice = null
         rebuildWidgets()
         restoreWidgetState(widgetState)
     }
@@ -279,7 +284,6 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
         if (model.section(state).kind == EmotionPickerSectionKind.FAVORITES) {
             grid.replaceEmotions(displayedEmotions, resetScroll = false)
         }
-        statusText = null
     }
 
     private fun configureSearchMode() {
@@ -305,20 +309,41 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
     private fun isSearchInputFocused(): Boolean =
         isSearching() && ::searchBox.isInitialized && searchBox.isFocused
 
-    private fun renderStatusMessage(guiGraphics: GuiGraphics, message: String) {
-        val availableWidth = geometry.gridWidth - STATUS_HORIZONTAL_PADDING * 2
-        val value = font.plainSubstrByWidth(message, availableWidth)
+    private fun renderNotice(guiGraphics: GuiGraphics, current: EmotionPickerNotice, nowNanos: Long) {
+        val opacity = current.opacityAt(nowNanos)
+        val alpha = EmotionPickerNoticeAnimation.renderAlpha(opacity)
+        if (alpha == 0) {
+            return
+        }
+        val maximumTextWidth = EmotionPickerNoticeLayout.maximumTextWidth(geometry.panelWidth)
+        val value = fittedNoticeMessage(current.message, maximumTextWidth)
         val textWidth = font.width(value)
-        val textX = geometry.gridX + (geometry.gridWidth - textWidth) / 2
-        val textY = geometry.listY(isSearching()) + geometry.listHeight(isSearching()) - font.lineHeight - STATUS_BOTTOM_INSET
-        guiGraphics.fill(
-            textX - STATUS_BACKGROUND_PADDING,
-            textY - STATUS_BACKGROUND_PADDING,
-            textX + textWidth + STATUS_BACKGROUND_PADDING,
-            textY + font.lineHeight + STATUS_BACKGROUND_PADDING,
-            STATUS_BACKGROUND_COLOR,
+        val bounds = EmotionPickerNoticeLayout.bounds(
+            height,
+            geometry.panelX,
+            geometry.panelY,
+            geometry.panelWidth,
+            geometry.panelHeight,
+            textWidth,
+            font.lineHeight,
         )
-        guiGraphics.drawString(font, value, textX, textY, EmotionPickerTheme.error, false)
+        EmotionPickerTheme.renderNotice(guiGraphics, bounds.x, bounds.y, bounds.width, bounds.height, alpha)
+        guiGraphics.drawString(
+            font,
+            value,
+            bounds.x + (bounds.width - textWidth) / 2,
+            bounds.y + (bounds.height - font.lineHeight) / 2,
+            EmotionPickerTheme.colorWithOpacity(EmotionPickerTheme.error, alpha),
+            false,
+        )
+    }
+
+    private fun fittedNoticeMessage(message: String, maximumWidth: Int): String {
+        if (font.width(message) <= maximumWidth) {
+            return message
+        }
+        val contentWidth = (maximumWidth - font.width(TRUNCATION_MARK)).coerceAtLeast(0)
+        return font.plainSubstrByWidth(message, contentWidth).trimEnd() + TRUNCATION_MARK
     }
 
     private fun captureWidgetState(): PickerWidgetState? {
@@ -372,10 +397,7 @@ class EmotionPickerScreen(initialContext: EmotionPickerContext) : Screen(
         private val NO_SEARCH_RESULTS_MESSAGE = Component.translatable("screen.emotify.no_search_results")
         private val NO_EMOTIONS_MESSAGE = Component.translatable("message.emotify.no_emotions")
         private const val MAXIMUM_SEARCH_LENGTH = 64
-        private const val STATUS_HORIZONTAL_PADDING = 8
-        private const val STATUS_BOTTOM_INSET = 4
-        private const val STATUS_BACKGROUND_PADDING = 2
-        private const val STATUS_BACKGROUND_COLOR = 0xE6BEBEBE.toInt()
+        private const val TRUNCATION_MARK = ".."
     }
 
     private data class PickerWidgetState(

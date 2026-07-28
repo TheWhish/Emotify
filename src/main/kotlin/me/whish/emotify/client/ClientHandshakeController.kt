@@ -40,7 +40,7 @@ object ClientHandshakeController {
     private val selectionResponseGate = ClientSelectionResponseGate()
     private val playGate = ClientPlayGate()
     private val activeEmotions = ClientActiveEmotionStore(SystemMonotonicTimeSource)
-    private var playDiagnostics = newPlayDiagnostics()
+    private var playDropDiagnostics = newPlayDropDiagnostics()
 
     val state: ClientHandshakeState
         get() = session.state
@@ -165,7 +165,7 @@ object ClientHandshakeController {
         }
         val activation = activeEmotions.activate(activeConnectionId, play)
         if (activation != EmotionActivationResult.ADDED && activation != EmotionActivationResult.REPLACED) {
-            if (playDiagnostics.tryConsume()) {
+            if (playDropDiagnostics.tryConsume()) {
                 Emotify.LOGGER.warn(
                     "Emotify play dropped on connection {}: result={}, emotion={}, entityId={}, sequence={}",
                     activeConnectionId,
@@ -175,20 +175,7 @@ object ClientHandshakeController {
                     play.sequence.value,
                 )
             }
-            return
         }
-        if (!playDiagnostics.tryConsume()) {
-            return
-        }
-
-        Emotify.LOGGER.info(
-            "Emotify play received on connection {}: emotion={}, entityId={}, sourceUuid={}, sequence={}",
-            activeConnectionId,
-            play.emotionId,
-            play.entityId.value,
-            play.sourceUuid,
-            play.sequence.value,
-        )
     }
 
     fun sendSelection(listener: ClientPacketListener, emotionId: EmotionId): ClientSelectionSendResult {
@@ -230,7 +217,7 @@ object ClientHandshakeController {
         selectionResponseGate.reset()
         playGate.begin(activeConnectionId)
         activeEmotions.begin(activeConnectionId)
-        playDiagnostics = newPlayDiagnostics()
+        playDropDiagnostics = newPlayDropDiagnostics()
         session.begin(activeConnectionId)
 
         val listener = event.player.connection
@@ -350,14 +337,14 @@ object ClientHandshakeController {
         return true
     }
 
-    private fun newPlayDiagnostics(): TokenBucket = TokenBucket(
-        capacity = PLAY_DIAGNOSTIC_BURST_CAPACITY,
-        refillTokensPerSecond = PLAY_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
+    private fun newPlayDropDiagnostics(): TokenBucket = TokenBucket(
+        capacity = PLAY_DROP_DIAGNOSTIC_BURST_CAPACITY,
+        refillTokensPerSecond = PLAY_DROP_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
         timeSource = SystemMonotonicTimeSource,
     )
 
-    private const val PLAY_DIAGNOSTIC_BURST_CAPACITY = 4
-    private const val PLAY_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND = 2
+    private const val PLAY_DROP_DIAGNOSTIC_BURST_CAPACITY = 4
+    private const val PLAY_DROP_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND = 2
 
     private fun SelectionRejected.userMessage(): Component = when (code.knownReason) {
         SelectionRejectionReason.COOLDOWN -> Component.translatable("message.emotify.selection_cooldown")

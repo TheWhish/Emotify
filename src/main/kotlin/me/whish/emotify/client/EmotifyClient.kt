@@ -21,7 +21,6 @@ class EmotifyClient(modEventBus: IEventBus, modContainer: ModContainer) {
             EmotionPlayReceiver(ClientHandshakeController::receive),
         )
         ClientHandshakeController.register()
-        ClientSelectionDebug.register()
         EmotionBillboardRenderer.register()
         EmotionPickerController.register(modEventBus)
         EmotionPickerResourceReload.register(modEventBus)

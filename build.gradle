@@ -154,6 +154,99 @@ tasks.named('jar', Jar) {
     }
 }
 
+def releaseJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
+def projectClassPrefix = 'me/whish/emotify/'
+def clientClassPrefix = "${projectClassPrefix}client/"
+def requiredReleaseMetadata = [
+    'modLoader = "kotlinforforge"',
+    "modId = \"${modMetadataProperties.mod_id}\"".toString(),
+    "version = \"${modMetadataProperties.mod_version}\"".toString(),
+    "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString()
+]
+
+def verifyReleaseJar = tasks.register('verifyReleaseJar') {
+    group = 'verification'
+    description = 'Verifies the Emotify release JAR contents and metadata.'
+    dependsOn tasks.named('jar')
+    inputs.file(releaseJar)
+
+    doLast {
+        def archiveFile = releaseJar.get().asFile
+        def requiredEntries = [
+            'META-INF/MANIFEST.MF',
+            'META-INF/neoforge.mods.toml',
+            embeddedLicenseName.toString(),
+            'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
+            'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
+            'assets/emotify/emotions.json',
+            'assets/emotify/lang/en_us.json',
+            'assets/emotify/lang/ru_ru.json',
+            'assets/emotify/textures/emotions/animals.png',
+            'assets/emotify/textures/emotions/faces.png',
+            'me/whish/emotify/Emotify.class',
+            'me/whish/emotify/client/EmotifyClient.class'
+        ]
+
+        new java.util.zip.ZipFile(archiveFile).withCloseable { archive ->
+            def entryNames = archive.entries().collect { entry -> entry.name }
+            def missingEntries = requiredEntries.findAll { entry -> entry !in entryNames }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException("Release JAR is missing required entries: ${missingEntries.join(', ')}")
+            }
+
+            def duplicateEntries = entryNames.groupBy { entry -> entry }
+                .findAll { entry, occurrences -> occurrences.size() > 1 }
+                .keySet()
+            if (!duplicateEntries.isEmpty()) {
+                throw new GradleException("Release JAR contains duplicate entries: ${duplicateEntries.join(', ')}")
+            }
+
+            def forbiddenEntries = entryNames.findAll { entry ->
+                entry.startsWith("${clientClassPrefix}ClientSelectionDebug") ||
+                    entry.startsWith('docs/') ||
+                    entry.startsWith('run-client/') ||
+                    entry.startsWith('run-server/') ||
+                    entry.contains('/test/') ||
+                    entry.endsWith('.bbmodel') ||
+                    entry.contains('/.cache/')
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                throw new GradleException("Release JAR contains forbidden entries: ${forbiddenEntries.join(', ')}")
+            }
+
+            def dedicatedServerBoundaryViolations = entryNames.findAll { entry ->
+                entry.startsWith(projectClassPrefix) &&
+                    entry.endsWith('.class') &&
+                    !entry.startsWith(clientClassPrefix)
+            }.findAll { entry ->
+                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
+                    stream.readAllBytes()
+                }
+                def constantPool = new String(classBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+                constantPool.contains('net/minecraft/client/') || constantPool.contains(clientClassPrefix)
+            }
+            if (!dedicatedServerBoundaryViolations.isEmpty()) {
+                throw new GradleException(
+                    "Dedicated-server classes reference client-only code: ${dedicatedServerBoundaryViolations.join(', ')}"
+                )
+            }
+
+            def metadataEntry = archive.getEntry('META-INF/neoforge.mods.toml')
+            def metadata = archive.getInputStream(metadataEntry).withCloseable { stream ->
+                stream.getText('UTF-8')
+            }
+            def missingMetadata = requiredReleaseMetadata.findAll { value -> !metadata.contains(value) }
+            if (!missingMetadata.isEmpty()) {
+                throw new GradleException("Release metadata is incomplete: ${missingMetadata.join(', ')}")
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyReleaseJar
+}
+
 idea {
     module {
         downloadSources = true

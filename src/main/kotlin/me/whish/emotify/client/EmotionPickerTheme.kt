@@ -22,7 +22,11 @@ internal object EmotionPickerTheme {
     val labelText = 0xFF454545.toInt()
     val mutedText = 0xFF5E5E5E.toInt()
     val favorite = 0xFFD19A00.toInt()
-    val error = 0xFFA63B36.toInt()
+    val error = 0xFF944844.toInt()
+    val notice = 0xFFC7C7C7.toInt()
+    val noticeHighlight = 0xFFDEDEDE.toInt()
+    val noticeShadow = 0xFF858585.toInt()
+    val noticeOutline = 0xFF555555.toInt()
     val searchField = 0xFFC4C4C4.toInt()
     val searchFieldFocused = 0xFFCCCCCC.toInt()
     val searchFieldShadow = 0xFF858585.toInt()
@@ -34,6 +38,38 @@ internal object EmotionPickerTheme {
 
     fun renderPanel(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
         renderRaisedBox(guiGraphics, x, y, width, height, panel, panelHighlight, panelShadow, outline, 2)
+    }
+
+    fun renderNotice(
+        guiGraphics: GuiGraphics,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        opacity: Int,
+    ) {
+        if (opacity <= 0) {
+            return
+        }
+        renderRaisedBox(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            colorWithOpacity(notice, opacity),
+            colorWithOpacity(noticeHighlight, opacity),
+            colorWithOpacity(noticeShadow, opacity),
+            colorWithOpacity(noticeOutline, opacity),
+            1,
+        )
+    }
+
+    fun colorWithOpacity(color: Int, opacity: Int): Int {
+        require(opacity in 0..255) { "Opacity is outside the byte range: $opacity" }
+        val sourceAlpha = color ushr 24
+        val resultAlpha = (sourceAlpha * opacity + 127) / 255
+        return resultAlpha shl 24 or (color and 0x00FFFFFF)
     }
 
     fun renderButton(

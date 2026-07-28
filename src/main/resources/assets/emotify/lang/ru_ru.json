@@ -22,7 +22,7 @@
   "message.emotify.server_busy": "Сервер занят. Попробуйте ещё раз",
   "message.emotify.selection_failed": "Не удалось отправить эмоцию",
   "message.emotify.request_pending": "Предыдущая эмоция ожидает ответа сервера",
-  "message.emotify.emotion_active": "Дождитесь завершения текущей эмоции",
+  "message.emotify.emotion_active": "Дождитесь завершения эмоции",
   "emotion.emotify.grinning_face": "Широкая улыбка",
   "emotion.emotify.beaming_face": "Сияющая улыбка",
   "emotion.emotify.tears_of_joy": "Слёзы радости",

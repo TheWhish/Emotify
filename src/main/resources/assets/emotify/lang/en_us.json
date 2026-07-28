@@ -22,7 +22,7 @@
   "message.emotify.server_busy": "The server is busy. Please try again",
   "message.emotify.selection_failed": "The emotion could not be sent",
   "message.emotify.request_pending": "Another emotion is awaiting a server response",
-  "message.emotify.emotion_active": "Wait for the current emotion to finish",
+  "message.emotify.emotion_active": "Wait for the emotion to finish",
   "emotion.emotify.grinning_face": "Grinning Face",
   "emotion.emotify.beaming_face": "Beaming Face",
   "emotion.emotify.tears_of_joy": "Face with Tears of Joy",
