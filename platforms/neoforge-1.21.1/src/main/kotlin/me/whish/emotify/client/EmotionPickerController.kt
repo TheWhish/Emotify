@@ -1,6 +1,11 @@
 package me.whish.emotify.client
 
 import com.mojang.blaze3d.platform.InputConstants
+import me.whish.emotify.client.picker.EmotionPickerAccessDecision
+import me.whish.emotify.client.picker.EmotionPickerAccessPolicy
+import me.whish.emotify.client.picker.EmotionPickerModel
+import me.whish.emotify.client.picker.EmotionPickerOpenRequests
+import me.whish.emotify.client.picker.EmotionPickerToggleGuard
 import net.minecraft.client.KeyMapping
 import net.minecraft.client.Minecraft
 import net.minecraft.network.chat.Component

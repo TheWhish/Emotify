@@ -18,6 +18,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext
 import net.neoforged.neoforge.network.registration.HandlerThread
 
 object EmotifyNetwork {
+    private val diagnostics = NetworkDiagnosticGate()
+
     fun register(modEventBus: IEventBus) {
         modEventBus.addListener(::registerPayloads)
     }
@@ -87,20 +89,24 @@ object EmotifyNetwork {
                 ServerHandshakeService.receive(server, playerId, connectionId, payload.hello)
             },
             onTaskFailure = { exception ->
-                Emotify.LOGGER.error(
-                    "Failed to process Emotify client hello for player {} on connection {}",
-                    playerId,
-                    connectionId,
-                    exception,
-                )
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to process Emotify client hello for player {} on connection {}",
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
             },
             onEnqueueFailure = { exception ->
-                Emotify.LOGGER.error(
-                    "Failed to enqueue Emotify client hello for player {} on connection {}",
-                    playerId,
-                    connectionId,
-                    exception,
-                )
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to enqueue Emotify client hello for player {} on connection {}",
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
             },
         )
     }
@@ -136,22 +142,26 @@ object EmotifyNetwork {
                 ServerHandshakeService.select(server, playerId, connectionId, worldEpoch, emotionId)
             },
             onTaskFailure = { exception ->
-                Emotify.LOGGER.error(
-                    "Failed to process Emotify selection {} for player {} on connection {}",
-                    emotionId,
-                    playerId,
-                    connectionId,
-                    exception,
-                )
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to process Emotify selection {} for player {} on connection {}",
+                        emotionId,
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
             },
             onEnqueueFailure = { exception ->
-                Emotify.LOGGER.error(
-                    "Failed to enqueue Emotify selection {} for player {} on connection {}",
-                    emotionId,
-                    playerId,
-                    connectionId,
-                    exception,
-                )
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to enqueue Emotify selection {} for player {} on connection {}",
+                        emotionId,
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
             },
             onCompletion = {
                 try {

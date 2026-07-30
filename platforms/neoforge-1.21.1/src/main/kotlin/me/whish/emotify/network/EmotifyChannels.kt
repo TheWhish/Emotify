@@ -8,16 +8,23 @@ import me.whish.emotify.network.payload.ServerHelloPayload
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 
 object EmotifyChannels {
-    private val required = java.util.List.copyOf(
+    private val serverbound = java.util.List.copyOf(
         listOf(
-            ServerHelloPayload.TYPE,
             ClientHelloPayload.TYPE,
             EmotionSelectionPayload.TYPE,
+        ),
+    )
+    private val clientbound = java.util.List.copyOf(
+        listOf(
+            ServerHelloPayload.TYPE,
             EmotionPlayPayload.TYPE,
             SelectionRejectedPayload.TYPE,
         ),
     )
 
-    fun supportsProtocol(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
-        required.all(hasChannel)
+    fun serverCanReceiveClientPayloads(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
+        serverbound.all(hasChannel)
+
+    fun clientCanReceiveServerPayloads(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
+        clientbound.all(hasChannel)
 }

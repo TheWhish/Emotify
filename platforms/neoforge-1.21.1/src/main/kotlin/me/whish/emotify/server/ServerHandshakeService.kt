@@ -59,7 +59,7 @@ object ServerHandshakeService {
             -> null
         }
 
-    fun open(server: MinecraftServer, playerId: UUID, connectionId: Long) {
+    fun open(server: MinecraftServer, playerId: UUID, connectionId: Long): OutboundDeliveryStatus {
         check(server.isSameThread) { "Emotify sessions must be opened on the main server thread" }
         val connection = ConnectionKey(playerId, ConnectionId.of(connectionId))
         val result = runtimeForOpen(server).engine.open(connection)
@@ -69,6 +69,34 @@ object ServerHandshakeService {
             playerId,
             connectionId,
         )
+        return result.hello.status
+    }
+
+    fun refreshServerHello(
+        server: MinecraftServer,
+        playerId: UUID,
+        connectionId: Long,
+    ): OutboundDeliveryStatus {
+        check(server.isSameThread) { "Emotify handshakes must be refreshed on the main server thread" }
+        val runtime = activeRuntime(server) ?: return OutboundDeliveryStatus.UNAVAILABLE
+        val attempt = runtime.engine.refreshServerHello(ConnectionKey(playerId, ConnectionId.of(connectionId)))
+        reportOutboundFailure("server hello retry", playerId, connectionId, attempt)
+        return attempt.status
+    }
+
+    fun reportServerHelloRetryExhausted(
+        playerId: UUID,
+        connectionId: Long,
+        status: OutboundDeliveryStatus,
+    ) {
+        if (diagnostics.tryConsume()) {
+            Emotify.LOGGER.warn(
+                "Emotify server hello remained undelivered for player {} on connection {} after retries: {}",
+                playerId,
+                connectionId,
+                status,
+            )
+        }
     }
 
     fun receive(server: MinecraftServer, playerId: UUID, connectionId: Long, hello: ClientHello) {
@@ -114,7 +142,7 @@ object ServerHandshakeService {
         if (activeConnectionId != connectionId || activeWorldEpoch != worldEpoch) {
             return
         }
-        if (!EmotifyChannels.supportsProtocol { type -> player.connection.hasChannel(type) }) {
+        if (!EmotifyChannels.clientCanReceiveServerPayloads { type -> player.connection.hasChannel(type) }) {
             return
         }
 

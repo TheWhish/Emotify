@@ -3,23 +3,28 @@ package me.whish.emotify.server
 import me.whish.emotify.Emotify
 import me.whish.emotify.network.ConnectionAttributes
 import me.whish.emotify.network.EmotifyChannels
+import me.whish.emotify.server.core.OutboundDeliveryStatus
 import net.minecraft.server.level.ServerPlayer
 import net.neoforged.neoforge.common.NeoForge
 import net.neoforged.neoforge.event.entity.player.PlayerEvent
 import net.neoforged.neoforge.event.server.ServerStoppedEvent
+import net.neoforged.neoforge.event.tick.ServerTickEvent
 
 object ServerHandshakeLifecycle {
+    private val serverHelloRetries = ServerHelloRetryQueue()
+
     fun register() {
         NeoForge.EVENT_BUS.addListener(::onPlayerLoggedIn)
         NeoForge.EVENT_BUS.addListener(::onPlayerLoggedOut)
         NeoForge.EVENT_BUS.addListener(::onPlayerClone)
         NeoForge.EVENT_BUS.addListener(::onPlayerChangedDimension)
+        NeoForge.EVENT_BUS.addListener(::onServerTick)
         NeoForge.EVENT_BUS.addListener(::onServerStopped)
     }
 
     private fun onPlayerLoggedIn(event: PlayerEvent.PlayerLoggedInEvent) {
         val player = event.entity as? ServerPlayer ?: return
-        val supportsHandshake = EmotifyChannels.supportsProtocol { type ->
+        val supportsHandshake = EmotifyChannels.clientCanReceiveServerPayloads { type ->
             player.connection.hasChannel(type)
         }
         if (!supportsHandshake) {
@@ -34,7 +39,10 @@ object ServerHandshakeLifecycle {
         val channel = player.connection.connection.channel()
         channel.attr(ConnectionAttributes.serverConnectionId).set(connectionId)
         channel.attr(ConnectionAttributes.serverWorldEpoch).set(ConnectionWorldEpoch())
-        ServerHandshakeService.open(player.server, player.uuid, connectionId)
+        val status = ServerHandshakeService.open(player.server, player.uuid, connectionId)
+        if (status != OutboundDeliveryStatus.SENT) {
+            serverHelloRetries.schedule(player.uuid, connectionId, MAX_SERVER_HELLO_ATTEMPTS - 1)
+        }
     }
 
     private fun onPlayerLoggedOut(event: PlayerEvent.PlayerLoggedOutEvent) {
@@ -43,6 +51,7 @@ object ServerHandshakeLifecycle {
             .channel()
             .attr(ConnectionAttributes.serverConnectionId)
             .get() ?: return
+        serverHelloRetries.remove(player.uuid, connectionId)
         ServerHandshakeService.close(player.server, player.uuid, connectionId)
     }
 
@@ -62,7 +71,33 @@ object ServerHandshakeLifecycle {
             ?.advance()
     }
 
+    private fun onServerTick(event: ServerTickEvent.Post) {
+        val server = event.server
+        serverHelloRetries.drain { playerId, connectionId, attemptsRemaining ->
+            val player = server.playerList.getPlayer(playerId) ?: return@drain
+            val activeConnectionId = player.connection.connection
+                .channel()
+                .attr(ConnectionAttributes.serverConnectionId)
+                .get()
+            if (activeConnectionId != connectionId) {
+                return@drain
+            }
+            if (!EmotifyChannels.clientCanReceiveServerPayloads(player.connection::hasChannel)) {
+                return@drain
+            }
+            val status = ServerHandshakeService.refreshServerHello(server, playerId, connectionId)
+            if (status != OutboundDeliveryStatus.SENT && attemptsRemaining > 1) {
+                serverHelloRetries.schedule(playerId, connectionId, attemptsRemaining - 1)
+            } else if (status != OutboundDeliveryStatus.SENT) {
+                ServerHandshakeService.reportServerHelloRetryExhausted(playerId, connectionId, status)
+            }
+        }
+    }
+
     private fun onServerStopped(event: ServerStoppedEvent) {
+        serverHelloRetries.clear()
         ServerHandshakeService.clear(event.server)
     }
+
+    private const val MAX_SERVER_HELLO_ATTEMPTS = 3
 }

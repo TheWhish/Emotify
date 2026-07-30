@@ -22,6 +22,7 @@ evaluationDependsOn(':emotify-core')
 evaluationDependsOn(':emotify-wire-v1')
 evaluationDependsOn(':emotify-server-core')
 evaluationDependsOn(':emotify-catalog-builtin')
+evaluationDependsOn(':minecraft-client-1.21.1')
 
 
 base {
@@ -67,6 +68,7 @@ neoForge {
             sourceSet project(':emotify-wire-v1').sourceSets.main
             sourceSet project(':emotify-server-core').sourceSets.main
             sourceSet project(':emotify-catalog-builtin').sourceSets.main
+            sourceSet project(':minecraft-client-1.21.1').sourceSets.main
         }
 
         emotifyUnitTest {
@@ -106,6 +108,7 @@ dependencies {
     compileOnly project(':emotify-wire-v1')
     compileOnly project(':emotify-server-core')
     compileOnly project(':emotify-catalog-builtin')
+    compileOnly project(':minecraft-client-1.21.1')
 
     jarJar(project(':emotify-core')) {
         transitive = false
@@ -119,6 +122,9 @@ dependencies {
     jarJar(project(':emotify-catalog-builtin')) {
         transitive = false
     }
+    jarJar(project(':minecraft-client-1.21.1')) {
+        transitive = false
+    }
 
     testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
     testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
@@ -127,6 +133,7 @@ dependencies {
     testImplementation project(':emotify-wire-v1')
     testImplementation project(':emotify-server-core')
     testImplementation project(':emotify-catalog-builtin')
+    testImplementation project(':minecraft-client-1.21.1')
     testImplementation testFixtures(project(':emotify-core'))
     testImplementation testFixtures(project(':emotify-wire-v1'))
     testImplementation testFixtures(project(':emotify-server-core'))
@@ -156,6 +163,9 @@ sourceSets.main.resources {
     srcDir generateModMetadata
     exclude '**/*.bbmodel', '**/.cache/**'
 }
+
+sourceSets.main.kotlin.srcDir project(':minecraft-client-1.21.1')
+    .layout.projectDirectory.dir('src/minecraft/kotlin')
 
 neoForge.ideSyncTask generateModMetadata
 
@@ -192,6 +202,9 @@ tasks.named('jar', Jar) {
     from(project(':emotify-catalog-builtin').layout.projectDirectory.dir('src/main/resources/META-INF/licenses')) {
         into 'META-INF/licenses'
     }
+    from(project(':minecraft-client-1.21.1').layout.projectDirectory.dir('src/main/resources/assets/emotify')) {
+        into 'assets/emotify'
+    }
 }
 
 def releaseJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
@@ -204,7 +217,8 @@ def embeddedProjectPaths = [
     ':emotify-core',
     ':emotify-wire-v1',
     ':emotify-server-core',
-    ':emotify-catalog-builtin'
+    ':emotify-catalog-builtin',
+    ':minecraft-client-1.21.1'
 ] as Set
 def embeddedProjectJarNames = embeddedProjectPaths.collect { projectPath ->
     "${projectPath.substring(1)}-${projectVersion}.jar".toString()
@@ -260,19 +274,43 @@ def nestedLibrarySpecifications = [
         moduleName: 'me.whish.emotify.catalog.builtin',
         requiredClass: 'me/whish/emotify/catalog/builtin/BuiltInEmotionManifest.class',
         requiredEntries: ['assets/emotify/emotions.json'],
-        allowedReferences: ['com/google/gson']
+        allowedReferences: ['com/google/gson', 'com.google.gson']
+    ],
+    [
+        group: projectGroup,
+        artifact: 'minecraft-client-1.21.1',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.minecraft-client-1.21.1-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.minecraft.client.v1_21_1',
+        requiredClass: 'me/whish/emotify/client/state/ClientHandshakeSession.class',
+        requiredEntries: [
+            'assets/emotify/lang/en_us.json',
+            'assets/emotify/lang/ru_ru.json',
+            'assets/emotify/textures/emotions/animals.png',
+            'assets/emotify/textures/emotions/faces.png'
+        ]
     ]
 ]
 def forbiddenPureModuleReferences = [
     'net/minecraft',
+    'net.minecraft',
     'net/neoforged',
+    'net.neoforged',
     'net/fabricmc',
+    'net.fabricmc',
     'org/bukkit',
+    'org.bukkit',
     'io/netty',
+    'io.netty',
     'com/mojang',
+    'com.mojang',
     'org/lwjgl',
+    'org.lwjgl',
     'thedarkcolour',
-    'com/google/gson'
+    'thedarkcolour.',
+    'com/google/gson',
+    'com.google.gson'
 ]
 
 def verifyDevRuntimeClasspath = tasks.register('verifyDevRuntimeClasspath') {
@@ -332,6 +370,8 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
     group = 'verification'
     description = 'Verifies the Emotify release JAR contents and metadata.'
     dependsOn tasks.named('jar')
+    dependsOn ':minecraft-client-1.21.1:verifyLoaderNeutralClientBoundary'
+    dependsOn ':minecraft-client-1.21.1:verifyClientLibraryJar'
     inputs.file(releaseJar)
 
     doLast {
@@ -479,13 +519,21 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
                 )
             }
 
-            def embeddedGsonEntries = nestedArchives.collectMany { moduleName, entries ->
-                entries.keySet().findAll { entry -> entry.startsWith('com/google/gson/') }
+            def forbiddenEmbeddedRuntimePrefixes = [
+                'kotlin/',
+                'it/unimi/dsi/fastutil/',
+                'org/jetbrains/annotations/',
+                'com/google/gson/'
+            ]
+            def embeddedRuntimeEntries = nestedArchives.collectMany { moduleName, entries ->
+                entries.keySet().findAll { entry ->
+                    forbiddenEmbeddedRuntimePrefixes.any { prefix -> entry.startsWith(prefix) }
+                }
                     .collect { entry -> "${moduleName}:${entry}" }
             }
-            if (!embeddedGsonEntries.isEmpty()) {
+            if (!embeddedRuntimeEntries.isEmpty()) {
                 throw new GradleException(
-                    "Release JAR embeds Gson classes: ${embeddedGsonEntries.join(', ')}"
+                    "Release JAR embeds runtime classes: ${embeddedRuntimeEntries.join(', ')}"
                 )
             }
 
@@ -520,6 +568,29 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
                 throw new GradleException(
                     "Catalog library contains unexpected Emotify assets: ${catalogAssetEntries.join(', ')}"
                 )
+            }
+            def expectedClientAssets = [
+                'assets/emotify/lang/en_us.json',
+                'assets/emotify/lang/ru_ru.json',
+                'assets/emotify/textures/emotions/animals.png',
+                'assets/emotify/textures/emotions/faces.png'
+            ] as Set
+            def clientEntries = nestedArchives.get('me.whish.emotify.minecraft.client.v1_21_1')
+            def clientAssetEntries = clientEntries.keySet().findAll { entry ->
+                !entry.endsWith('/') && entry.startsWith('assets/')
+            }.toSet()
+            if (clientAssetEntries != expectedClientAssets) {
+                throw new GradleException(
+                    "Client library assets differ from the exact expected set: ${clientAssetEntries.join(', ')}"
+                )
+            }
+            expectedClientAssets.each { assetPath ->
+                def outerBytes = archive.getInputStream(archive.getEntry(assetPath)).withCloseable { stream ->
+                    stream.readAllBytes()
+                }
+                if (!Arrays.equals(clientEntries.get(assetPath), outerBytes)) {
+                    throw new GradleException("Outer and embedded client assets differ: ${assetPath}")
+                }
             }
 
             def pureModuleBoundaryViolations = nestedArchives.collectMany { moduleName, entries ->
@@ -599,7 +670,10 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
                     stream.readAllBytes()
                 }
                 def constantPool = new String(classBytes, StandardCharsets.ISO_8859_1)
-                constantPool.contains('net/minecraft/client/') || constantPool.contains(clientClassPrefix)
+                constantPool.contains('net/minecraft/client/') ||
+                    constantPool.contains('net.minecraft.client.') ||
+                    constantPool.contains(clientClassPrefix) ||
+                    constantPool.contains('me.whish.emotify.client.')
             }
             if (!dedicatedServerBoundaryViolations.isEmpty()) {
                 throw new GradleException(
@@ -624,6 +698,7 @@ tasks.named('check') {
     dependsOn ':emotify-wire-v1:check'
     dependsOn ':emotify-server-core:check'
     dependsOn ':emotify-catalog-builtin:check'
+    dependsOn ':minecraft-client-1.21.1:check'
     dependsOn verifyDevRuntimeClasspath
     dependsOn verifyReleaseJar
 }

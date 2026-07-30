@@ -4,6 +4,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import me.whish.emotify.Emotify
 import me.whish.emotify.catalog.builtin.BuiltInEmotionManifest
+import me.whish.emotify.client.state.FailureLogGate
+import me.whish.emotify.client.state.SerializedSnapshotStore
 import me.whish.emotify.domain.AnimationMotion
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId

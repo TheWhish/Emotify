@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "${modId}",
+  "version": "${modVersion}",
+  "name": "${modName}",
+  "description": "${modDescription}",
+  "authors": [
+    "${modAuthors}"
+  ],
+  "license": "${modLicense}",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "me.whish.emotify.fabric.EmotifyFabric"
+    ],
+    "client": [
+      "me.whish.emotify.fabric.client.EmotifyFabricClient"
+    ]
+  },
+  "mixins": [
+    "emotify.mixins.json",
+    {
+      "config": "emotify.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${fabricLoaderVersion}",
+    "fabric-api": ">=${fabricApiVersion}",
+    "fabric-language-kotlin": ">=${fabricLanguageKotlinVersion}",
+    "minecraft": "=${minecraftVersion}",
+    "java": ">=21"
+  }
+}

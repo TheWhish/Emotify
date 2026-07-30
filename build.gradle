@@ -10,7 +10,9 @@ def expectedProjectDirectories = [
     ':emotify-wire-v1': 'modules/emotify-wire-v1',
     ':emotify-server-core': 'modules/emotify-server-core',
     ':emotify-catalog-builtin': 'modules/emotify-catalog-builtin',
+    ':minecraft-client-1.21.1': 'modules/minecraft-client-1.21.1',
     ':neoforge-1.21.1': 'platforms/neoforge-1.21.1',
+    ':fabric-1.21.1': 'platforms/fabric-1.21.1',
     ':paper-1.21': 'platforms/paper-1.21'
 ]
 def expectedProjectPaths = expectedProjectDirectories.keySet().toList().sort()
@@ -24,14 +26,47 @@ def requiredProjectDirectories = expectedProjectDirectories.collectEntries { pro
 def configuredRootName = rootProject.name
 def unexpectedRootSourceDirectory = rootProject.file('src')
 def neoForgeSourceDirectory = project(':neoforge-1.21.1').file('src/main/kotlin')
+def fabricSourceDirectory = project(':fabric-1.21.1').file('src/main/kotlin')
+def fabricClientSourceDirectory = project(':fabric-1.21.1').file('src/client/kotlin')
+def minecraftClientSourceDirectory = project(':minecraft-client-1.21.1').file('src/main/kotlin')
+def minecraftClientAdapterSourceDirectory = project(':minecraft-client-1.21.1').file('src/minecraft/kotlin')
 def paperSourceDirectory = project(':paper-1.21').file('src/main/kotlin')
 def testReportDirectories = expectedProjectPaths.collectEntries { projectPath ->
     [(projectPath): project(projectPath).layout.buildDirectory.dir('test-results/test')]
 }
+def githubActions = providers.environmentVariable('GITHUB_ACTIONS').orElse('')
+def githubRefType = providers.environmentVariable('GITHUB_REF_TYPE').orElse('')
+def githubRefName = providers.environmentVariable('GITHUB_REF_NAME').orElse('')
+def configuredModVersion = providers.gradleProperty('mod_version')
+
+def verifyReleaseIdentity = tasks.register('verifyReleaseIdentity') {
+    group = 'verification'
+    description = 'Verifies that a GitHub release tag exactly matches a non-snapshot project version.'
+    inputs.property('githubActions', githubActions)
+    inputs.property('githubRefType', githubRefType)
+    inputs.property('githubRefName', githubRefName)
+    inputs.property('modVersion', configuredModVersion)
+    onlyIf {
+        githubActions.get() == 'true' && githubRefType.get() == 'tag'
+    }
+
+    doLast {
+        def releaseVersion = configuredModVersion.get()
+        if (releaseVersion.toUpperCase(Locale.ROOT).contains('SNAPSHOT')) {
+            throw new GradleException("GitHub release tags cannot publish a snapshot version: ${releaseVersion}")
+        }
+        def expectedTag = "v${releaseVersion}".toString()
+        if (githubRefName.get() != expectedTag) {
+            throw new GradleException(
+                "GitHub release tag ${githubRefName.get()} does not match project version ${expectedTag}"
+            )
+        }
+    }
+}
 
 def verifyProjectStructure = tasks.register('verifyProjectStructure') {
     group = 'verification'
-    description = 'Verifies the neutral root, shared modules and NeoForge platform boundary.'
+    description = 'Verifies the neutral root, shared modules and platform boundaries.'
 
     doLast {
         if (configuredRootName != 'Emotify') {
@@ -55,6 +90,18 @@ def verifyProjectStructure = tasks.register('verifyProjectStructure') {
         }
         if (!neoForgeSourceDirectory.isDirectory()) {
             throw new GradleException('NeoForge platform source tree is missing')
+        }
+        if (!fabricSourceDirectory.isDirectory()) {
+            throw new GradleException('Fabric common source tree is missing')
+        }
+        if (!fabricClientSourceDirectory.isDirectory()) {
+            throw new GradleException('Fabric client source tree is missing')
+        }
+        if (!minecraftClientSourceDirectory.isDirectory()) {
+            throw new GradleException('Shared Minecraft client source tree is missing')
+        }
+        if (!minecraftClientAdapterSourceDirectory.isDirectory()) {
+            throw new GradleException('Shared Minecraft client adapter source tree is missing')
         }
         if (!paperSourceDirectory.isDirectory()) {
             throw new GradleException('Paper platform source tree is missing')
@@ -101,14 +148,18 @@ def verifyTestReports = tasks.register('verifyTestReports') {
 
 tasks.register('verifyReleaseJar') {
     group = 'verification'
-    description = 'Verifies the current NeoForge release artifact.'
+    description = 'Verifies every current platform release artifact.'
+    dependsOn verifyReleaseIdentity
     dependsOn ':neoforge-1.21.1:verifyReleaseJar'
+    dependsOn ':fabric-1.21.1:verifyFabricReleaseJar'
+    dependsOn ':paper-1.21:verifyPaperReleaseJar'
 }
 
 tasks.register('verifyDevRuntimeClasspath') {
     group = 'verification'
-    description = 'Verifies the current NeoForge development runtime.'
+    description = 'Verifies every current loader development runtime.'
     dependsOn ':neoforge-1.21.1:verifyDevRuntimeClasspath'
+    dependsOn ':fabric-1.21.1:verifyFabricDevRuntimeClasspath'
 }
 
 tasks.named('clean') {
@@ -120,6 +171,7 @@ tasks.named('assemble') {
 }
 
 tasks.named('check') {
+    dependsOn verifyReleaseIdentity
     dependsOn verifyProjectStructure
     dependsOn verifyTestReports
     dependsOn expectedProjectPaths.collect { projectPath -> "${projectPath}:check" }

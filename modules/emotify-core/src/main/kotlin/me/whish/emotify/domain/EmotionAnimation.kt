@@ -1,4 +1,4 @@
- package me.whish.emotify.domain
+package me.whish.emotify.domain
 
 import kotlin.math.cos
 import kotlin.math.exp

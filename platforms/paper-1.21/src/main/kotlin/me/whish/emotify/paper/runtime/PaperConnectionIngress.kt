@@ -1,5 +1,6 @@
 package me.whish.emotify.paper.runtime
 
+import java.lang.ref.WeakReference
 import java.util.UUID
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.MonotonicTimeSource
@@ -20,6 +21,8 @@ sealed interface PaperClientHelloIngress {
 
     data object DUPLICATE_OR_BLOCKED : PaperClientHelloIngress
 
+    data object PROTOCOL_INACTIVE : PaperClientHelloIngress
+
     data object RATE_LIMITED : PaperClientHelloIngress
 
     data object STALE_CONNECTION : PaperClientHelloIngress
@@ -32,6 +35,8 @@ sealed interface PaperSelectionIngress {
     ) : PaperSelectionIngress
 
     data object RATE_LIMITED : PaperSelectionIngress
+
+    data object PROTOCOL_INACTIVE : PaperSelectionIngress
 
     data object STALE_CONNECTION : PaperSelectionIngress
 
@@ -49,11 +54,16 @@ class PaperConnectionIngress(
     private val entries = HashMap<UUID, Entry>()
     private var lastConnectionId = 0L
 
-    fun begin(playerId: UUID, outgoingChannels: Collection<String> = emptyList()): ConnectionKey = synchronized(monitor) {
+    fun begin(
+        playerId: UUID,
+        connectionIdentity: Any,
+        outgoingChannels: Collection<String> = emptyList(),
+    ): ConnectionKey = synchronized(monitor) {
         lastConnectionId = Math.incrementExact(lastConnectionId)
         val connection = ConnectionKey(playerId, ConnectionId.of(lastConnectionId))
         entries[playerId] = Entry(
             connection,
+            connectionIdentity,
             TokenBucket(HELLO_BURST_CAPACITY, HELLO_REFILL_TOKENS_PER_SECOND, timeSource),
             ClientHelloIngressGuard(),
             SelectionIngressGuard(timeSource),
@@ -62,16 +72,24 @@ class PaperConnectionIngress(
         connection
     }
 
-    fun current(playerId: UUID): ConnectionKey? = synchronized(monitor) {
-        entries[playerId]?.connection
+    fun current(playerId: UUID, connectionIdentity: Any): ConnectionKey? = synchronized(monitor) {
+        entries[playerId]
+            ?.takeIf { entry -> entry.belongsTo(connectionIdentity) }
+            ?.connection
     }
 
     fun isActive(connection: ConnectionKey): Boolean = synchronized(monitor) {
         entries[connection.playerId]?.connection == connection
     }
 
+    fun isActive(connection: ConnectionKey, connectionIdentity: Any): Boolean = synchronized(monitor) {
+        entries[connection.playerId]
+            ?.takeIf { entry -> entry.connection == connection }
+            ?.belongsTo(connectionIdentity) == true
+    }
+
     fun activeConnections(): List<ConnectionKey> = synchronized(monitor) {
-        entries.values.map { entry -> entry.connection }
+        entries.values.mapNotNull { entry -> entry.connection.takeIf { entry.protocolActive } }
     }
 
     fun registerOutgoingChannel(connection: ConnectionKey, channel: String): Boolean = synchronized(monitor) {
@@ -91,6 +109,9 @@ class PaperConnectionIngress(
             return false
         }
         entry.outgoingChannelsMask = entry.outgoingChannelsMask and bit.inv()
+        if (!entry.supportsAllOutgoingChannels()) {
+            entry.protocolActive = false
+        }
         true
     }
 
@@ -102,7 +123,22 @@ class PaperConnectionIngress(
 
     fun supportsAllOutgoingChannels(connection: ConnectionKey): Boolean = synchronized(monitor) {
         val entry = entries[connection.playerId]?.takeIf { active -> active.connection == connection } ?: return false
-        entry.outgoingChannelsMask and ALL_OUTGOING_CHANNELS_MASK == ALL_OUTGOING_CHANNELS_MASK
+        entry.supportsAllOutgoingChannels()
+    }
+
+    fun activateProtocol(connection: ConnectionKey): Boolean = synchronized(monitor) {
+        val entry = entries[connection.playerId]?.takeIf { active -> active.connection == connection } ?: return false
+        if (!entry.supportsAllOutgoingChannels()) {
+            return false
+        }
+        entry.protocolActive = true
+        true
+    }
+
+    fun isProtocolActive(connection: ConnectionKey): Boolean = synchronized(monitor) {
+        entries[connection.playerId]
+            ?.takeIf { entry -> entry.connection == connection }
+            ?.protocolActive == true
     }
 
     fun admitClientHello(
@@ -113,6 +149,9 @@ class PaperConnectionIngress(
             val active = entries[connection.playerId]
             if (active?.connection != connection) {
                 return PaperClientHelloIngress.STALE_CONNECTION
+            }
+            if (!active.protocolActive) {
+                return PaperClientHelloIngress.PROTOCOL_INACTIVE
             }
             if (!active.helloRequests.tryConsume()) {
                 return PaperClientHelloIngress.RATE_LIMITED
@@ -140,6 +179,9 @@ class PaperConnectionIngress(
             val active = entries[connection.playerId]
             if (active?.connection != connection) {
                 return PaperSelectionIngress.STALE_CONNECTION
+            }
+            if (!active.protocolActive) {
+                return PaperSelectionIngress.PROTOCOL_INACTIVE
             }
             if (!active.selectionGuard.tryAdmit()) {
                 return PaperSelectionIngress.RATE_LIMITED
@@ -190,11 +232,20 @@ class PaperConnectionIngress(
 
     private class Entry(
         val connection: ConnectionKey,
+        connectionIdentity: Any,
         val helloRequests: TokenBucket,
         val helloGuard: ClientHelloIngressGuard,
         val selectionGuard: SelectionIngressGuard,
         var outgoingChannelsMask: Int,
-    )
+    ) {
+        private val connectionReference = WeakReference(connectionIdentity)
+        var protocolActive = false
+
+        fun belongsTo(connectionIdentity: Any): Boolean = connectionReference.get() === connectionIdentity
+
+        fun supportsAllOutgoingChannels(): Boolean =
+            outgoingChannelsMask and ALL_OUTGOING_CHANNELS_MASK == ALL_OUTGOING_CHANNELS_MASK
+    }
 
     private data class SelectionPermit(
         val entry: Entry,

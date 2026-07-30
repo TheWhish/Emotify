@@ -1,0 +1,224 @@
+import java.nio.charset.StandardCharsets
+import java.util.zip.ZipFile
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+base {
+    archivesName = 'minecraft-client-1.21.1'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+dependencies {
+    api project(':emotify-core')
+    api project(':emotify-wire-v1')
+    api project(':emotify-catalog-builtin')
+    compileOnly "it.unimi.dsi:fastutil:${fastutil_version}"
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation "io.kotest:kotest-property:${kotest_version}"
+    testImplementation "it.unimi.dsi:fastutil:${fastutil_version}"
+    testImplementation testFixtures(project(':emotify-core'))
+    testImplementation testFixtures(project(':emotify-wire-v1'))
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+            'FMLModType': 'LIBRARY',
+            'Automatic-Module-Name': 'me.whish.emotify.minecraft.client.v1_21_1'
+        )
+    }
+}
+
+def mainClassDirectories = sourceSets.main.output.classesDirs
+def forbiddenReferences = [
+    'net/minecraft/',
+    'net.minecraft.',
+    'net/neoforged/',
+    'net.neoforged.',
+    'net/fabricmc/',
+    'net.fabricmc.',
+    'org/bukkit/',
+    'org.bukkit.',
+    'io/papermc/',
+    'io.papermc.',
+    'io/netty/',
+    'io.netty.',
+    'com/mojang/',
+    'com.mojang.',
+    'org/lwjgl/',
+    'org.lwjgl.',
+    'thedarkcolour/',
+    'thedarkcolour.',
+    'com/google/gson/',
+    'com.google.gson.'
+]
+
+def verifyLoaderNeutralClientBoundary = tasks.register('verifyLoaderNeutralClientBoundary') {
+    group = 'verification'
+    description = 'Verifies that shared client state and presentation math remain loader-neutral.'
+    dependsOn tasks.named('classes')
+    inputs.files(mainClassDirectories)
+
+    doLast {
+        def violations = mainClassDirectories.files.findAll { directory -> directory.isDirectory() }
+            .collectMany { directory ->
+                def pendingDirectories = [directory]
+                def classFiles = []
+                while (!pendingDirectories.isEmpty()) {
+                    def currentDirectory = pendingDirectories.removeLast()
+                    currentDirectory.listFiles()?.each { child ->
+                        if (child.isDirectory()) {
+                            pendingDirectories.add(child)
+                        } else if (child.name.endsWith('.class')) {
+                            classFiles.add(child)
+                        }
+                    }
+                }
+                classFiles.collectMany { classFile ->
+                    def constantPool = new String(classFile.bytes, StandardCharsets.ISO_8859_1)
+                    forbiddenReferences.findAll { reference -> constantPool.contains(reference) }
+                        .collect { reference -> "${classFile.name}->${reference}" }
+                }
+            }
+        if (!violations.isEmpty()) {
+            throw new GradleException(
+                "Shared client module references loader or Minecraft APIs: ${violations.join(', ')}"
+            )
+        }
+    }
+}
+
+def clientJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
+
+def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
+    group = 'verification'
+    description = 'Verifies the shared client library metadata and package boundary.'
+    dependsOn tasks.named('jar')
+    inputs.file(clientJar)
+
+    doLast {
+        new ZipFile(clientJar.get().asFile).withCloseable { archive ->
+            def manifest = archive.getInputStream(archive.getEntry('META-INF/MANIFEST.MF')).withCloseable { stream ->
+                new java.util.jar.Manifest(stream)
+            }
+            def moduleName = manifest.mainAttributes.getValue('Automatic-Module-Name')
+            if (moduleName != 'me.whish.emotify.minecraft.client.v1_21_1') {
+                throw new GradleException("Unexpected shared client module name: ${moduleName}")
+            }
+            def fmlModType = manifest.mainAttributes.getValue('FMLModType')
+            if (fmlModType != 'LIBRARY') {
+                throw new GradleException("Unexpected shared client FML module type: ${fmlModType}")
+            }
+            def entries = archive.entries().collect { entry -> entry.name }
+            def expectedClientAssets = [
+                'assets/emotify/lang/en_us.json',
+                'assets/emotify/lang/ru_ru.json',
+                'assets/emotify/textures/emotions/animals.png',
+                'assets/emotify/textures/emotions/faces.png'
+            ] as Set
+            def requiredEntries = [
+                'me/whish/emotify/client/state/ClientHandshakeSession.class',
+                'me/whish/emotify/client/picker/EmotionPickerModel.class',
+                'me/whish/emotify/client/input/PickerMovementInputState.class',
+                'me/whish/emotify/client/presentation/EmotionBillboardLayout.class',
+                'me/whish/emotify/client/presentation/EmotionPresentationCatalog.class'
+            ] + expectedClientAssets
+            def missingEntries = requiredEntries.findAll { requiredEntry -> requiredEntry !in entries }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException(
+                    "Shared client JAR is missing entries: ${missingEntries.join(', ')}"
+                )
+            }
+            def duplicateEntries = entries.groupBy { entry -> entry }
+                .findAll { entry, occurrences -> occurrences.size() > 1 }
+                .keySet()
+            if (!duplicateEntries.isEmpty()) {
+                throw new GradleException(
+                    "Shared client JAR contains duplicate entries: ${duplicateEntries.join(', ')}"
+                )
+            }
+            def ownedClassPrefixes = [
+                'me/whish/emotify/client/state/',
+                'me/whish/emotify/client/picker/',
+                'me/whish/emotify/client/input/',
+                'me/whish/emotify/client/presentation/'
+            ]
+            def misplacedClasses = entries.findAll { entry ->
+                entry.endsWith('.class') && !ownedClassPrefixes.any { prefix -> entry.startsWith(prefix) }
+            }
+            if (!misplacedClasses.isEmpty()) {
+                throw new GradleException(
+                    "Shared client JAR contains classes outside its owned packages: ${misplacedClasses.join(', ')}"
+                )
+            }
+            def actualClientAssets = entries.findAll { entry ->
+                !entry.endsWith('/') && entry.startsWith('assets/')
+            }.toSet()
+            if (actualClientAssets != expectedClientAssets) {
+                throw new GradleException(
+                    "Shared client JAR assets differ from the exact expected set: ${actualClientAssets.join(', ')}"
+                )
+            }
+            def forbiddenEntries = entries.findAll { entry ->
+                entry == 'fabric.mod.json' ||
+                    entry == 'META-INF/neoforge.mods.toml' ||
+                    entry.startsWith('META-INF/jarjar/') ||
+                    entry.contains('/test/') ||
+                    entry.endsWith('Test.class') ||
+                    entry.endsWith('.jar')
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                throw new GradleException(
+                    "Shared client JAR contains forbidden entries: ${forbiddenEntries.join(', ')}"
+                )
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyLoaderNeutralClientBoundary
+    dependsOn verifyClientLibraryJar
+}

@@ -15,7 +15,8 @@ import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 import me.whish.emotify.catalog.builtin.BuiltInEmotionManifest
 import me.whish.emotify.catalog.builtin.BuiltInEmotionSource
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
-import me.whish.emotify.client.EmotionPresentationCatalog
+import me.whish.emotify.client.EmotionTextureResources
+import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.domain.EmotionId
 
 class EmotionAssetsTest : FunSpec({
@@ -149,7 +150,8 @@ class EmotionAssetsTest : FunSpec({
             val definition = definitions[index]
             val presentation = presentations[index]
             presentation.emotionId shouldBe definition.id
-            presentation.texture.toString() shouldBe definition.texture
+            presentation.textureId shouldBe definition.texture
+            EmotionTextureResources.resolve(presentation.textureId).toString() shouldBe definition.texture
             presentation.translationKey shouldBe definition.translationKey
             presentation.category shouldBe definition.category
             presentation.glyph shouldBe definition.glyph

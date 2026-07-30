@@ -11,6 +11,7 @@ import me.whish.emotify.domain.FakeMonotonicTimeSource
 import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
+import me.whish.emotify.paper.network.PaperProtocolChannels
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.server.core.GlobalSelectionIngressBudget
@@ -24,9 +25,17 @@ class PaperConnectionIngressTest : FunSpec({
     val emotionId = EmotionId.of("emotify:happy")
     val catalog = EmotionCatalog.of(listOf(emotionId))
 
+    fun beginActive(
+        ingress: PaperConnectionIngress,
+        playerId: UUID = UUID.randomUUID(),
+        connectionIdentity: Any = Any(),
+    ) = ingress.begin(playerId, connectionIdentity, PaperProtocolChannels.outgoing).also { connection ->
+        ingress.activateProtocol(connection) shouldBe true
+    }
+
     test("duplicate hello spam decodes at most the bounded burst and admits one call") {
         val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
-        val connection = ingress.begin(UUID.randomUUID())
+        val connection = beginActive(ingress)
         var decoded = 0
         var admitted = 0
 
@@ -34,6 +43,7 @@ class PaperConnectionIngressTest : FunSpec({
             when (ingress.admitClientHello(connection) { decoded += 1; hello }) {
                 is PaperClientHelloIngress.Admitted -> admitted += 1
                 PaperClientHelloIngress.DUPLICATE_OR_BLOCKED,
+                PaperClientHelloIngress.PROTOCOL_INACTIVE,
                 PaperClientHelloIngress.RATE_LIMITED,
                 PaperClientHelloIngress.STALE_CONNECTION,
                 -> Unit
@@ -47,7 +57,7 @@ class PaperConnectionIngressTest : FunSpec({
     test("one changed hello is admitted and terminally blocks later packets") {
         val time = FakeMonotonicTimeSource()
         val ingress = PaperConnectionIngress(catalog, time)
-        val connection = ingress.begin(UUID.randomUUID())
+        val connection = beginActive(ingress)
         val changed = ClientHello(ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags.NONE))
 
         ingress.admitClientHello(connection) { hello }.shouldBeInstanceOf<PaperClientHelloIngress.Admitted>()
@@ -59,7 +69,7 @@ class PaperConnectionIngressTest : FunSpec({
 
     test("selection spam is limited before decode on the direct main thread path") {
         val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
-        val connection = ingress.begin(UUID.randomUUID())
+        val connection = beginActive(ingress)
         var decoded = 0
         var admitted = 0
 
@@ -73,6 +83,7 @@ class PaperConnectionIngressTest : FunSpec({
                     result.lease.release()
                 }
                 PaperSelectionIngress.RATE_LIMITED,
+                PaperSelectionIngress.PROTOCOL_INACTIVE,
                 PaperSelectionIngress.STALE_CONNECTION,
                 PaperSelectionIngress.UNKNOWN_EMOTION,
                 -> Unit
@@ -92,8 +103,8 @@ class PaperConnectionIngressTest : FunSpec({
             timeSource = time,
         )
         val ingress = PaperConnectionIngress(catalog, time, global)
-        val first = ingress.begin(UUID.randomUUID())
-        val second = ingress.begin(UUID.randomUUID())
+        val first = beginActive(ingress)
+        val second = beginActive(ingress)
         val unknown = EmotionId.of("external:unknown")
         var unknownResults = 0
 
@@ -120,8 +131,10 @@ class PaperConnectionIngressTest : FunSpec({
     test("connection generation rejects stale payloads close calls and outbound identity") {
         val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
         val playerId = UUID.randomUUID()
-        val first = ingress.begin(playerId)
-        val second = ingress.begin(playerId)
+        val firstIdentity = Any()
+        val secondIdentity = Any()
+        val first = ingress.begin(playerId, firstIdentity)
+        val second = ingress.begin(playerId, secondIdentity)
         var decoded = false
 
         ingress.admitClientHello(first) {
@@ -131,38 +144,80 @@ class PaperConnectionIngressTest : FunSpec({
         decoded shouldBe false
         ingress.isActive(first) shouldBe false
         ingress.isActive(second) shouldBe true
+        ingress.current(playerId, firstIdentity) shouldBe null
+        ingress.current(playerId, secondIdentity) shouldBe second
         ingress.close(first) shouldBe false
-        ingress.current(playerId) shouldBe second
         ingress.close(second) shouldBe true
-        ingress.current(playerId) shouldBe null
+        ingress.current(playerId, secondIdentity) shouldBe null
+    }
+
+    test("protocol packets stay undecoded until activation and after channel loss") {
+        val time = FakeMonotonicTimeSource()
+        val global = GlobalSelectionIngressBudget(
+            maxOutstanding = 2,
+            requestBurstCapacity = 2,
+            requestRefillTokensPerSecond = 1,
+            timeSource = time,
+        )
+        val ingress = PaperConnectionIngress(catalog, time, global)
+        val connection = ingress.begin(UUID.randomUUID(), Any(), PaperProtocolChannels.outgoing)
+        var helloDecodes = 0
+        var selectionDecodes = 0
+
+        ingress.admitClientHello(connection) {
+            helloDecodes += 1
+            hello
+        } shouldBe PaperClientHelloIngress.PROTOCOL_INACTIVE
+        ingress.admitSelection(connection) {
+            selectionDecodes += 1
+            EmotionSelection(emotionId)
+        } shouldBe PaperSelectionIngress.PROTOCOL_INACTIVE
+        helloDecodes shouldBe 0
+        selectionDecodes shouldBe 0
+        global.snapshot().availableRequestTokens shouldBe 2
+
+        ingress.activateProtocol(connection) shouldBe true
+        ingress.admitClientHello(connection) { helloDecodes += 1; hello }
+            .shouldBeInstanceOf<PaperClientHelloIngress.Admitted>()
+        ingress.unregisterOutgoingChannel(connection, ProtocolV1Channels.PLAY) shouldBe true
+        ingress.admitSelection(connection) {
+            selectionDecodes += 1
+            EmotionSelection(emotionId)
+        } shouldBe PaperSelectionIngress.PROTOCOL_INACTIVE
+        helloDecodes shouldBe 1
+        selectionDecodes shouldBe 0
+        global.snapshot().availableRequestTokens shouldBe 2
     }
 
     test("clear invalidates admitted global leases without reusing connection ids") {
         val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
         val playerId = UUID.randomUUID()
-        val first = ingress.begin(playerId)
+        val first = beginActive(ingress, playerId)
         val admitted = ingress.admitSelection(first) { EmotionSelection(emotionId) }
             .shouldBeInstanceOf<PaperSelectionIngress.Admitted>()
 
         ingress.clear() shouldBe 1
         admitted.lease.release() shouldBe GlobalSelectionIngressRelease.STALE_AFTER_RESET
-        val second = ingress.begin(playerId)
+        val second = ingress.begin(playerId, Any())
         (second.connectionId.value > first.connectionId.value) shouldBe true
     }
 
     test("outgoing channel mask changes without replacing the connection generation") {
         val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
         val playerId = UUID.randomUUID()
-        val connection = ingress.begin(playerId, listOf(ProtocolV1Channels.SERVER_HELLO))
+        val identity = Any()
+        val connection = ingress.begin(playerId, identity, listOf(ProtocolV1Channels.SERVER_HELLO))
 
         ingress.supportsOutgoingChannel(connection, ProtocolV1Channels.SERVER_HELLO) shouldBe true
         ingress.supportsAllOutgoingChannels(connection) shouldBe false
         ingress.registerOutgoingChannel(connection, ProtocolV1Channels.PLAY) shouldBe true
         ingress.registerOutgoingChannel(connection, ProtocolV1Channels.SELECTION_REJECTED) shouldBe true
         ingress.supportsAllOutgoingChannels(connection) shouldBe true
+        ingress.activateProtocol(connection) shouldBe true
 
         ingress.unregisterOutgoingChannel(connection, ProtocolV1Channels.PLAY) shouldBe true
         ingress.supportsOutgoingChannel(connection, ProtocolV1Channels.PLAY) shouldBe false
-        ingress.current(playerId) shouldBe connection
+        ingress.isProtocolActive(connection) shouldBe false
+        ingress.current(playerId, identity) shouldBe connection
     }
 })

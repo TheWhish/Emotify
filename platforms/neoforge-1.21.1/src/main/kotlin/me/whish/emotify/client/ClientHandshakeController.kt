@@ -2,6 +2,22 @@ package me.whish.emotify.client
 
 import me.whish.emotify.Emotify
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
+import me.whish.emotify.client.picker.ClientSelectionEligibility
+import me.whish.emotify.client.picker.EmotionPickerContext
+import me.whish.emotify.client.presentation.EmotionPresentationCatalog
+import me.whish.emotify.client.state.ActiveEmotion
+import me.whish.emotify.client.state.ClientActiveEmotionStore
+import me.whish.emotify.client.state.ClientHandshakeSession
+import me.whish.emotify.client.state.ClientHandshakeState
+import me.whish.emotify.client.state.ClientHandshakeTransition
+import me.whish.emotify.client.state.ClientHelloResponseGate
+import me.whish.emotify.client.state.ClientPlayGate
+import me.whish.emotify.client.state.ClientPlayIngressGuard
+import me.whish.emotify.client.state.ClientSelectionAttemptGate
+import me.whish.emotify.client.state.ClientSelectionResponseGate
+import me.whish.emotify.client.state.ClientSelectionSendResult
+import me.whish.emotify.client.state.ClientServerHelloIngressGuard
+import me.whish.emotify.client.state.EmotionActivationResult
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.SelectionRejectionReason
 import me.whish.emotify.domain.SystemMonotonicTimeSource
@@ -261,7 +277,7 @@ object ClientHandshakeController {
         session.begin(activeConnectionId)
 
         val listener = event.player.connection
-        val supportsHandshake = EmotifyChannels.supportsProtocol { type -> listener.hasChannel(type) }
+        val supportsHandshake = EmotifyChannels.serverCanReceiveClientPayloads { type -> listener.hasChannel(type) }
         if (supportsHandshake) {
             Emotify.LOGGER.info("Emotify client handshake pending on connection {}", activeConnectionId)
         } else {
@@ -364,7 +380,7 @@ object ClientHandshakeController {
         val listener = Minecraft.getInstance().connection ?: return false
         if (
             listener.connection !== connection ||
-            !EmotifyChannels.supportsProtocol { type -> listener.hasChannel(type) }
+            !EmotifyChannels.serverCanReceiveClientPayloads { type -> listener.hasChannel(type) }
         ) {
             return false
         }
@@ -400,16 +416,4 @@ object ClientHandshakeController {
         SelectionRejectionReason.SERVER_BUSY -> Component.translatable("message.emotify.server_busy")
         null -> Component.translatable("message.emotify.selection_failed")
     }
-}
-
-enum class ClientSelectionSendResult {
-    SENT,
-    NOT_CONNECTED,
-    HANDSHAKE_UNAVAILABLE,
-    EMOTION_UNAVAILABLE,
-    PLAYER_STATE,
-    CHANNEL_UNAVAILABLE,
-    REQUEST_PENDING,
-    REQUEST_THROTTLED,
-    EMOTION_ACTIVE,
 }

@@ -1,6 +1,7 @@
 pluginManagement {
     plugins {
         id 'net.neoforged.moddev' version providers.gradleProperty('moddev_version').get()
+        id 'net.fabricmc.fabric-loom-remap' version providers.gradleProperty('fabric_loom_version').get()
         id 'org.jetbrains.kotlin.jvm' version providers.gradleProperty('kotlin_version').get()
     }
 
@@ -9,6 +10,10 @@ pluginManagement {
         maven {
             name = 'NeoForged'
             url = uri('https://maven.neoforged.net/releases')
+        }
+        maven {
+            name = 'Fabric'
+            url = uri('https://maven.fabricmc.net/')
         }
     }
 }
@@ -23,12 +28,16 @@ include 'emotify-core'
 include 'emotify-wire-v1'
 include 'emotify-server-core'
 include 'emotify-catalog-builtin'
+include 'minecraft-client-1.21.1'
 include 'neoforge-1.21.1'
+include 'fabric-1.21.1'
 include 'paper-1.21'
 
 project(':emotify-core').projectDir = file('modules/emotify-core')
 project(':emotify-wire-v1').projectDir = file('modules/emotify-wire-v1')
 project(':emotify-server-core').projectDir = file('modules/emotify-server-core')
 project(':emotify-catalog-builtin').projectDir = file('modules/emotify-catalog-builtin')
+project(':minecraft-client-1.21.1').projectDir = file('modules/minecraft-client-1.21.1')
 project(':neoforge-1.21.1').projectDir = file('platforms/neoforge-1.21.1')
+project(':fabric-1.21.1').projectDir = file('platforms/fabric-1.21.1')
 project(':paper-1.21').projectDir = file('platforms/paper-1.21')

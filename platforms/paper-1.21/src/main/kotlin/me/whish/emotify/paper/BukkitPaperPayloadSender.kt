@@ -46,12 +46,12 @@ internal class BukkitPaperOutboundTransport(
         body: ByteArray,
     ): OutboundDeliveryStatus {
         check(plugin.server.isPrimaryThread) { "Paper payloads must be sent on the primary server thread" }
-        if (!connections.isActive(connection)) {
-            return OutboundDeliveryStatus.UNAVAILABLE
-        }
         val player = plugin.server.getPlayer(connection.playerId)
             ?.takeIf { candidate -> candidate.isOnline }
             ?: return OutboundDeliveryStatus.UNAVAILABLE
+        if (!connections.isActive(connection, player)) {
+            return OutboundDeliveryStatus.UNAVAILABLE
+        }
         if (!connections.supportsOutgoingChannel(connection, channel)) {
             return OutboundDeliveryStatus.UNAVAILABLE
         }

@@ -3,6 +3,10 @@ package me.whish.emotify.client
 import com.mojang.blaze3d.vertex.PoseStack
 import com.mojang.blaze3d.vertex.VertexConsumer
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
+import me.whish.emotify.client.presentation.EmotionBillboardLayout
+import me.whish.emotify.client.presentation.EmotionBillboardPose
+import me.whish.emotify.client.presentation.EmotionPresentation
+import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionAnimationFrameBuffer
 import me.whish.emotify.domain.SystemMonotonicTimeSource
@@ -20,8 +24,8 @@ import net.neoforged.neoforge.common.util.TriState
 object EmotionBillboardRenderer {
     private val animationFrame = EmotionAnimationFrameBuffer()
     private val renderTypes = java.util.Map.copyOf(
-        EmotionPresentationCatalog.ordered.map(EmotionPresentation::texture).distinct().associateWith { texture ->
-            RenderType.entityTranslucent(texture, false)
+        EmotionPresentationCatalog.ordered.map(EmotionPresentation::textureId).distinct().associateWith { textureId ->
+            RenderType.entityTranslucent(EmotionTextureResources.resolve(textureId), false)
         },
     )
 
@@ -57,7 +61,7 @@ object EmotionBillboardRenderer {
             return
         }
         val presentation = EmotionPresentationCatalog.find(active.emotionId) ?: return
-        val renderType = renderTypes[presentation.texture] ?: return
+        val renderType = renderTypes[presentation.textureId] ?: return
         val poseStack = event.poseStack
         poseStack.pushPose()
         try {
@@ -68,14 +72,18 @@ object EmotionBillboardRenderer {
                 player.isAutoSpinAttack -> Pose.SPIN_ATTACK
                 else -> player.pose
             }
-            val visualPose = EmotionBillboardLayout.visualPose(sourcePose)
-            val visualHeight = player.getDimensions(visualPose).height().toDouble()
-            val targetLocalY = EmotionBillboardLayout.localY(visualHeight, renderOffset.y, sourcePose)
+            val poseResolution = EmotionBillboardPoseResolver.resolve(sourcePose)
+            val visualHeight = player.getDimensions(poseResolution.visualPose).height().toDouble()
+            val targetLocalY = EmotionBillboardLayout.localY(
+                visualHeight,
+                renderOffset.y,
+                poseResolution.layoutPose,
+            )
             val localY = if (sourcePose == Pose.FALL_FLYING) {
                 val uprightLocalY = EmotionBillboardLayout.localY(
                     player.getDimensions(Pose.STANDING).height().toDouble(),
                     renderOffset.y,
-                    Pose.STANDING,
+                    EmotionBillboardPose.UPRIGHT,
                 )
                 EmotionBillboardLayout.fallFlyingLocalY(
                     uprightLocalY,

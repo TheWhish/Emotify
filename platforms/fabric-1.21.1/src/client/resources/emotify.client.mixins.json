@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "me.whish.emotify.fabric.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "EditBoxMixin",
+    "GameRendererMixin",
+    "PlayerRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

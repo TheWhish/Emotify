@@ -173,7 +173,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     @EventHandler
     fun onPlayerQuit(event: PlayerQuitEvent) {
-        val connection = connections.current(event.player.uniqueId) ?: return
+        val connection = connections.current(event.player.uniqueId, event.player) ?: return
         connections.close(connection)
         runtime.close(connection)
     }
@@ -181,7 +181,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     @EventHandler
     fun onPlayerRegisterChannel(event: PlayerRegisterChannelEvent) {
         if (event.channel in PaperProtocolChannels.outgoing) {
-            val connection = connections.current(event.player.uniqueId) ?: return
+            val connection = connections.current(event.player.uniqueId, event.player) ?: return
             connections.registerOutgoingChannel(connection, event.channel)
             tryOpen(event.player, connection, refreshExisting = true)
         }
@@ -190,7 +190,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     @EventHandler
     fun onPlayerUnregisterChannel(event: PlayerUnregisterChannelEvent) {
         if (event.channel in PaperProtocolChannels.outgoing) {
-            val connection = connections.current(event.player.uniqueId) ?: return
+            val connection = connections.current(event.player.uniqueId, event.player) ?: return
             connections.unregisterOutgoingChannel(connection, event.channel)
         }
     }
@@ -199,7 +199,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         if (!PaperProtocolChannels.acceptsIncoming(channel)) {
             return
         }
-        val connection = connections.current(player.uniqueId) ?: return
+        val connection = connections.current(player.uniqueId, player) ?: return
         try {
             when (channel) {
                 ProtocolV1Channels.CLIENT_HELLO -> when (
@@ -212,6 +212,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                         admission.hello,
                     )
                     PaperClientHelloIngress.DUPLICATE_OR_BLOCKED,
+                    PaperClientHelloIngress.PROTOCOL_INACTIVE,
                     PaperClientHelloIngress.RATE_LIMITED,
                     PaperClientHelloIngress.STALE_CONNECTION,
                     -> Unit
@@ -227,6 +228,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                         admission.lease,
                     )
                     PaperSelectionIngress.RATE_LIMITED,
+                    PaperSelectionIngress.PROTOCOL_INACTIVE,
                     PaperSelectionIngress.STALE_CONNECTION,
                     PaperSelectionIngress.UNKNOWN_EMOTION,
                     -> Unit
@@ -239,43 +241,59 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     private fun beginConnection(player: Player) {
         check(server.isPrimaryThread) { "Paper connection lifecycle must run on the primary server thread" }
-        scheduleOpen(connections.begin(player.uniqueId, player.listeningPluginChannels))
+        scheduleOpen(connections.begin(player.uniqueId, player, player.listeningPluginChannels))
     }
 
-    private fun scheduleOpen(connection: ConnectionKey) {
+    private fun scheduleOpen(
+        connection: ConnectionKey,
+        attemptsRemaining: Int = MAX_SERVER_HELLO_ATTEMPTS,
+    ) {
+        require(attemptsRemaining > 0) { "Paper server hello attempts must be positive: $attemptsRemaining" }
         server.scheduler.runTask(this, Runnable {
             if (!connections.isActive(connection)) {
                 return@Runnable
             }
             server.getPlayer(connection.playerId)
                 ?.takeIf { player -> player.isOnline }
-                ?.let { player -> tryOpen(player, connection, refreshExisting = false) }
+                ?.let { player -> tryOpen(player, connection, refreshExisting = false, attemptsRemaining) }
         })
     }
 
-    private fun tryOpen(player: Player, connection: ConnectionKey, refreshExisting: Boolean) {
+    private fun tryOpen(
+        player: Player,
+        connection: ConnectionKey,
+        refreshExisting: Boolean,
+        attemptsRemaining: Int = MAX_SERVER_HELLO_ATTEMPTS,
+    ) {
         if (!server.isPrimaryThread) {
-            scheduleOpen(connection)
+            scheduleOpen(connection, attemptsRemaining)
             return
         }
-        if (!connections.isActive(connection)) {
+        if (!connections.isActive(connection, player)) {
             return
         }
         if (!connections.supportsAllOutgoingChannels(connection)) {
             return
         }
         when (val result = runtime.open(connection)) {
-            PaperServerOpenResult.Opened -> logger.fine(
-                "Emotify Paper handshake opened for ${player.uniqueId}",
-            )
-            PaperServerOpenResult.AlreadyOpen -> if (refreshExisting) {
-                reportOutboundFailure("server policy refresh", connection, runtime.refresh(connection))
+            PaperServerOpenResult.Opened -> {
+                if (connections.activateProtocol(connection)) {
+                    logger.fine("Emotify Paper handshake opened for ${player.uniqueId}")
+                } else {
+                    runtime.close(connection)
+                }
             }
-            is PaperServerOpenResult.Undelivered -> reportOutboundFailure(
-                "server hello",
-                connection,
-                result.outbound,
-            )
+            PaperServerOpenResult.AlreadyOpen -> {
+                connections.activateProtocol(connection)
+                if (refreshExisting) {
+                    reportOutboundFailure("server policy refresh", connection, runtime.refresh(connection))
+                }
+            }
+            is PaperServerOpenResult.Undelivered -> if (attemptsRemaining > 1) {
+                scheduleOpen(connection, attemptsRemaining - 1)
+            } else {
+                reportOutboundFailure("server hello", connection, result.outbound)
+            }
         }
     }
 
@@ -394,7 +412,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         ingressLease: PaperIngressLease?,
     ) {
         try {
-            if (connections.isActive(connection)) {
+            if (connections.isProtocolActive(connection)) {
                 task()
             }
         } catch (exception: RuntimeException) {
@@ -483,6 +501,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         )
 
     private companion object {
+        const val MAX_SERVER_HELLO_ATTEMPTS = 3
         const val DIAGNOSTIC_BURST_CAPACITY = 8
         const val DIAGNOSTIC_REFILL_TOKENS_PER_SECOND = 2
     }

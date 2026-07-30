@@ -53,6 +53,28 @@ jobs:
         if: runner.os == 'Windows'
         run: .\gradlew.bat check --console=plain
 
+      - name: Verify configuration cache reuse on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          output="$(bash ./gradlew check --console=plain)"
+          printf '%s\n' "$output"
+          grep -Fq 'Reusing configuration cache.' <<< "$output"
+
+      - name: Verify configuration cache reuse on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = .\gradlew.bat check --console=plain | Out-String
+          $exitCode = $LASTEXITCODE
+          Write-Output $output
+          if ($exitCode -ne 0) {
+            throw "Gradle verification failed with exit code $exitCode."
+          }
+          if ($output -notmatch 'Reusing configuration cache\.') {
+            throw 'Gradle did not reuse the configuration cache.'
+          }
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -113,7 +135,14 @@ jobs:
           fi
           first_paper_jar="${paper_jars[0]}"
           first_paper_hash="$(sha256sum "$first_paper_jar" | cut -d ' ' -f 1)"
-          bash ./reproducibility-copy/gradlew -p ./reproducibility-copy :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar --console=plain
+          fabric_jars=(platforms/fabric-1.21.1/build/libs/emotify-fabric-1.21.1-*.jar)
+          if (( ${#fabric_jars[@]} != 1 )); then
+            echo "Expected exactly one Fabric release JAR, found ${#fabric_jars[@]}."
+            exit 1
+          fi
+          first_fabric_jar="${fabric_jars[0]}"
+          first_fabric_hash="$(sha256sum "$first_fabric_jar" | cut -d ' ' -f 1)"
+          bash ./reproducibility-copy/gradlew -p ./reproducibility-copy :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar :fabric-1.21.1:remapJar :fabric-1.21.1:verifyFabricReleaseJar :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar --console=plain --no-build-cache
           rebuilt_jars=(reproducibility-copy/platforms/neoforge-1.21.1/build/libs/emotify-*.jar)
           if (( ${#rebuilt_jars[@]} != 1 )); then
             echo "Expected exactly one independently rebuilt release JAR, found ${#rebuilt_jars[@]}."
@@ -138,8 +167,21 @@ jobs:
             exit 1
           fi
           echo "Verified reproducible Paper release JAR: $second_paper_hash"
-          mkdir -p build/release/neoforge build/release/paper
+          rebuilt_fabric_jars=(reproducibility-copy/platforms/fabric-1.21.1/build/libs/emotify-fabric-1.21.1-*.jar)
+          if (( ${#rebuilt_fabric_jars[@]} != 1 )); then
+            echo "Expected exactly one independently rebuilt Fabric release JAR, found ${#rebuilt_fabric_jars[@]}."
+            exit 1
+          fi
+          second_fabric_jar="${rebuilt_fabric_jars[0]}"
+          second_fabric_hash="$(sha256sum "$second_fabric_jar" | cut -d ' ' -f 1)"
+          if ! cmp --silent "$first_fabric_jar" "$second_fabric_jar"; then
+            echo "Fabric release JAR is not reproducible: $first_fabric_hash != $second_fabric_hash"
+            exit 1
+          fi
+          echo "Verified reproducible Fabric release JAR: $second_fabric_hash"
+          mkdir -p build/release/neoforge build/release/fabric build/release/paper
           cp "$second_jar" build/release/neoforge/
+          cp "$second_fabric_jar" build/release/fabric/
           cp "$second_paper_jar" build/release/paper/
 
       - name: Upload NeoForge release JAR
@@ -156,6 +198,15 @@ jobs:
         with:
           name: emotify-paper-1.21-${{ github.sha }}
           path: build/release/paper/*.jar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload Fabric release JAR
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: emotify-fabric-1.21.1-${{ github.sha }}
+          path: build/release/fabric/*.jar
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

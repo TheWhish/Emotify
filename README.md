@@ -4,9 +4,10 @@
 
 **A small visual language for the moments when chat is one message too slow.**
 
-[![Version 0.2.0](https://img.shields.io/badge/Version-0.2.0-5865F2?style=flat-square)](#installation)
+[![Version 0.3.0](https://img.shields.io/badge/Version-0.3.0-5865F2?style=flat-square)](#installation)
 [![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A?style=flat-square)](https://www.minecraft.net/)
 [![NeoForge](https://img.shields.io/badge/NeoForge-Client_%26_Server-EA6A47?style=flat-square)](https://neoforged.net/)
+[![Fabric](https://img.shields.io/badge/Fabric-Client_%26_Server-DBD0B4?style=flat-square)](https://fabricmc.net/)
 [![Paper & Purpur](https://img.shields.io/badge/Paper_%26_Purpur-Server-4A90E2?style=flat-square)](https://papermc.io/)
 [![Java 21](https://img.shields.io/badge/Java-21-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639?style=flat-square)](LICENSE)
@@ -15,7 +16,7 @@
 
 Emotify adds animated pixel-art reactions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
-Version **0.2.0** brings the same server-authoritative emotion system to **NeoForge, Paper, and Purpur** servers.
+Version **0.3.0** adds full **Fabric** support and lets NeoForge and Fabric clients share reactions across NeoForge, Fabric, Paper, and Purpur servers.
 
 ---
 
@@ -32,27 +33,31 @@ Emotify keeps its visual language close to Minecraft: readable pixel sprites, sm
 
 ## 🌐 Compatibility
 
-| Component               | Supported version |
-|-------------------------| --- |
-| Minecraft               | **1.21.1** |
-| Client or Modded server | **NeoForge 21.1.234+** |
-| Plugin server           | **Paper or Purpur 1.21.1** |
-| Java                    | **21** |
-| NeoForge runtime        | **Kotlin for Forge 5.12.x** |
+| Component | Supported version |
+| --- | --- |
+| Minecraft | **1.21.1** |
+| NeoForge | **21.1.234+** |
+| Fabric Loader | **0.19.3 or newer** |
+| Fabric API | **0.116.15+1.21.1 or newer compatible release** |
+| Fabric Language Kotlin | **1.13.12+kotlin.2.4.0 or newer compatible release** |
+| Paper / Purpur | **1.21.1** |
+| Java | **21** |
+| Kotlin for Forge | **5.12.x** |
 
-NeoForge, Paper, and Purpur use the same Emotify protocol. Players without the client mod can still join normally, but they do not send or see reactions.
+All supported platforms use the same Emotify protocol. NeoForge and Fabric clients can connect to either modded server platform or to Paper and Purpur servers running the plugin. Players without the client mod can still join normally, but they do not send or see reactions.
 
 > [!IMPORTANT]
-> Paper and Purpur support is server-side. Emotify **0.2.0** still uses a NeoForge client; Fabric and additional Minecraft versions are not part of this release.
+> Emotify uses separate NeoForge, Fabric, and Paper artifacts. Install only the artifact for the platform on which it runs. Additional Minecraft versions are not part of this release.
 
 ## 📦 Installation
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-0.2.0.jar` | `mods`; requires Kotlin for Forge `5.12.x` |
-| Paper / Purpur | `emotify-paper-1.21-0.2.0.jar` | `plugins`; no NeoForge or Kotlin for Forge on the server |
+| NeoForge | `emotify-0.3.0.jar` | `mods`; requires Kotlin for Forge `5.12.x` |
+| Fabric | `emotify-fabric-1.21.1-0.3.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur | `emotify-paper-1.21-0.3.0.jar` | `plugins`; has no additional server dependencies |
 
-Players on Paper or Purpur use the regular NeoForge client mod. Do not install both Emotify artifacts on the same server.
+Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 
 ## 🛡️ Server administration
 
@@ -103,7 +108,7 @@ The 162 bundled `8×8` emoji assets come from [Happy's Better Emojis](https://mo
 
 The artwork is included without visual modification. Emotify provides its own catalog, stable IDs, categories, atlas coordinates, localization, animations, interface, and multiplayer system.
 
-The attribution notice and complete license text are included in both release JARs and are available as [Happy-Better-Emojis-NOTICE.txt](modules/emotify-catalog-builtin/src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt) and [Happy-Better-Emojis-LICENSE.txt](modules/emotify-catalog-builtin/src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt).
+The attribution notice and complete license text are included in all three release JARs and are available as [Happy-Better-Emojis-NOTICE.txt](modules/emotify-catalog-builtin/src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt) and [Happy-Better-Emojis-LICENSE.txt](modules/emotify-catalog-builtin/src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt).
 
 ## 📄 License
 

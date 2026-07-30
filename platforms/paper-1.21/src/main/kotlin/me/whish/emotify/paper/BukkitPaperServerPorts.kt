@@ -35,11 +35,12 @@ internal class BukkitPaperPlayerSnapshotFactory(
     }
 
     private fun resolve(connection: ConnectionKey): Player? {
-        if (!connections.isActive(connection)) {
-            return null
+        val player = server.getPlayer(connection.playerId)
+            ?.takeIf { candidate -> candidate.isOnline && candidate.uniqueId == connection.playerId }
+            ?: return null
+        return player.takeIf {
+            connections.isActive(connection, player) && connections.isProtocolActive(connection)
         }
-        return server.getPlayer(connection.playerId)
-            ?.takeIf { player -> player.isOnline && player.uniqueId == connection.playerId }
     }
 }
 
@@ -67,7 +68,10 @@ internal class BukkitPaperAudiencePort(
             if (!recipient.hasPermission(PaperPermissions.RECEIVE)) {
                 continue
             }
-            val recipientConnection = connections.current(recipient.uniqueId) ?: continue
+            val recipientConnection = connections.current(recipient.uniqueId, recipient) ?: continue
+            if (!connections.isProtocolActive(recipientConnection)) {
+                continue
+            }
             val sameDimension = sourcePlayer.world.uid == recipient.world.uid
             val distanceSquared = if (sameDimension) {
                 distanceSquared(sourcePlayer, recipient)
@@ -89,11 +93,12 @@ internal class BukkitPaperAudiencePort(
     }
 
     private fun resolve(connection: ConnectionKey): Player? {
-        if (!connections.isActive(connection)) {
-            return null
+        val player = server.getPlayer(connection.playerId)
+            ?.takeIf { candidate -> candidate.isOnline && candidate.uniqueId == connection.playerId }
+            ?: return null
+        return player.takeIf {
+            connections.isActive(connection, player) && connections.isProtocolActive(connection)
         }
-        return server.getPlayer(connection.playerId)
-            ?.takeIf { player -> player.isOnline && player.uniqueId == connection.playerId }
     }
 
     private fun distanceSquared(first: Player, second: Player): Double {

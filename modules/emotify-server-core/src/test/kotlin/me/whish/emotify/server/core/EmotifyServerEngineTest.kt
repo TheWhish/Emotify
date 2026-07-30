@@ -124,6 +124,30 @@ class EmotifyServerEngineTest : FunSpec({
         transport.plays.size shouldBe 2
     }
 
+    test("zero delivery refunds exactly one audience reservation") {
+        val time = FakeMonotonicTimeSource()
+        val audienceBudget = AudienceBudget(
+            globalCapacity = 2,
+            globalRefillTokensPerSecond = 1,
+            regionCapacity = 2,
+            regionRefillTokensPerSecond = 1,
+            timeSource = time,
+        )
+        audienceBudget.tryReserve(1, 1L) shouldBe AudienceReservation.RESERVED
+        val transport = RecordingOutboundTransport().also {
+            it.playResponder = { _, _, _ -> OutboundDeliveryStatus.FAILED }
+        }
+        val harness = engineHarness(time = time, audienceBudget = audienceBudget, transport = transport)
+        val connection = testConnection(1L)
+        harness.openSupported(connection)
+
+        harness.engine.select(testPlayer(connection), TEST_HAPPY)
+            .shouldBeInstanceOf<ServerSelectionResult.Undelivered>()
+
+        audienceBudget.tryReserve(1, 1L) shouldBe AudienceReservation.RESERVED
+        audienceBudget.tryReserve(1, 1L) shouldBe AudienceReservation.GLOBAL_BUSY
+    }
+
     test("runtime traversal failure after delivery is typed and commits cooldown") {
         val failure = IllegalStateException("synthetic traversal failure")
         val harness = engineHarness()

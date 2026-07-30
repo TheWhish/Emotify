@@ -2,40 +2,13 @@ package me.whish.emotify.client
 
 import com.mojang.blaze3d.platform.InputConstants
 import java.util.IdentityHashMap
+import me.whish.emotify.client.input.PickerMovementAction
+import me.whish.emotify.client.input.PickerMovementInputState
 import net.minecraft.client.KeyMapping
 import net.minecraft.client.Minecraft
 import net.minecraft.client.Options
 import net.neoforged.neoforge.client.settings.IKeyConflictContext
 import org.lwjgl.glfw.GLFW
-
-internal enum class PickerMovementAction {
-    FORWARD,
-    BACKWARD,
-    LEFT,
-    RIGHT,
-    JUMP,
-    CROUCH,
-    SPRINT,
-}
-
-internal class PickerMovementInputState {
-    private var scanCodeMask = 0
-
-    val hasScanCodeInput: Boolean
-        get() = scanCodeMask != 0
-
-    fun setScanCodeDown(action: PickerMovementAction, down: Boolean) {
-        val bit = 1 shl action.ordinal
-        scanCodeMask = if (down) scanCodeMask or bit else scanCodeMask and bit.inv()
-    }
-
-    fun isScanCodeDown(action: PickerMovementAction): Boolean =
-        scanCodeMask and (1 shl action.ordinal) != 0
-
-    fun clear() {
-        scanCodeMask = 0
-    }
-}
 
 object EmotionPickerMovement {
     private val togglePhysicalState = IdentityHashMap<KeyMapping, Boolean>()

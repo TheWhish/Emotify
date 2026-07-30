@@ -129,6 +129,22 @@ def expectedPaperLibraries = [
     "com.google.code.gson:gson:${pluginProperties.gsonVersion}".toString(),
     "it.unimi.dsi:fastutil:${pluginProperties.fastutilVersion}".toString()
 ]
+def expectedPaperKotlinModules = [
+    'META-INF/me.whish_emotify-paper-1.21.kotlin_module',
+    'META-INF/me.whish_emotify-core.kotlin_module',
+    'META-INF/me.whish_emotify-wire-v1.kotlin_module',
+    'META-INF/me.whish_emotify-server-core.kotlin_module',
+    'META-INF/me.whish_emotify-catalog-builtin.kotlin_module'
+] as Set
+def expectedPaperResourceEntries = ([
+    'META-INF/MANIFEST.MF',
+    'plugin.yml',
+    'config.yml',
+    'LICENSE_emotify',
+    'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
+    'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
+    'assets/emotify/emotions.json'
+] + expectedPaperKotlinModules) as Set
 def requiredPaperPluginMetadata = [
     'main: me.whish.emotify.paper.PaperEmotifyPlugin',
     "version: '${project.version}'".toString(),
@@ -205,6 +221,26 @@ def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
                     "Paper release JAR contains duplicate entries: ${duplicateEntries.join(', ')}"
                 )
             }
+            def actualKotlinModules = entries.findAll { entry -> entry.endsWith('.kotlin_module') }.toSet()
+            if (actualKotlinModules != expectedPaperKotlinModules) {
+                throw new GradleException("Unexpected Paper Kotlin module metadata: ${actualKotlinModules}")
+            }
+            def unexpectedResources = archive.entries().findAll { entry ->
+                !entry.directory && !entry.name.endsWith('.class') && entry.name !in expectedPaperResourceEntries
+            }.collect { entry -> entry.name }
+            if (!unexpectedResources.isEmpty()) {
+                throw new GradleException(
+                    "Paper release JAR contains unexpected resources: ${unexpectedResources.join(', ')}"
+                )
+            }
+            def misplacedClasses = entries.findAll { entry ->
+                entry.endsWith('.class') && !entry.startsWith('me/whish/emotify/')
+            }
+            if (!misplacedClasses.isEmpty()) {
+                throw new GradleException(
+                    "Paper release JAR contains classes outside owned packages: ${misplacedClasses.take(30).join(', ')}"
+                )
+            }
             def forbiddenEntries = entries.findAll { entry ->
                 forbiddenPrefixes.any { prefix -> entry.startsWith(prefix) } ||
                     entry.contains('/test/') ||
@@ -277,11 +313,17 @@ def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
             }
             def forbiddenClassReferences = [
                 'cpw/mods/',
+                'cpw.mods.',
                 'net/neoforged/',
+                'net.neoforged.',
                 'net/fabricmc/',
+                'net.fabricmc.',
                 'net/minecraft/',
+                'net.minecraft.',
                 'org/spongepowered/asm/',
-                'thedarkcolour/'
+                'org.spongepowered.asm.',
+                'thedarkcolour/',
+                'thedarkcolour.'
             ]
             def pollutedClasses = entries.findAll { entry -> entry.endsWith('.class') }.findAll { entry ->
                 def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
