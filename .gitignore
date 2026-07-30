@@ -66,5 +66,9 @@ Desktop.ini
 /CHANGELOG.md
 /RELEASE_CHECKLIST.md
 
+# Local project media
+/project-media/
+
 # Locally copied release artifacts
 /emotify-*.jar
+/versions/

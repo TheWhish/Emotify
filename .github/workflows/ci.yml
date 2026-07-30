@@ -59,7 +59,14 @@ jobs:
         run: |
           output="$(bash ./gradlew check --console=plain)"
           printf '%s\n' "$output"
-          grep -Fq 'Reusing configuration cache.' <<< "$output"
+          if ! grep -Fq 'Reusing configuration cache.' <<< "$output"; then
+            output="$(bash ./gradlew check --console=plain)"
+            printf '%s\n' "$output"
+          fi
+          if ! grep -Fq 'Reusing configuration cache.' <<< "$output"; then
+            echo 'Gradle did not reuse the configuration cache.' >&2
+            exit 1
+          fi
 
       - name: Verify configuration cache reuse on Windows
         if: runner.os == 'Windows'
@@ -70,6 +77,14 @@ jobs:
           Write-Output $output
           if ($exitCode -ne 0) {
             throw "Gradle verification failed with exit code $exitCode."
+          }
+          if ($output -notmatch 'Reusing configuration cache\.') {
+            $output = .\gradlew.bat check --console=plain | Out-String
+            $exitCode = $LASTEXITCODE
+            Write-Output $output
+            if ($exitCode -ne 0) {
+              throw "Gradle verification failed with exit code $exitCode."
+            }
           }
           if ($output -notmatch 'Reusing configuration cache\.') {
             throw 'Gradle did not reuse the configuration cache.'
@@ -87,6 +102,11 @@ jobs:
             platforms/*/build/test-results/test/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Stop Gradle daemon on Windows
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: .\gradlew.bat --stop
 
   release-artifact:
     name: Package verified platform JARs

@@ -14,7 +14,7 @@
 
 </div>
 
-Emotify adds animated pixel-art reactions above players: a fast, quiet alternative to another chat message or a full-body emote.
+Emotify adds animated reactions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
 Version **0.3.0** adds full **Fabric** support and lets NeoForge and Fabric clients share reactions across NeoForge, Fabric, Paper, and Purpur servers.
 
@@ -58,6 +58,10 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 | Paper / Purpur | `emotify-paper-1.21-0.3.0.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
+
+### Client settings
+
+Favorites are managed directly in the picker. Reduced Motion and the persisted favorite order are stored in `config/emotify-client.toml` on NeoForge and `config/emotify-client.properties` on Fabric. The two loaders use different file formats but expose the same client behavior.
 
 ## 🛡️ Server administration
 
