@@ -1,0 +1,90 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'java-test-fixtures'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+dependencies {
+    api project(':emotify-core')
+    api project(':emotify-wire-v1')
+    implementation "it.unimi.dsi:fastutil:${fastutil_version}"
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation "io.kotest:kotest-property:${kotest_version}"
+    testImplementation testFixtures(project(':emotify-core'))
+    testImplementation testFixtures(project(':emotify-wire-v1'))
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+            'FMLModType': 'LIBRARY',
+            'Automatic-Module-Name': 'me.whish.emotify.server.core'
+        )
+    }
+}
+
+def runtimeClasspathFiles = configurations.named('runtimeClasspath').get()
+def modulePath = project.path
+
+def verifyNoGsonRuntime = tasks.register('verifyNoGsonRuntime') {
+    group = 'verification'
+    description = 'Verifies that Gson is not a transitive runtime dependency.'
+    inputs.files(runtimeClasspathFiles)
+
+    doLast {
+        def gsonArtifacts = runtimeClasspathFiles.files.findAll { runtimeFile ->
+            runtimeFile.name ==~ /gson-[0-9].*\.jar/
+        }
+        if (!gsonArtifacts.isEmpty()) {
+            throw new GradleException(
+                "Gson leaked into ${modulePath}: " +
+                    gsonArtifacts.collect { runtimeFile -> runtimeFile.name }.join(', ')
+            )
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyNoGsonRuntime
+}

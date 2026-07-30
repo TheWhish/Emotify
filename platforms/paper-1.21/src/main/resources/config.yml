@@ -1,0 +1,19 @@
+config-version: 1
+enabled: true
+cooldown-millis: 2200
+emotions:
+  allow: []
+  deny: []
+broadcast:
+  radius-blocks: 64.0
+  maximum-tracking-candidates: 256
+  global-burst-capacity: 512
+  global-refill-per-second: 256
+  region-burst-capacity: 32
+  region-refill-per-second: 16
+  maximum-regions: 4096
+ingress:
+  maximum-queued-main-thread-tasks: 512
+  maximum-outstanding-selections: 512
+  global-burst-capacity: 1024
+  global-refill-per-second: 512

@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-2022
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Java 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@90ddb51e90a5fd9ba75f40cf85156b7b41bf76a3
+        with:
+          cache-provider: basic
+          validate-wrappers: true
+
+      - name: Run verification on Linux
+        if: runner.os == 'Linux'
+        run: bash ./gradlew check --console=plain
+
+      - name: Run verification on Windows
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat check --console=plain
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: emotify-test-reports-${{ matrix.name }}-${{ github.sha }}
+          path: |
+            modules/*/build/reports/tests/test/
+            modules/*/build/test-results/test/
+            platforms/*/build/reports/tests/test/
+            platforms/*/build/test-results/test/
+          if-no-files-found: warn
+          retention-days: 14
+
+  release-artifact:
+    name: Package verified platform JARs
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Set up Java 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@90ddb51e90a5fd9ba75f40cf85156b7b41bf76a3
+        with:
+          cache-provider: basic
+          validate-wrappers: true
+
+      - name: Build verified platform JARs
+        run: bash ./gradlew check --console=plain
+
+      - name: Check out independent reproducibility copy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: reproducibility-copy
+
+      - name: Verify reproducible artifacts
+        shell: bash
+        run: |
+          shopt -s nullglob
+          release_jars=(platforms/neoforge-1.21.1/build/libs/emotify-*.jar)
+          if (( ${#release_jars[@]} != 1 )); then
+            echo "Expected exactly one release JAR, found ${#release_jars[@]}."
+            exit 1
+          fi
+          first_jar="${release_jars[0]}"
+          first_hash="$(sha256sum "$first_jar" | cut -d ' ' -f 1)"
+          paper_jars=(platforms/paper-1.21/build/libs/emotify-paper-*.jar)
+          if (( ${#paper_jars[@]} != 1 )); then
+            echo "Expected exactly one Paper release JAR, found ${#paper_jars[@]}."
+            exit 1
+          fi
+          first_paper_jar="${paper_jars[0]}"
+          first_paper_hash="$(sha256sum "$first_paper_jar" | cut -d ' ' -f 1)"
+          bash ./reproducibility-copy/gradlew -p ./reproducibility-copy :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar --console=plain
+          rebuilt_jars=(reproducibility-copy/platforms/neoforge-1.21.1/build/libs/emotify-*.jar)
+          if (( ${#rebuilt_jars[@]} != 1 )); then
+            echo "Expected exactly one independently rebuilt release JAR, found ${#rebuilt_jars[@]}."
+            exit 1
+          fi
+          second_jar="${rebuilt_jars[0]}"
+          second_hash="$(sha256sum "$second_jar" | cut -d ' ' -f 1)"
+          if ! cmp --silent "$first_jar" "$second_jar"; then
+            echo "Release JAR is not reproducible: $first_hash != $second_hash"
+            exit 1
+          fi
+          echo "Verified reproducible release JAR: $second_hash"
+          rebuilt_paper_jars=(reproducibility-copy/platforms/paper-1.21/build/libs/emotify-paper-*.jar)
+          if (( ${#rebuilt_paper_jars[@]} != 1 )); then
+            echo "Expected exactly one independently rebuilt Paper release JAR, found ${#rebuilt_paper_jars[@]}."
+            exit 1
+          fi
+          second_paper_jar="${rebuilt_paper_jars[0]}"
+          second_paper_hash="$(sha256sum "$second_paper_jar" | cut -d ' ' -f 1)"
+          if ! cmp --silent "$first_paper_jar" "$second_paper_jar"; then
+            echo "Paper release JAR is not reproducible: $first_paper_hash != $second_paper_hash"
+            exit 1
+          fi
+          echo "Verified reproducible Paper release JAR: $second_paper_hash"
+          mkdir -p build/release/neoforge build/release/paper
+          cp "$second_jar" build/release/neoforge/
+          cp "$second_paper_jar" build/release/paper/
+
+      - name: Upload NeoForge release JAR
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: emotify-neoforge-1.21.1-${{ github.sha }}
+          path: build/release/neoforge/*.jar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload Paper and Purpur release JAR
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: emotify-paper-1.21-${{ github.sha }}
+          path: build/release/paper/*.jar
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

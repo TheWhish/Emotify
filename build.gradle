@@ -1,255 +1,126 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import groovy.xml.XmlSlurper
 
 plugins {
-    id 'java-library'
-    id 'idea'
-    id 'net.neoforged.moddev'
-    id 'org.jetbrains.kotlin.jvm'
+    id 'base'
+    id 'org.jetbrains.kotlin.jvm' apply false
 }
 
-version = mod_version
-group = mod_group_id
-
-String dataGenerationModId = providers.gradleProperty('mod_id').get()
-
-base {
-    archivesName = mod_id
-}
-
-repositories {
-    maven {
-        name = 'KotlinForForge'
-        url = uri('https://thedarkcolour.github.io/KotlinForForge/')
-        content {
-            includeGroup 'thedarkcolour'
-        }
-    }
-}
-
-java {
-    toolchain.languageVersion = JavaLanguageVersion.of(21)
-}
-
-kotlin {
-    jvmToolchain(21)
-
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_21)
-        allWarningsAsErrors.set(true)
-        progressiveMode.set(true)
-    }
-}
-
-neoForge {
-    version = neo_version
-
-    parchment {
-        minecraftVersion = parchment_minecraft_version
-        mappingsVersion = parchment_mappings_version
-    }
-
-    runs {
-        client {
-            client()
-            gameDirectory = layout.projectDirectory.dir('run-client')
-        }
-
-        server {
-            server()
-            gameDirectory = layout.projectDirectory.dir('run-server')
-            programArgument '--nogui'
-        }
-
-        data {
-            data()
-            gameDirectory = layout.projectDirectory.dir('run-data')
-            programArgument '--mod'
-            programArgument dataGenerationModId
-            programArgument '--all'
-            programArgument '--output'
-            programArgument file('src/generated/resources').absolutePath
-            programArgument '--existing'
-            programArgument file('src/main/resources').absolutePath
-        }
-
-        configureEach {
-            logLevel = org.slf4j.event.Level.INFO
-        }
-    }
-
-    mods {
-        "${mod_id}" {
-            sourceSet sourceSets.main
-        }
-    }
-
-    unitTest {
-        testedMod = mods.named(mod_id)
-        enable()
-    }
-}
-
-dependencies {
-    implementation "thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version}"
-
-    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
-    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
-    testImplementation "io.kotest:kotest-property:${kotest_version}"
-}
-
-def modMetadataProperties = [
-    minecraft_version_range: minecraft_version_range,
-    neo_version_range: neo_version_range,
-    loader_version_range: loader_version_range,
-    mod_id: mod_id,
-    mod_name: mod_name,
-    mod_license: mod_license,
-    mod_version: mod_version,
-    mod_authors: mod_authors,
-    mod_description: mod_description
+def expectedProjectDirectories = [
+    ':emotify-core': 'modules/emotify-core',
+    ':emotify-wire-v1': 'modules/emotify-wire-v1',
+    ':emotify-server-core': 'modules/emotify-server-core',
+    ':emotify-catalog-builtin': 'modules/emotify-catalog-builtin',
+    ':neoforge-1.21.1': 'platforms/neoforge-1.21.1',
+    ':paper-1.21': 'platforms/paper-1.21'
 ]
-
-def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
-    inputs.properties modMetadataProperties
-    expand modMetadataProperties
-    from 'src/main/templates'
-    rename 'neoforge[.]mods[.]toml[.]template', 'neoforge.mods.toml'
-    into layout.buildDirectory.dir('generated/sources/modMetadata')
+def expectedProjectPaths = expectedProjectDirectories.keySet().toList().sort()
+def configuredProjectPaths = subprojects.collect { subproject -> subproject.path }.sort()
+def configuredProjectDirectories = expectedProjectDirectories.collectEntries { projectPath, relativePath ->
+    [(projectPath): project(projectPath).projectDir.canonicalPath]
+}
+def requiredProjectDirectories = expectedProjectDirectories.collectEntries { projectPath, relativePath ->
+    [(projectPath): rootProject.file(relativePath).canonicalPath]
+}
+def configuredRootName = rootProject.name
+def unexpectedRootSourceDirectory = rootProject.file('src')
+def neoForgeSourceDirectory = project(':neoforge-1.21.1').file('src/main/kotlin')
+def paperSourceDirectory = project(':paper-1.21').file('src/main/kotlin')
+def testReportDirectories = expectedProjectPaths.collectEntries { projectPath ->
+    [(projectPath): project(projectPath).layout.buildDirectory.dir('test-results/test')]
 }
 
-sourceSets.main.resources {
-    srcDir 'src/generated/resources'
-    srcDir generateModMetadata
-    exclude '**/*.bbmodel', '**/.cache/**'
-}
-
-neoForge.ideSyncTask generateModMetadata
-
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-    options.release = 21
-    options.compilerArgs.add '-Werror'
-}
-
-tasks.withType(ProcessResources).configureEach {
-    filteringCharset = 'UTF-8'
-    includeEmptyDirs = false
-}
-
-tasks.withType(Test).configureEach {
-    useJUnitPlatform()
-}
-
-tasks.withType(Jar).configureEach {
-    includeEmptyDirs = false
-    preserveFileTimestamps = false
-    reproducibleFileOrder = true
-}
-
-def embeddedLicenseName = "LICENSE_${mod_id}"
-
-tasks.named('jar', Jar) {
-    from('LICENSE') {
-        rename { embeddedLicenseName }
-    }
-}
-
-def releaseJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
-def projectClassPrefix = 'me/whish/emotify/'
-def clientClassPrefix = "${projectClassPrefix}client/"
-def requiredReleaseMetadata = [
-    'modLoader = "kotlinforforge"',
-    "modId = \"${modMetadataProperties.mod_id}\"".toString(),
-    "version = \"${modMetadataProperties.mod_version}\"".toString(),
-    "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString()
-]
-
-def verifyReleaseJar = tasks.register('verifyReleaseJar') {
+def verifyProjectStructure = tasks.register('verifyProjectStructure') {
     group = 'verification'
-    description = 'Verifies the Emotify release JAR contents and metadata.'
-    dependsOn tasks.named('jar')
-    inputs.file(releaseJar)
+    description = 'Verifies the neutral root, shared modules and NeoForge platform boundary.'
 
     doLast {
-        def archiveFile = releaseJar.get().asFile
-        def requiredEntries = [
-            'META-INF/MANIFEST.MF',
-            'META-INF/neoforge.mods.toml',
-            embeddedLicenseName.toString(),
-            'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
-            'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
-            'assets/emotify/emotions.json',
-            'assets/emotify/lang/en_us.json',
-            'assets/emotify/lang/ru_ru.json',
-            'assets/emotify/textures/emotions/animals.png',
-            'assets/emotify/textures/emotions/faces.png',
-            'me/whish/emotify/Emotify.class',
-            'me/whish/emotify/client/EmotifyClient.class'
-        ]
-
-        new java.util.zip.ZipFile(archiveFile).withCloseable { archive ->
-            def entryNames = archive.entries().collect { entry -> entry.name }
-            def missingEntries = requiredEntries.findAll { entry -> entry !in entryNames }
-            if (!missingEntries.isEmpty()) {
-                throw new GradleException("Release JAR is missing required entries: ${missingEntries.join(', ')}")
-            }
-
-            def duplicateEntries = entryNames.groupBy { entry -> entry }
-                .findAll { entry, occurrences -> occurrences.size() > 1 }
-                .keySet()
-            if (!duplicateEntries.isEmpty()) {
-                throw new GradleException("Release JAR contains duplicate entries: ${duplicateEntries.join(', ')}")
-            }
-
-            def forbiddenEntries = entryNames.findAll { entry ->
-                entry.startsWith("${clientClassPrefix}ClientSelectionDebug") ||
-                    entry.startsWith('docs/') ||
-                    entry.startsWith('run-client/') ||
-                    entry.startsWith('run-server/') ||
-                    entry.contains('/test/') ||
-                    entry.endsWith('.bbmodel') ||
-                    entry.contains('/.cache/')
-            }
-            if (!forbiddenEntries.isEmpty()) {
-                throw new GradleException("Release JAR contains forbidden entries: ${forbiddenEntries.join(', ')}")
-            }
-
-            def dedicatedServerBoundaryViolations = entryNames.findAll { entry ->
-                entry.startsWith(projectClassPrefix) &&
-                    entry.endsWith('.class') &&
-                    !entry.startsWith(clientClassPrefix)
-            }.findAll { entry ->
-                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
-                    stream.readAllBytes()
-                }
-                def constantPool = new String(classBytes, java.nio.charset.StandardCharsets.ISO_8859_1)
-                constantPool.contains('net/minecraft/client/') || constantPool.contains(clientClassPrefix)
-            }
-            if (!dedicatedServerBoundaryViolations.isEmpty()) {
-                throw new GradleException(
-                    "Dedicated-server classes reference client-only code: ${dedicatedServerBoundaryViolations.join(', ')}"
-                )
-            }
-
-            def metadataEntry = archive.getEntry('META-INF/neoforge.mods.toml')
-            def metadata = archive.getInputStream(metadataEntry).withCloseable { stream ->
-                stream.getText('UTF-8')
-            }
-            def missingMetadata = requiredReleaseMetadata.findAll { value -> !metadata.contains(value) }
-            if (!missingMetadata.isEmpty()) {
-                throw new GradleException("Release metadata is incomplete: ${missingMetadata.join(', ')}")
-            }
+        if (configuredRootName != 'Emotify') {
+            throw new GradleException("Unexpected root project name: ${configuredRootName}")
+        }
+        if (configuredProjectPaths != expectedProjectPaths) {
+            throw new GradleException(
+                "Unexpected project paths: ${configuredProjectPaths.join(', ')}"
+            )
+        }
+        def misplacedProjects = expectedProjectPaths.findAll { projectPath ->
+            configuredProjectDirectories[projectPath] != requiredProjectDirectories[projectPath]
+        }
+        if (!misplacedProjects.isEmpty()) {
+            throw new GradleException(
+                "Projects use unexpected directories: ${misplacedProjects.join(', ')}"
+            )
+        }
+        if (unexpectedRootSourceDirectory.exists()) {
+            throw new GradleException('Neutral root must not contain a source tree')
+        }
+        if (!neoForgeSourceDirectory.isDirectory()) {
+            throw new GradleException('NeoForge platform source tree is missing')
+        }
+        if (!paperSourceDirectory.isDirectory()) {
+            throw new GradleException('Paper platform source tree is missing')
         }
     }
+}
+
+def verifyTestReports = tasks.register('verifyTestReports') {
+    group = 'verification'
+    description = 'Verifies that every module test report exists and has no failures, errors or skipped tests.'
+    dependsOn expectedProjectPaths.collect { projectPath -> "${projectPath}:test" }
+    inputs.files(testReportDirectories.values())
+
+    doLast {
+        def results = testReportDirectories.collectEntries { projectPath, reportDirectoryProvider ->
+            def reportDirectory = reportDirectoryProvider.get().asFile
+            def reportFiles = reportDirectory.isDirectory() ?
+                reportDirectory.listFiles().findAll { reportFile ->
+                    reportFile.isFile() && reportFile.name.startsWith('TEST-') && reportFile.name.endsWith('.xml')
+                } : []
+            if (reportFiles.isEmpty()) {
+                throw new GradleException("No test reports found for ${projectPath}")
+            }
+            def totals = [tests: 0, failures: 0, errors: 0, skipped: 0]
+            reportFiles.each { reportFile ->
+                def suite = new XmlSlurper(false, false).parse(reportFile)
+                totals.keySet().each { metric ->
+                    def value = suite.attributes()[metric]?.toString()
+                    totals[metric] += value ? value.toInteger() : 0
+                }
+            }
+            [(projectPath): totals]
+        }
+        def violations = results.findAll { projectPath, totals ->
+            totals.failures != 0 || totals.errors != 0 || totals.skipped != 0
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException("Test report violations: ${violations}")
+        }
+        def totalTests = results.values().sum { totals -> totals.tests }
+        logger.lifecycle("Verified ${totalTests} tests across ${results.size()} modules: ${results}")
+    }
+}
+
+tasks.register('verifyReleaseJar') {
+    group = 'verification'
+    description = 'Verifies the current NeoForge release artifact.'
+    dependsOn ':neoforge-1.21.1:verifyReleaseJar'
+}
+
+tasks.register('verifyDevRuntimeClasspath') {
+    group = 'verification'
+    description = 'Verifies the current NeoForge development runtime.'
+    dependsOn ':neoforge-1.21.1:verifyDevRuntimeClasspath'
+}
+
+tasks.named('clean') {
+    dependsOn expectedProjectPaths.collect { projectPath -> "${projectPath}:clean" }
+}
+
+tasks.named('assemble') {
+    dependsOn expectedProjectPaths.collect { projectPath -> "${projectPath}:assemble" }
 }
 
 tasks.named('check') {
-    dependsOn verifyReleaseJar
-}
-
-idea {
-    module {
-        downloadSources = true
-        downloadJavadoc = true
-    }
+    dependsOn verifyProjectStructure
+    dependsOn verifyTestReports
+    dependsOn expectedProjectPaths.collect { projectPath -> "${projectPath}:check" }
 }

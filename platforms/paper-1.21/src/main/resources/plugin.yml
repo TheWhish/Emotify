@@ -1,0 +1,26 @@
+name: Emotify
+version: '${pluginVersion}'
+main: me.whish.emotify.paper.PaperEmotifyPlugin
+description: Server-authoritative Emotify bridge for Paper and Purpur.
+author: Whish
+api-version: '1.21.1'
+load: STARTUP
+commands:
+  emotify:
+    description: Emotify administration command.
+    usage: /emotify reload
+    permission: emotify.admin.reload
+permissions:
+  emotify.use:
+    description: Allows a player to publish Emotify emotions.
+    default: true
+  emotify.receive:
+    description: Allows a player to receive emotions from other players.
+    default: true
+  emotify.admin.reload:
+    description: Allows reloading the Emotify configuration.
+    default: op
+libraries:
+  - org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}
+  - com.google.code.gson:gson:${gsonVersion}
+  - it.unimi.dsi:fastutil:${fastutilVersion}

@@ -1,0 +1,66 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+dependencies {
+    api project(':emotify-core')
+    implementation "com.google.code.gson:gson:${gson_version}"
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation "io.kotest:kotest-property:${kotest_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+    includeEmptyDirs = false
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+            'FMLModType': 'LIBRARY',
+            'Automatic-Module-Name': 'me.whish.emotify.catalog.builtin'
+        )
+    }
+}

@@ -1,0 +1,304 @@
+import java.nio.charset.StandardCharsets
+import java.util.Arrays
+import java.util.zip.ZipFile
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+base {
+    archivesName = 'emotify-paper-1.21'
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'PaperMC'
+        url = uri('https://repo.papermc.io/repository/maven-public/')
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+dependencies {
+    compileOnly("io.papermc.paper:paper-api:${paper_api_version}") {
+        exclude group: 'org.apache.commons', module: 'commons-lang3'
+        exclude group: 'org.codehaus.plexus', module: 'plexus-utils'
+    }
+
+    implementation project(':emotify-core')
+    implementation project(':emotify-wire-v1')
+    implementation project(':emotify-server-core')
+    implementation project(':emotify-catalog-builtin')
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation 'org.yaml:snakeyaml:2.2'
+    testImplementation testFixtures(project(':emotify-core'))
+    testImplementation testFixtures(project(':emotify-wire-v1'))
+}
+
+def pluginProperties = [
+    pluginVersion: project.version,
+    kotlinVersion: providers.gradleProperty('kotlin_version').get(),
+    gsonVersion: providers.gradleProperty('gson_version').get(),
+    fastutilVersion: providers.gradleProperty('fastutil_version').get()
+]
+
+tasks.named('processResources', ProcessResources) {
+    inputs.properties(pluginProperties)
+    filteringCharset = 'UTF-8'
+    expand(pluginProperties)
+    includeEmptyDirs = false
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def embeddedProjectPaths = [
+    ':emotify-core',
+    ':emotify-wire-v1',
+    ':emotify-server-core',
+    ':emotify-catalog-builtin'
+] as Set
+def embeddedProjectRuntime = configurations.named('runtimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedProjectPaths
+    }
+}.files
+
+tasks.named('jar', Jar) {
+    dependsOn embeddedProjectPaths.collect { projectPath -> "${projectPath}:jar" }
+    inputs.files(embeddedProjectRuntime)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from({ embeddedProjectRuntime.collect { runtimeFile -> zipTree(runtimeFile) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+    }
+    from(rootProject.layout.projectDirectory.file('LICENSE')) {
+        rename { 'LICENSE_emotify' }
+    }
+}
+
+def paperJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
+def paperCatalogSource = project(':emotify-catalog-builtin').layout.projectDirectory.file(
+    'src/main/resources/assets/emotify/emotions.json'
+)
+def paperLicenseSource = rootProject.layout.projectDirectory.file('LICENSE')
+def paperConfigSource = layout.projectDirectory.file('src/main/resources/config.yml')
+def paperThirdPartyLicenseDirectory = project(':emotify-catalog-builtin').layout.projectDirectory.dir(
+    'src/main/resources/META-INF/licenses/emotify'
+)
+def paperThirdPartyLicenseSources = [
+    paperThirdPartyLicenseDirectory.file('Happy-Better-Emojis-LICENSE.txt'),
+    paperThirdPartyLicenseDirectory.file('Happy-Better-Emojis-NOTICE.txt')
+]
+def expectedPaperLibraries = [
+    "org.jetbrains.kotlin:kotlin-stdlib:${pluginProperties.kotlinVersion}".toString(),
+    "com.google.code.gson:gson:${pluginProperties.gsonVersion}".toString(),
+    "it.unimi.dsi:fastutil:${pluginProperties.fastutilVersion}".toString()
+]
+def requiredPaperPluginMetadata = [
+    'main: me.whish.emotify.paper.PaperEmotifyPlugin',
+    "version: '${project.version}'".toString(),
+    'commands:',
+    'permissions:',
+    'emotify.use:',
+    'emotify.receive:',
+    'emotify.admin.reload:',
+    *expectedPaperLibraries
+]
+
+def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
+    group = 'verification'
+    description = 'Verifies the production Paper and Purpur Protocol 1 adapter artifact.'
+    dependsOn tasks.named('jar')
+    inputs.file(paperJar)
+    inputs.file(paperCatalogSource)
+    inputs.file(paperLicenseSource)
+    inputs.file(paperConfigSource)
+    inputs.files(paperThirdPartyLicenseSources)
+
+    doLast {
+        def artifact = paperJar.get().asFile
+        def requiredEntries = [
+            'META-INF/MANIFEST.MF',
+            'plugin.yml',
+            'config.yml',
+            'LICENSE_emotify',
+            'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
+            'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
+            'assets/emotify/emotions.json',
+            'me/whish/emotify/paper/PaperEmotifyPlugin.class',
+            'me/whish/emotify/paper/PaperPermissions.class',
+            'me/whish/emotify/paper/BukkitPaperAudiencePort.class',
+            'me/whish/emotify/paper/BukkitPaperOutboundTransport.class',
+            'me/whish/emotify/paper/config/BukkitPaperConfigLoader.class',
+            'me/whish/emotify/paper/config/PaperReloadCoordinator.class',
+            'me/whish/emotify/paper/config/PaperRuntimeConfigParser.class',
+            'me/whish/emotify/paper/network/PaperProtocolV1Bridge.class',
+            'me/whish/emotify/paper/runtime/PaperConnectionIngress.class',
+            'me/whish/emotify/paper/runtime/PaperPolicyRefreshQueue.class',
+            'me/whish/emotify/paper/runtime/PaperReloadGate.class',
+            'me/whish/emotify/paper/runtime/PaperServerRuntime.class',
+            'me/whish/emotify/domain/EmotionId.class',
+            'me/whish/emotify/wire/v1/ProtocolV1Codecs.class',
+            'me/whish/emotify/server/core/EmotifyServerEngine.class',
+            'me/whish/emotify/server/core/ServerPlayerSession.class',
+            'me/whish/emotify/catalog/builtin/BuiltInEmotionCatalog.class'
+        ]
+        def forbiddenPrefixes = [
+            'net/neoforged/',
+            'net/fabricmc/',
+            'net/minecraft/',
+            'org/bukkit/',
+            'io/papermc/',
+            'org/yaml/snakeyaml/',
+            'thedarkcolour/',
+            'META-INF/jarjar/',
+            'kotlin/',
+            'com/google/gson/',
+            'it/unimi/dsi/fastutil/'
+        ]
+        new ZipFile(artifact).withCloseable { archive ->
+            def entries = archive.entries().collect { entry -> entry.name }
+            def missingEntries = requiredEntries.findAll { requiredEntry -> requiredEntry !in entries }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException("Paper release JAR is missing entries: ${missingEntries.join(', ')}")
+            }
+            def duplicateEntries = entries.groupBy { entry -> entry }
+                .findAll { entry, occurrences -> occurrences.size() > 1 }
+                .keySet()
+            if (!duplicateEntries.isEmpty()) {
+                throw new GradleException(
+                    "Paper release JAR contains duplicate entries: ${duplicateEntries.join(', ')}"
+                )
+            }
+            def forbiddenEntries = entries.findAll { entry ->
+                forbiddenPrefixes.any { prefix -> entry.startsWith(prefix) } ||
+                    entry.contains('/test/') ||
+                    entry.endsWith('Test.class') ||
+                    entry.endsWith('.jar')
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                throw new GradleException(
+                    "Paper release JAR contains forbidden entries: ${forbiddenEntries.take(20).join(', ')}"
+                )
+            }
+            def pluginMetadataEntry = archive.getEntry('plugin.yml')
+            def pluginMetadata = archive.getInputStream(pluginMetadataEntry).withCloseable { stream ->
+                stream.getText('UTF-8')
+            }
+            def missingMetadata = requiredPaperPluginMetadata.findAll { metadata ->
+                !pluginMetadata.contains(metadata)
+            }
+            if (!missingMetadata.isEmpty()) {
+                throw new GradleException(
+                    "Paper release plugin.yml is missing metadata: ${missingMetadata.join(', ')}"
+                )
+            }
+            if (pluginMetadata.contains('${')) {
+                throw new GradleException('Paper release plugin.yml contains unresolved placeholders')
+            }
+            def forbiddenDescriptors = [
+                'META-INF/neoforge.mods.toml',
+                'fabric.mod.json'
+            ].findAll { descriptor -> descriptor in entries }
+            if (!forbiddenDescriptors.isEmpty()) {
+                throw new GradleException(
+                    "Paper release JAR contains foreign platform descriptors: ${forbiddenDescriptors.join(', ')}"
+                )
+            }
+            def pluginMetadataLines = pluginMetadata.readLines()
+            def librariesHeader = pluginMetadataLines.findIndexOf { line -> line == 'libraries:' }
+            def declaredLibraries = librariesHeader >= 0 ?
+                pluginMetadataLines.drop(librariesHeader + 1)
+                    .takeWhile { line -> line.startsWith('  - ') }
+                    .collect { line -> line.substring(4) } : []
+            if (declaredLibraries != expectedPaperLibraries) {
+                throw new GradleException(
+                    "Paper release plugin.yml libraries differ: ${declaredLibraries.join(', ')}"
+                )
+            }
+            def catalogEntry = archive.getEntry('assets/emotify/emotions.json')
+            def embeddedCatalog = archive.getInputStream(catalogEntry).withCloseable { stream -> stream.bytes }
+            if (!Arrays.equals(embeddedCatalog, paperCatalogSource.asFile.bytes)) {
+                throw new GradleException('Paper release catalog differs from the canonical catalog resource')
+            }
+            def licenseEntry = archive.getEntry('LICENSE_emotify')
+            def embeddedLicense = archive.getInputStream(licenseEntry).withCloseable { stream -> stream.bytes }
+            if (!Arrays.equals(embeddedLicense, paperLicenseSource.asFile.bytes)) {
+                throw new GradleException('Paper release license differs from the repository license')
+            }
+            def configEntry = archive.getEntry('config.yml')
+            def embeddedConfig = archive.getInputStream(configEntry).withCloseable { stream -> stream.bytes }
+            if (!Arrays.equals(embeddedConfig, paperConfigSource.asFile.bytes)) {
+                throw new GradleException('Paper release config differs from the shipped configuration')
+            }
+            paperThirdPartyLicenseSources.each { source ->
+                def entryName = "META-INF/licenses/emotify/${source.asFile.name}".toString()
+                def embedded = archive.getInputStream(archive.getEntry(entryName)).withCloseable { stream ->
+                    stream.bytes
+                }
+                if (!Arrays.equals(embedded, source.asFile.bytes)) {
+                    throw new GradleException("Paper release attribution differs: ${entryName}")
+                }
+            }
+            def forbiddenClassReferences = [
+                'cpw/mods/',
+                'net/neoforged/',
+                'net/fabricmc/',
+                'net/minecraft/',
+                'org/spongepowered/asm/',
+                'thedarkcolour/'
+            ]
+            def pollutedClasses = entries.findAll { entry -> entry.endsWith('.class') }.findAll { entry ->
+                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
+                    stream.bytes
+                }
+                def constantPool = new String(classBytes, StandardCharsets.ISO_8859_1)
+                forbiddenClassReferences.any { reference -> constantPool.contains(reference) }
+            }
+            if (!pollutedClasses.isEmpty()) {
+                throw new GradleException(
+                    "Paper release classes reference foreign runtimes: ${pollutedClasses.take(20).join(', ')}"
+                )
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyPaperReleaseJar
+}

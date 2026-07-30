@@ -18,3 +18,17 @@ plugins {
 }
 
 rootProject.name = 'Emotify'
+
+include 'emotify-core'
+include 'emotify-wire-v1'
+include 'emotify-server-core'
+include 'emotify-catalog-builtin'
+include 'neoforge-1.21.1'
+include 'paper-1.21'
+
+project(':emotify-core').projectDir = file('modules/emotify-core')
+project(':emotify-wire-v1').projectDir = file('modules/emotify-wire-v1')
+project(':emotify-server-core').projectDir = file('modules/emotify-server-core')
+project(':emotify-catalog-builtin').projectDir = file('modules/emotify-catalog-builtin')
+project(':neoforge-1.21.1').projectDir = file('platforms/neoforge-1.21.1')
+project(':paper-1.21').projectDir = file('platforms/paper-1.21')

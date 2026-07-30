@@ -1,29 +1,70 @@
+# Gradle and Kotlin
 /.gradle/
 /.kotlin/
 /build/
+/modules/*/build/
+/platforms/*/build/
 /out/
 /repo/
+
+# Generated sources and Minecraft runtimes
+/src/generated/resources/
+/modules/*/src/generated/resources/
+/platforms/*/src/generated/resources/
 /run/
 /run-*/
-/src/generated/resources/
-/docs/
-/§b§lAllure Emoji Pack§r§0/
-/assets/
+/platforms/*/run/
+/platforms/*/run-*/
 
+# IDE and editor state
 /.idea/
 /.fleet/
 /.vscode/
 *.iml
 *.ipr
 *.iws
+*.swp
+*.swo
+*~
 
+# Compiled output and diagnostics
 *.class
 *.log
+*.log.gz
 *.jfr
 *.hprof
+*.heapdump
 hs_err_pid*
 replay_pid*
+/crash-reports/
 
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+local.properties
+credentials.properties
+publishing.properties
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Operating system metadata
 .DS_Store
+._*
 Thumbs.db
-desktop.ini
+ehthumbs.db
+Desktop.ini
+
+# Local project notes
+/docs/
+/DOCS/
+/CHANGELOG.md
+/RELEASE_CHECKLIST.md
+
+# Locally copied release artifacts
+/emotify-*.jar
