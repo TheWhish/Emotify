@@ -141,7 +141,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          release_jars=(platforms/neoforge-1.21.1/build/libs/emotify-*.jar)
+          release_jars=(platforms/neoforge-1.21.1/build/libs/emotify-neoforge-1.21.1-*.jar)
           if (( ${#release_jars[@]} != 1 )); then
             echo "Expected exactly one release JAR, found ${#release_jars[@]}."
             exit 1
@@ -163,7 +163,7 @@ jobs:
           first_fabric_jar="${fabric_jars[0]}"
           first_fabric_hash="$(sha256sum "$first_fabric_jar" | cut -d ' ' -f 1)"
           bash ./reproducibility-copy/gradlew -p ./reproducibility-copy :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar :fabric-1.21.1:remapJar :fabric-1.21.1:verifyFabricReleaseJar :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar --console=plain --no-build-cache
-          rebuilt_jars=(reproducibility-copy/platforms/neoforge-1.21.1/build/libs/emotify-*.jar)
+          rebuilt_jars=(reproducibility-copy/platforms/neoforge-1.21.1/build/libs/emotify-neoforge-1.21.1-*.jar)
           if (( ${#rebuilt_jars[@]} != 1 )); then
             echo "Expected exactly one independently rebuilt release JAR, found ${#rebuilt_jars[@]}."
             exit 1

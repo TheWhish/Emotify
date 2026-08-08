@@ -54,7 +54,7 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-0.4.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| NeoForge | `emotify-neoforge-1.21.1-0.4.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
 | Fabric | `emotify-fabric-1.21.1-0.4.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
 | Paper / Purpur | `emotify-paper-1.21-0.4.0.jar` | `plugins`; has no additional server dependencies |
 

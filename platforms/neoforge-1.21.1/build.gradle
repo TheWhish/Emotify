@@ -26,7 +26,7 @@ evaluationDependsOn(':minecraft-client-1.21.1')
 
 
 base {
-    archivesName = mod_id
+    archivesName = 'emotify-neoforge-1.21.1'
 }
 
 repositories {
