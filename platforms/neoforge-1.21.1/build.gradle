@@ -235,6 +235,7 @@ def requiredReleaseMetadata = [
     'modLoader = "kotlinforforge"',
     "modId = \"${modMetadataProperties.mod_id}\"".toString(),
     "version = \"${modMetadataProperties.mod_version}\"".toString(),
+    'logoFile = "assets/emotify/icon.png"',
     "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString()
 ]
 def nestedLibrarySpecifications = [
@@ -245,7 +246,8 @@ def nestedLibrarySpecifications = [
         range: expectedJarJarVersionRange,
         path: "META-INF/jarjar/${projectGroup}.emotify-core-${projectVersion}.jar".toString(),
         moduleName: 'me.whish.emotify.core',
-        requiredClass: 'me/whish/emotify/domain/EmotionId.class'
+        requiredClass: 'me/whish/emotify/domain/EmotionId.class',
+        requiredEntries: ['me/whish/emotify/domain/CustomEmojiAsset.class']
     ],
     [
         group: projectGroup,
@@ -254,7 +256,8 @@ def nestedLibrarySpecifications = [
         range: expectedJarJarVersionRange,
         path: "META-INF/jarjar/${projectGroup}.emotify-wire-v1-${projectVersion}.jar".toString(),
         moduleName: 'me.whish.emotify.wire.v1',
-        requiredClass: 'me/whish/emotify/wire/v1/ProtocolV1Codecs.class'
+        requiredClass: 'me/whish/emotify/wire/v1/ProtocolV1Codecs.class',
+        requiredEntries: ['me/whish/emotify/wire/v1/CustomEmojiLosslessCodec.class']
     ],
     [
         group: projectGroup,
@@ -263,7 +266,11 @@ def nestedLibrarySpecifications = [
         range: expectedJarJarVersionRange,
         path: "META-INF/jarjar/${projectGroup}.emotify-server-core-${projectVersion}.jar".toString(),
         moduleName: 'me.whish.emotify.server.core',
-        requiredClass: 'me/whish/emotify/server/core/EmotifyServerEngine.class'
+        requiredClass: 'me/whish/emotify/server/core/EmotifyServerEngine.class',
+        requiredEntries: [
+            'me/whish/emotify/server/core/CustomAssetEgressBudget.class',
+            'me/whish/emotify/server/core/ServerCustomAssetStore.class'
+        ]
     ],
     [
         group: projectGroup,
@@ -285,6 +292,10 @@ def nestedLibrarySpecifications = [
         moduleName: 'me.whish.emotify.minecraft.client.v1_21_1',
         requiredClass: 'me/whish/emotify/client/state/ClientHandshakeSession.class',
         requiredEntries: [
+            'me/whish/emotify/client/state/ClientEmotionPlayCoordinator.class',
+            'me/whish/emotify/client/settings/ClientSettingsSnapshot.class',
+            'me/whish/emotify/client/sound/EmotionSoundPlayback.class',
+            'assets/emotify/icon.png',
             'assets/emotify/lang/en_us.json',
             'assets/emotify/lang/ru_ru.json',
             'assets/emotify/textures/emotions/animals.png',
@@ -384,12 +395,16 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
             'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
             'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
             'assets/emotify/emotions.json',
+            'assets/emotify/icon.png',
             'assets/emotify/lang/en_us.json',
             'assets/emotify/lang/ru_ru.json',
             'assets/emotify/textures/emotions/animals.png',
             'assets/emotify/textures/emotions/faces.png',
             'me/whish/emotify/Emotify.class',
-            'me/whish/emotify/client/EmotifyClient.class'
+            'me/whish/emotify/client/EmotifyClient.class',
+            'me/whish/emotify/client/EmotifySettingsScreen.class',
+            'me/whish/emotify/network/payload/CustomEmojiAssetChunkPayload.class',
+            'me/whish/emotify/server/EmotifyServerConfig.class'
         ]
 
         new ZipFile(archiveFile).withCloseable { archive ->
@@ -570,6 +585,7 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
                 )
             }
             def expectedClientAssets = [
+                'assets/emotify/icon.png',
                 'assets/emotify/lang/en_us.json',
                 'assets/emotify/lang/ru_ru.json',
                 'assets/emotify/textures/emotions/animals.png',

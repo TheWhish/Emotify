@@ -17,6 +17,7 @@ internal class ProtocolV1PayloadCodec<TPayload : Any, TMessage : Any>(
     private val unwrap: (TPayload) -> TMessage,
     private val wrap: (TMessage) -> TPayload,
     private val maxOutboundBodyBytes: Int = wireCodec.maxBodyBytes,
+    private val preEncodedBody: (TPayload) -> ByteArray? = { null },
 ) : StreamCodec<FriendlyByteBuf, TPayload> {
     init {
         require(maxOutboundBodyBytes in 1..wireCodec.maxBodyBytes) {
@@ -27,6 +28,17 @@ internal class ProtocolV1PayloadCodec<TPayload : Any, TMessage : Any>(
     override fun encode(buffer: FriendlyByteBuf, value: TPayload) {
         val initialWriterIndex = buffer.writerIndex()
         try {
+            val encodedBody = preEncodedBody(value)
+            if (encodedBody != null) {
+                if (encodedBody.size > maxOutboundBodyBytes) {
+                    throw WireEncodeException(
+                        WireEncodeViolation.BODY_TOO_LARGE,
+                        "Protocol 1 outbound payload exceeds $maxOutboundBodyBytes bytes",
+                    )
+                }
+                buffer.writeBytes(encodedBody)
+                return
+            }
             val message = unwrap(value)
             val encodedSize = wireCodec.encodedSize(message)
             if (encodedSize > maxOutboundBodyBytes) {
@@ -83,6 +95,21 @@ private class FriendlyByteBufWireReader(
         )
     }
 
+    override fun readBytes(length: Int): ByteArray {
+        if (length < 0) {
+            throw IllegalArgumentException("Wire byte count must not be negative: $length")
+        }
+        return try {
+            ByteArray(length).also(buffer::readBytes)
+        } catch (exception: IndexOutOfBoundsException) {
+            throw WireDecodeException(
+                WireDecodeViolation.TRUNCATED_BODY,
+                "Protocol 1 payload is truncated",
+                exception,
+            )
+        }
+    }
+
     override fun reset(position: Int) {
         buffer.readerIndex(position)
     }
@@ -99,6 +126,10 @@ private class FriendlyByteBufWireWriter(
             throw WireEncodeException(WireEncodeViolation.UNENCODABLE_VALUE, "Wire byte must fit U8: $value")
         }
         buffer.writeByte(value)
+    }
+
+    override fun writeBytes(source: ByteArray) {
+        buffer.writeBytes(source)
     }
 
     override fun reset(position: Int) {

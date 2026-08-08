@@ -68,4 +68,15 @@ class EmotionPickerAvailabilityTest : FunSpec({
         ClientSelectionSendResult.PLAYER_STATE.messageTranslationKey() shouldBe "message.emotify.player_state"
         ClientSelectionSendResult.SENT.messageTranslationKey() shouldBe null
     }
+
+    test("custom selection failures identify protocol support and missing local assets") {
+        ClientSelectionSendResult.CUSTOM_EMOJIS_UNSUPPORTED.messageTranslationKey() shouldBe
+            "message.emotify.custom_emojis_unsupported"
+        ClientSelectionSendResult.CUSTOM_EMOJI_MISSING.messageTranslationKey() shouldBe
+            "message.emotify.custom_emoji_missing"
+        ClientSelectionSendResult.CUSTOM_EMOJIS_DISABLED.messageTranslationKey() shouldBe
+            "message.emotify.custom_emojis_disabled"
+        ClientSelectionSendResult.CUSTOM_EMOJI_TOO_LARGE.messageTranslationKey() shouldBe
+            "message.emotify.custom_emoji_too_large"
+    }
 })

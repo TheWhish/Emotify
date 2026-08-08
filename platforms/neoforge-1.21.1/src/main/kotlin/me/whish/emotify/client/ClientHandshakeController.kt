@@ -4,32 +4,45 @@ import me.whish.emotify.Emotify
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 import me.whish.emotify.client.picker.ClientSelectionEligibility
 import me.whish.emotify.client.picker.EmotionPickerContext
-import me.whish.emotify.client.presentation.EmotionPresentationCatalog
+import me.whish.emotify.client.settings.ClientSettingsSnapshot
+import me.whish.emotify.client.settings.ClientEmotionVisibility
 import me.whish.emotify.client.state.ActiveEmotion
 import me.whish.emotify.client.state.ClientActiveEmotionStore
+import me.whish.emotify.client.state.ClientEmotionPlayCoordinator
+import me.whish.emotify.client.state.ClientEmotionPlayDisposition
 import me.whish.emotify.client.state.ClientHandshakeSession
 import me.whish.emotify.client.state.ClientHandshakeState
 import me.whish.emotify.client.state.ClientHandshakeTransition
 import me.whish.emotify.client.state.ClientHelloResponseGate
-import me.whish.emotify.client.state.ClientPlayGate
 import me.whish.emotify.client.state.ClientPlayIngressGuard
 import me.whish.emotify.client.state.ClientSelectionAttemptGate
 import me.whish.emotify.client.state.ClientSelectionResponseGate
 import me.whish.emotify.client.state.ClientSelectionSendResult
 import me.whish.emotify.client.state.ClientServerHelloIngressGuard
+import me.whish.emotify.client.state.ClientCustomEmojiUploadTracker
+import me.whish.emotify.client.state.ClientCustomEmojiAssetIngressGuard
 import me.whish.emotify.client.state.EmotionActivationResult
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.SelectionRejectionReason
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import me.whish.emotify.domain.TokenBucket
+import me.whish.emotify.domain.EmotifyProtocolFeatures
 import me.whish.emotify.network.payload.ClientHelloPayload
 import me.whish.emotify.network.EmotifyChannels
 import me.whish.emotify.network.payload.EmotionSelectionPayload
+import me.whish.emotify.network.payload.CustomEmotionSelectionPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetChunkPayload
 import me.whish.emotify.runtime.EmotifyProtocol
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.ServerHelloEnvelope
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmotionPlay
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.wire.v1.CustomEmojiAssetAssembler
+import me.whish.emotify.wire.v1.CustomEmojiAssetAssemblyResult
 import net.minecraft.client.Minecraft
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.client.multiplayer.ClientPacketListener
@@ -47,6 +60,7 @@ object ClientHandshakeController {
         EmotifyProtocol.capabilities,
         BuiltInEmotionCatalog.catalog,
         SystemMonotonicTimeSource,
+        EmotifyProtocolFeatures.registry,
     )
 
     private var activeConnection: Connection? = null
@@ -56,9 +70,13 @@ object ClientHandshakeController {
     private val selectionResponseGate = ClientSelectionResponseGate()
     private val selectionAttemptGate = ClientSelectionAttemptGate()
     private val playIngressGuard = ClientPlayIngressGuard(SystemMonotonicTimeSource)
-    private val playGate = ClientPlayGate()
-    private val activeEmotions = ClientActiveEmotionStore(SystemMonotonicTimeSource)
-    private var playDropDiagnostics = newPlayDropDiagnostics()
+    private val playCoordinator = ClientEmotionPlayCoordinator()
+    private val activeEmotions = ClientActiveEmotionStore(SystemMonotonicTimeSource, EmotionPresentationRegistry::contains)
+    private val customUploads = ClientCustomEmojiUploadTracker()
+    private val customAssetIngress = ClientCustomEmojiAssetIngressGuard(SystemMonotonicTimeSource)
+    private val customAssetAssembler = CustomEmojiAssetAssembler()
+    private var playDropDiagnostics = newDropDiagnostics()
+    private var customAssetDropDiagnostics = newDropDiagnostics()
 
     val state: ClientHandshakeState
         get() = session.state
@@ -72,14 +90,15 @@ object ClientHandshakeController {
     }
 
     fun renderableEmotionFor(player: AbstractClientPlayer): ActiveEmotion? {
+        if (activeEmotions.find(player.id, player.uuid) == null) return null
         if (!isEligibleForEmotion(player)) return null
         val active = activeEmotions.visibleFor(player.id, player.uuid) ?: return null
         return knownEmotionOrDiscard(player, active)
     }
 
     fun shouldHideNameTagFor(player: AbstractClientPlayer): Boolean {
-        if (!isEligibleForEmotion(player)) return false
         val active = activeEmotions.find(player.id, player.uuid) ?: return false
+        if (!isEligibleForEmotion(player)) return false
         if (knownEmotionOrDiscard(player, active) == null) return false
         return activeEmotions.shouldHideNameTagFor(player.id, player.uuid)
     }
@@ -106,7 +125,7 @@ object ClientHandshakeController {
     }
 
     private fun knownEmotionOrDiscard(player: AbstractClientPlayer, active: ActiveEmotion): ActiveEmotion? {
-        if (EmotionPresentationCatalog.find(active.emotionId) != null) {
+        if (EmotionPresentationRegistry.find(active.emotionId) != null) {
             return active
         }
         discardEmotionFor(player.id, player.uuid)
@@ -130,6 +149,7 @@ object ClientHandshakeController {
         }
         val transition = when (envelope) {
             is ServerHelloEnvelope.Valid -> {
+                customUploads.clearRejections(activeConnectionId)
                 if (!sendClientHelloResponse(connection)) {
                     return
                 }
@@ -144,8 +164,21 @@ object ClientHandshakeController {
         if (activeConnection !== connection || state !is ClientHandshakeState.Supported) {
             return
         }
-        if (!selectionResponseGate.tryConsumeRejection()) {
+        val rejectedEmotion = selectionResponseGate.consumeRejection() ?: run {
             return
+        }
+        when (rejection.code.knownReason) {
+            SelectionRejectionReason.CUSTOM_ASSET_MISSING ->
+                me.whish.emotify.domain.CustomEmojiId.parse(rejectedEmotion)?.let { id ->
+                    customUploads.forget(activeConnectionId, id)
+                }
+            SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED ->
+                customUploads.rejectAll(activeConnectionId, SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED)
+            SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE ->
+                me.whish.emotify.domain.CustomEmojiId.parse(rejectedEmotion)?.let { id ->
+                    customUploads.reject(activeConnectionId, id, SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE)
+                }
+            else -> Unit
         }
         val reason = rejection.code.knownReason?.name ?: "UNKNOWN"
         Emotify.LOGGER.info(
@@ -180,16 +213,25 @@ object ClientHandshakeController {
         val minecraft = Minecraft.getInstance()
         val localPlayer = minecraft.player ?: return
         val source = minecraft.level?.getEntity(play.entityId.value) as? Player ?: return
-        if (!playGate.admit(
-                activeConnectionId,
-                supported.policy.allowedEmotions,
-                play,
-                source.id,
-                source.uuid,
-                !source.isInvisibleTo(localPlayer),
-            )
-        ) {
-            return
+        val settings = EmotifyClientConfig.settings()
+        val disposition = playCoordinator.evaluate(
+            activeConnectionId,
+            supported.policy.allowedEmotions,
+            play,
+            source.id,
+            source.uuid,
+            !source.isInvisibleTo(localPlayer),
+            source === localPlayer,
+            source.gameProfile.name,
+            settings,
+        )
+        when (disposition) {
+            ClientEmotionPlayDisposition.REJECTED -> return
+            ClientEmotionPlayDisposition.HIDDEN -> {
+                activeEmotions.discard(source.id, source.uuid)
+                return
+            }
+            ClientEmotionPlayDisposition.VISIBLE -> Unit
         }
         if (
             source === localPlayer &&
@@ -198,7 +240,9 @@ object ClientHandshakeController {
             (minecraft.screen as? EmotionPickerScreen)?.selectionAccepted()
         }
         val activation = activeEmotions.activate(activeConnectionId, play)
-        if (activation != EmotionActivationResult.ADDED && activation != EmotionActivationResult.REPLACED) {
+        if (activation == EmotionActivationResult.ADDED || activation == EmotionActivationResult.REPLACED) {
+            EmotionSoundEngine.play(play.emotionId, source, settings.soundVolumePercent)
+        } else {
             if (playDropDiagnostics.tryConsume()) {
                 Emotify.LOGGER.warn(
                     "Emotify play dropped on connection {}: result={}, emotion={}, entityId={}, sequence={}",
@@ -212,6 +256,123 @@ object ClientHandshakeController {
         }
     }
 
+    fun receive(connection: Connection, transfer: CustomEmojiTransfer) {
+        if (activeConnection !== connection || !customAssetIngress.tryAdmit(activeConnectionId)) {
+            return
+        }
+        val supported = state as? ClientHandshakeState.Supported ?: return
+        if (!supported.negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING)) {
+            return
+        }
+        if (transfer.asset.isAnimated && !supported.negotiated.features.contains(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING)) {
+            return
+        }
+        RemoteCustomEmojiRegistry.register(activeConnectionId, transfer.asset)
+    }
+
+    fun receive(connection: Connection, chunk: CustomEmojiAssetChunk) {
+        if (activeConnection !== connection || !customAssetIngress.tryAdmit(activeConnectionId)) {
+            return
+        }
+        val supported = state as? ClientHandshakeState.Supported ?: return
+        if (!supported.negotiated.features.contains(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS)) {
+            return
+        }
+        val asset = when (
+            val result = customAssetAssembler.tryAcceptAssembly(chunk, System.nanoTime() / 1_000_000L)
+        ) {
+            CustomEmojiAssetAssemblyResult.Pending -> return
+            is CustomEmojiAssetAssemblyResult.Completed -> result.assembly.asset
+            is CustomEmojiAssetAssemblyResult.Rejected -> {
+                if (customAssetDropDiagnostics.tryConsume()) {
+                    Emotify.LOGGER.warn(
+                        "Rejected malformed custom emoji transfer on connection {}: {}",
+                        activeConnectionId,
+                        result.violation,
+                    )
+                }
+                return
+            }
+        }
+        RemoteCustomEmojiRegistry.register(activeConnectionId, asset)
+    }
+
+    fun receive(connection: Connection, play: CustomEmotionPlay) {
+        if (activeConnection !== connection || !playIngressGuard.tryAdmit(activeConnectionId)) {
+            return
+        }
+        val supported = state as? ClientHandshakeState.Supported ?: return
+        if (!supported.negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING)) {
+            return
+        }
+        val minecraft = Minecraft.getInstance()
+        val localPlayer = minecraft.player ?: return
+        val source = minecraft.level?.getEntity(play.entityId.value) as? Player ?: return
+        val remotePresentation = RemoteCustomEmojiRegistry.find(play.customEmojiId.emotionId)
+        if (CustomEmojiRegistry.find(play.customEmojiId.emotionId) == null && remotePresentation == null) {
+            return
+        }
+        val settings = EmotifyClientConfig.settings()
+        val disposition = playCoordinator.evaluateCustom(
+            activeConnectionId,
+            play,
+            source.id,
+            source.uuid,
+            !source.isInvisibleTo(localPlayer),
+            source === localPlayer,
+            source.gameProfile.name,
+            settings,
+        )
+        when (disposition) {
+            ClientEmotionPlayDisposition.REJECTED -> return
+            ClientEmotionPlayDisposition.HIDDEN -> {
+                activeEmotions.discard(source.id, source.uuid)
+                return
+            }
+            ClientEmotionPlayDisposition.VISIBLE -> Unit
+        }
+        if (source === localPlayer) {
+            customUploads.markUploaded(activeConnectionId, play.customEmojiId)
+            if (selectionResponseGate.tryConsumeSuccess(play.customEmojiId.emotionId)) {
+                (minecraft.screen as? EmotionPickerScreen)?.selectionAccepted()
+            }
+        }
+        val basePlay = play.asEmotionPlay()
+        val activation = activeEmotions.activate(activeConnectionId, basePlay)
+        if (activation == EmotionActivationResult.ADDED || activation == EmotionActivationResult.REPLACED) {
+            EmotionSoundEngine.play(basePlay.emotionId, source, settings.soundVolumePercent)
+        }
+    }
+
+    @Suppress("unused")
+    fun applySettings(settings: ClientSettingsSnapshot) {
+        EmotifyClientConfig.saveSettings(settings)
+        discardFilteredEmotions(settings)
+    }
+
+    private fun discardFilteredEmotions(settings: ClientSettingsSnapshot) {
+        val minecraft = Minecraft.getInstance()
+        val localPlayer = minecraft.player
+        val level = minecraft.level
+        activeEmotions.discardIf { active ->
+            val localSource = active.sourceUuid == localPlayer?.uuid
+            val source = level?.getEntity(active.entityId.value) as? Player
+            val sourceName = source
+                ?.takeIf { candidate -> candidate.uuid == active.sourceUuid }
+                ?.gameProfile
+                ?.name
+                .orEmpty()
+            !ClientEmotionVisibility.allowsActive(
+                localSource,
+                active.sourceUuid,
+                sourceName,
+                active.emotionId,
+                settings,
+            )
+        }
+    }
+
+    @Suppress("unused")
     fun sendSelection(listener: ClientPacketListener, emotionId: EmotionId): ClientSelectionSendResult {
         if (activeConnection !== listener.connection) {
             return ClientSelectionSendResult.NOT_CONNECTED
@@ -233,7 +394,9 @@ object ClientHandshakeController {
         ) {
             return ClientSelectionSendResult.PLAYER_STATE
         }
-        if (activeEmotions.visibleFor(localPlayer.id, localPlayer.uuid) != null) {
+        if (
+            activeEmotions.visibleFor(localPlayer.id, localPlayer.uuid) != null
+        ) {
             return ClientSelectionSendResult.EMOTION_ACTIVE
         }
         if (!listener.hasChannel(EmotionSelectionPayload.TYPE)) {
@@ -263,6 +426,96 @@ object ClientHandshakeController {
         return ClientSelectionSendResult.SENT
     }
 
+    @Suppress("unused")
+    fun sendCustomSelection(emotionId: EmotionId): ClientSelectionSendResult {
+        val supported = state as? ClientHandshakeState.Supported
+            ?: return ClientSelectionSendResult.HANDSHAKE_UNAVAILABLE
+        if (activeConnection == null || supported.connectionId != activeConnectionId) {
+            return ClientSelectionSendResult.NOT_CONNECTED
+        }
+        val localPlayer = Minecraft.getInstance().player ?: return ClientSelectionSendResult.NOT_CONNECTED
+        if (!supported.negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING)) {
+            return ClientSelectionSendResult.CUSTOM_EMOJIS_UNSUPPORTED
+        }
+        if (!ClientSelectionEligibility.canPublish(localPlayer.isAlive, localPlayer.isSpectator, localPlayer.isInvisible)) {
+            return ClientSelectionSendResult.PLAYER_STATE
+        }
+        if (activeEmotions.visibleFor(localPlayer.id, localPlayer.uuid) != null) {
+            return ClientSelectionSendResult.EMOTION_ACTIVE
+        }
+        val listener = Minecraft.getInstance().connection ?: return ClientSelectionSendResult.NOT_CONNECTED
+        if (!listener.hasChannel(CustomEmotionSelectionPayload.TYPE)) {
+            return ClientSelectionSendResult.CHANNEL_UNAVAILABLE
+        }
+        val asset = CustomEmojiRegistry.asset(emotionId) ?: return ClientSelectionSendResult.CUSTOM_EMOJI_MISSING
+        when (customUploads.rejection(activeConnectionId, asset.id)) {
+            SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED -> return ClientSelectionSendResult.CUSTOM_EMOJIS_DISABLED
+            SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE -> return ClientSelectionSendResult.CUSTOM_EMOJI_TOO_LARGE
+            else -> Unit
+        }
+        if (asset.isAnimated && !supported.negotiated.features.contains(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING)) {
+            return ClientSelectionSendResult.CUSTOM_EMOJIS_UNSUPPORTED
+        }
+        val lossless = asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE
+        val transferChunks = if (lossless) {
+            CustomEmojiRegistry.transferChunks(emotionId)
+                ?: return ClientSelectionSendResult.CUSTOM_EMOJI_MISSING
+        } else {
+            emptyList()
+        }
+        if (
+            lossless && (
+                !supported.negotiated.features.contains(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS) ||
+                    !listener.hasChannel(CustomEmojiAssetChunkPayload.TYPE)
+                )
+        ) {
+            return ClientSelectionSendResult.CUSTOM_EMOJIS_UNSUPPORTED
+        }
+        if (!selectionResponseGate.tryReserve(emotionId)) {
+            return ClientSelectionSendResult.REQUEST_PENDING
+        }
+        val admitted = try {
+            selectionAttemptGate.tryAdmit()
+        } catch (error: RuntimeException) {
+            selectionResponseGate.cancelReservation()
+            throw error
+        }
+        if (!admitted) {
+            selectionResponseGate.cancelReservation()
+            return ClientSelectionSendResult.REQUEST_THROTTLED
+        }
+        val requiresUpload = customUploads.requiresUpload(activeConnectionId, asset.id)
+        if (requiresUpload == null) {
+            selectionResponseGate.cancelReservation()
+            selectionAttemptGate.refund()
+            return ClientSelectionSendResult.NOT_CONNECTED
+        }
+        val selection = if (lossless) {
+            CustomEmotionSelection(asset.id, null)
+        } else {
+            customUploads.prepare(activeConnectionId, asset)
+                ?: run {
+                    selectionResponseGate.cancelReservation()
+                    selectionAttemptGate.refund()
+                    return ClientSelectionSendResult.NOT_CONNECTED
+                }
+        }
+        try {
+            if (lossless && requiresUpload) {
+                transferChunks.forEach { chunk ->
+                    listener.send(CustomEmojiAssetChunkPayload(chunk))
+                }
+                customUploads.markUploaded(activeConnectionId, asset.id)
+            }
+            listener.send(CustomEmotionSelectionPayload(selection))
+        } catch (error: RuntimeException) {
+            selectionResponseGate.cancelReservation()
+            selectionAttemptGate.refund()
+            throw error
+        }
+        return ClientSelectionSendResult.SENT
+    }
+
     private fun onLoggingIn(event: ClientPlayerNetworkEvent.LoggingIn) {
         activeConnectionId = Math.incrementExact(activeConnectionId)
         activeConnection = event.connection
@@ -271,9 +524,14 @@ object ClientHandshakeController {
         selectionResponseGate.reset()
         selectionAttemptGate.reset()
         playIngressGuard.begin(activeConnectionId)
-        playGate.begin(activeConnectionId)
+        playCoordinator.begin(activeConnectionId)
         activeEmotions.begin(activeConnectionId)
-        playDropDiagnostics = newPlayDropDiagnostics()
+        customUploads.begin(activeConnectionId)
+        customAssetIngress.begin(activeConnectionId)
+        customAssetAssembler.reset()
+        RemoteCustomEmojiRegistry.begin(activeConnectionId)
+        playDropDiagnostics = newDropDiagnostics()
+        customAssetDropDiagnostics = newDropDiagnostics()
         session.begin(activeConnectionId)
 
         val listener = event.player.connection
@@ -297,8 +555,12 @@ object ClientHandshakeController {
         selectionResponseGate.reset()
         selectionAttemptGate.reset()
         playIngressGuard.disconnect(activeConnectionId)
-        playGate.disconnect(activeConnectionId)
+        playCoordinator.disconnect(activeConnectionId)
         activeEmotions.disconnect(activeConnectionId)
+        customUploads.disconnect(activeConnectionId)
+        customAssetIngress.disconnect(activeConnectionId)
+        customAssetAssembler.reset()
+        RemoteCustomEmojiRegistry.disconnect(activeConnectionId)
     }
 
     private fun onPlayerClone(event: ClientPlayerNetworkEvent.Clone) {
@@ -338,9 +600,8 @@ object ClientHandshakeController {
             return
         }
         activeEmotions.discardIf { active ->
-            val source = level.getEntity(active.entityId.value) as? Player
-            source == null ||
-                source.uuid != active.sourceUuid ||
+            val source = level.getEntity(active.entityId.value) as? Player ?: return@discardIf true
+            source.uuid != active.sourceUuid ||
                 !source.isAlive ||
                 source.isRemoved ||
                 source.isSpectator ||
@@ -351,10 +612,7 @@ object ClientHandshakeController {
 
     private fun logTransition(transition: ClientHandshakeTransition) {
         when (transition) {
-            ClientHandshakeTransition.SUPPORTED -> Emotify.LOGGER.info(
-                "Emotify client handshake supported on connection {}",
-                activeConnectionId,
-            )
+            ClientHandshakeTransition.SUPPORTED -> logSupportedHandshake()
             ClientHandshakeTransition.POLICY_UPDATED -> Emotify.LOGGER.info(
                 "Emotify client policy updated on connection {}",
                 activeConnectionId,
@@ -371,6 +629,19 @@ object ClientHandshakeController {
             ClientHandshakeTransition.IGNORED,
             -> Unit
         }
+    }
+
+    private fun logSupportedHandshake() {
+        val supported = checkNotNull(state as? ClientHandshakeState.Supported) {
+            "Supported handshake transition without supported state"
+        }
+        Emotify.LOGGER.info(
+            "Emotify client handshake supported on connection {}: protocol={}.{}, features=0x{}",
+            activeConnectionId,
+            supported.negotiated.version.major,
+            supported.negotiated.version.minor,
+            java.lang.Long.toUnsignedString(supported.negotiated.features.bits, 16),
+        )
     }
 
     private fun sendClientHelloResponse(connection: Connection): Boolean {
@@ -398,7 +669,7 @@ object ClientHandshakeController {
         return true
     }
 
-    private fun newPlayDropDiagnostics(): TokenBucket = TokenBucket(
+    private fun newDropDiagnostics(): TokenBucket = TokenBucket(
         capacity = PLAY_DROP_DIAGNOSTIC_BURST_CAPACITY,
         refillTokensPerSecond = PLAY_DROP_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
         timeSource = SystemMonotonicTimeSource,
@@ -406,6 +677,7 @@ object ClientHandshakeController {
 
     private const val PLAY_DROP_DIAGNOSTIC_BURST_CAPACITY = 4
     private const val PLAY_DROP_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND = 2
+    private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
 
     private fun SelectionRejected.userMessage(): Component = when (code.knownReason) {
         SelectionRejectionReason.COOLDOWN -> Component.translatable("message.emotify.selection_cooldown")
@@ -414,6 +686,13 @@ object ClientHandshakeController {
         -> Component.translatable("message.emotify.selection_unavailable")
         SelectionRejectionReason.PLAYER_STATE -> Component.translatable("message.emotify.player_state")
         SelectionRejectionReason.SERVER_BUSY -> Component.translatable("message.emotify.server_busy")
+        SelectionRejectionReason.CUSTOM_ASSET_MISSING -> Component.translatable("message.emotify.custom_asset_missing")
+        SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED -> Component.translatable(
+            "message.emotify.custom_emojis_disabled",
+        )
+        SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE -> Component.translatable(
+            "message.emotify.custom_emoji_too_large",
+        )
         null -> Component.translatable("message.emotify.selection_failed")
     }
 }

@@ -6,6 +6,10 @@ import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.protocol.ServerHelloEnvelope
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.wire.v1.ProtocolV1Channels
 import me.whish.emotify.wire.v1.ProtocolV1Codecs
 import me.whish.emotify.wire.v1.ProtocolV1Limits
@@ -48,7 +52,6 @@ data class FabricServerHelloPayload(
             ::FabricServerHelloPayload,
             ProtocolV1Limits.PORTABLE_SERVER_HELLO_BODY_BYTES,
         )
-        internal const val MAX_BODY_BYTES = ProtocolV1Limits.SERVER_HELLO_BODY_BYTES
     }
 }
 
@@ -99,6 +102,95 @@ data class FabricSelectionRejectedPayload(
             ProtocolV1Codecs.selectionRejected,
             FabricSelectionRejectedPayload::rejection,
             ::FabricSelectionRejectedPayload,
+        )
+    }
+}
+
+data class FabricCustomEmotionSelectionPayload(
+    val selection: CustomEmotionSelection,
+) : CustomPacketPayload {
+    override fun type(): CustomPacketPayload.Type<FabricCustomEmotionSelectionPayload> = TYPE
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<FabricCustomEmotionSelectionPayload>(
+            ResourceLocation.parse(ProtocolV1Channels.CUSTOM_SELECT),
+        )
+        val STREAM_CODEC: StreamCodec<FriendlyByteBuf, FabricCustomEmotionSelectionPayload> = ProtocolV1PayloadCodec(
+            ProtocolV1Codecs.customSelection,
+            FabricCustomEmotionSelectionPayload::selection,
+            ::FabricCustomEmotionSelectionPayload,
+        )
+    }
+}
+
+class FabricCustomEmojiAssetPayload private constructor(
+    val transfer: CustomEmojiTransfer,
+    private val encodedBody: Lazy<ByteArray>?,
+) : CustomPacketPayload {
+    constructor(transfer: CustomEmojiTransfer) : this(transfer, null)
+
+    override fun type(): CustomPacketPayload.Type<FabricCustomEmojiAssetPayload> = TYPE
+
+    internal fun preEncodedBody(): ByteArray? = encodedBody?.value
+
+    override fun equals(other: Any?): Boolean =
+        this === other || other is FabricCustomEmojiAssetPayload && transfer == other.transfer
+
+    override fun hashCode(): Int = transfer.hashCode()
+
+    override fun toString(): String = "FabricCustomEmojiAssetPayload(transfer=$transfer)"
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<FabricCustomEmojiAssetPayload>(
+            ResourceLocation.parse(ProtocolV1Channels.CUSTOM_ASSET),
+        )
+        val STREAM_CODEC: StreamCodec<FriendlyByteBuf, FabricCustomEmojiAssetPayload> = ProtocolV1PayloadCodec(
+            ProtocolV1Codecs.customAsset,
+            FabricCustomEmojiAssetPayload::transfer,
+            ::FabricCustomEmojiAssetPayload,
+            preEncodedBody = FabricCustomEmojiAssetPayload::preEncodedBody,
+        )
+
+        internal fun prepared(transfer: CustomEmojiTransfer): FabricCustomEmojiAssetPayload =
+            FabricCustomEmojiAssetPayload(
+                transfer,
+                lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+                    ProtocolV1Codecs.customAsset.encodeToByteArray(transfer)
+                },
+            )
+    }
+}
+
+data class FabricCustomEmojiAssetChunkPayload(
+    val chunk: CustomEmojiAssetChunk,
+) : CustomPacketPayload {
+    override fun type(): CustomPacketPayload.Type<FabricCustomEmojiAssetChunkPayload> = TYPE
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<FabricCustomEmojiAssetChunkPayload>(
+            ResourceLocation.parse(ProtocolV1Channels.CUSTOM_ASSET_CHUNK),
+        )
+        val STREAM_CODEC: StreamCodec<FriendlyByteBuf, FabricCustomEmojiAssetChunkPayload> = ProtocolV1PayloadCodec(
+            ProtocolV1Codecs.customAssetChunk,
+            FabricCustomEmojiAssetChunkPayload::chunk,
+            ::FabricCustomEmojiAssetChunkPayload,
+        )
+    }
+}
+
+data class FabricCustomEmotionPlayPayload(
+    val play: CustomEmotionPlay,
+) : CustomPacketPayload {
+    override fun type(): CustomPacketPayload.Type<FabricCustomEmotionPlayPayload> = TYPE
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<FabricCustomEmotionPlayPayload>(
+            ResourceLocation.parse(ProtocolV1Channels.CUSTOM_PLAY),
+        )
+        val STREAM_CODEC: StreamCodec<FriendlyByteBuf, FabricCustomEmotionPlayPayload> = ProtocolV1PayloadCodec(
+            ProtocolV1Codecs.customPlay,
+            FabricCustomEmotionPlayPayload::play,
+            ::FabricCustomEmotionPlayPayload,
         )
     }
 }

@@ -8,6 +8,7 @@
     "${modAuthors}"
   ],
   "license": "${modLicense}",
+  "icon": "assets/emotify/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
@@ -15,6 +16,9 @@
     ],
     "client": [
       "me.whish.emotify.fabric.client.EmotifyFabricClient"
+    ],
+    "modmenu": [
+      "me.whish.emotify.fabric.client.EmotifyModMenu"
     ]
   },
   "mixins": [

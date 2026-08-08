@@ -5,9 +5,15 @@ import me.whish.emotify.network.ConnectionAttributes
 import me.whish.emotify.network.payload.EmotionPlayPayload
 import me.whish.emotify.network.payload.SelectionRejectedPayload
 import me.whish.emotify.network.payload.ServerHelloPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetChunkPayload
+import me.whish.emotify.network.payload.CustomEmotionPlayPayload
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.ServerHello
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.server.core.AudiencePort
 import me.whish.emotify.server.core.AudienceVisitCompletion
 import me.whish.emotify.server.core.AudienceVisitor
@@ -18,6 +24,9 @@ import me.whish.emotify.server.core.OutboundTransport
 import me.whish.emotify.server.core.PlayerSnapshot
 import me.whish.emotify.server.core.PreparedEmotionDelivery
 import me.whish.emotify.server.core.PreparedServerHelloDelivery
+import me.whish.emotify.server.core.PreparedCustomEmojiAssetDelivery
+import me.whish.emotify.server.core.PreparedCustomEmotionDelivery
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunkCache
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 
@@ -71,6 +80,8 @@ internal class NeoForgeAudiencePort(
 internal class NeoForgeOutboundTransport(
     private val server: MinecraftServer,
 ) : OutboundTransport {
+    private val customEmojiAssets = CustomEmojiAssetChunkCache()
+
     override fun prepareServerHello(hello: ServerHello): PreparedServerHelloDelivery {
         val payload = ServerHelloPayload(hello)
         return PreparedServerHelloDelivery { connection ->
@@ -100,6 +111,46 @@ internal class NeoForgeOutboundTransport(
         }
     }
 
+    override fun prepareCustomEmojiAsset(transfer: CustomEmojiTransfer): PreparedCustomEmojiAssetDelivery {
+        return prepareCustomEmojiAsset(transfer, null)
+    }
+
+    override fun prepareCustomEmojiAsset(
+        transfer: CustomEmojiTransfer,
+        losslessChunks: List<CustomEmojiAssetChunk>?,
+    ): PreparedCustomEmojiAssetDelivery {
+        if (transfer.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+            val payloads = (losslessChunks ?: customEmojiAssets.chunks(transfer.asset))
+                .map(::CustomEmojiAssetChunkPayload)
+            return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
+                payloads.fold(OutboundDeliveryStatus.SENT) { status, payload ->
+                    if (status != OutboundDeliveryStatus.SENT) {
+                        status
+                    } else {
+                        send(playerId, connectionId, CustomEmojiAssetChunkPayload.TYPE) { player ->
+                            player.connection.send(payload)
+                        }
+                    }
+                }
+            }
+        }
+        val payload = CustomEmojiAssetPayload.prepared(transfer)
+        return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
+            send(playerId, connectionId, CustomEmojiAssetPayload.TYPE) { player ->
+                player.connection.send(payload)
+            }
+        }
+    }
+
+    override fun prepareCustomEmotionPlay(play: CustomEmotionPlay): PreparedCustomEmotionDelivery {
+        val payload = CustomEmotionPlayPayload(play)
+        return PreparedCustomEmotionDelivery { playerId, connectionId ->
+            send(playerId, connectionId, CustomEmotionPlayPayload.TYPE) { player ->
+                player.connection.send(payload)
+            }
+        }
+    }
+
     private fun <TPayload : net.minecraft.network.protocol.common.custom.CustomPacketPayload> send(
         playerId: UUID,
         connectionId: ConnectionId,
@@ -120,5 +171,9 @@ internal class NeoForgeOutboundTransport(
         }
         delivery(player)
         return OutboundDeliveryStatus.SENT
+    }
+
+    companion object {
+        private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
     }
 }

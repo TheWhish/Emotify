@@ -52,6 +52,10 @@ fun ClientSelectionSendResult.messageTranslationKey(): String? = when (this) {
     ClientSelectionSendResult.CHANNEL_UNAVAILABLE,
     -> "message.emotify.unavailable"
     ClientSelectionSendResult.EMOTION_UNAVAILABLE -> "message.emotify.selection_unavailable"
+    ClientSelectionSendResult.CUSTOM_EMOJIS_UNSUPPORTED -> "message.emotify.custom_emojis_unsupported"
+    ClientSelectionSendResult.CUSTOM_EMOJIS_DISABLED -> "message.emotify.custom_emojis_disabled"
+    ClientSelectionSendResult.CUSTOM_EMOJI_TOO_LARGE -> "message.emotify.custom_emoji_too_large"
+    ClientSelectionSendResult.CUSTOM_EMOJI_MISSING -> "message.emotify.custom_emoji_missing"
     ClientSelectionSendResult.PLAYER_STATE -> "message.emotify.player_state"
     ClientSelectionSendResult.REQUEST_PENDING -> "message.emotify.request_pending"
     ClientSelectionSendResult.REQUEST_THROTTLED -> "message.emotify.request_throttled"

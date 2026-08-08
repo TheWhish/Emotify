@@ -7,6 +7,10 @@ import me.whish.emotify.network.payload.EmotionSelectionPayload
 import me.whish.emotify.network.payload.EmotionPlayPayload
 import me.whish.emotify.network.payload.SelectionRejectedPayload
 import me.whish.emotify.network.payload.ServerHelloPayload
+import me.whish.emotify.network.payload.CustomEmotionSelectionPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetChunkPayload
+import me.whish.emotify.network.payload.CustomEmotionPlayPayload
 import me.whish.emotify.runtime.EmotifyProtocol
 import me.whish.emotify.server.ServerHandshakeService
 import me.whish.emotify.server.core.ClientHelloIngressGuard
@@ -15,6 +19,7 @@ import net.minecraft.server.level.ServerPlayer
 import net.neoforged.bus.api.IEventBus
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent
 import net.neoforged.neoforge.network.handling.IPayloadContext
+import net.neoforged.neoforge.network.handling.DirectionalPayloadHandler
 import net.neoforged.neoforge.network.registration.HandlerThread
 
 object EmotifyNetwork {
@@ -42,6 +47,13 @@ object EmotifyNetwork {
             EmotionPlayPayload.STREAM_CODEC,
             ::receiveEmotionPlay,
         )
+        mainRegistrar.playToClient(CustomEmojiAssetPayload.TYPE, CustomEmojiAssetPayload.STREAM_CODEC, ::receiveCustomAsset)
+        mainRegistrar.playBidirectional(
+            CustomEmojiAssetChunkPayload.TYPE,
+            CustomEmojiAssetChunkPayload.STREAM_CODEC,
+            DirectionalPayloadHandler(::receiveCustomAssetChunkClient, ::receiveCustomAssetChunkServer),
+        )
+        mainRegistrar.playToClient(CustomEmotionPlayPayload.TYPE, CustomEmotionPlayPayload.STREAM_CODEC, ::receiveCustomPlay)
 
         val networkRegistrar = mainRegistrar.executesOn(HandlerThread.NETWORK)
         networkRegistrar.playToServer(
@@ -54,6 +66,11 @@ object EmotifyNetwork {
             EmotionSelectionPayload.STREAM_CODEC,
             ::receiveEmotionSelection,
         )
+        networkRegistrar.playToServer(
+            CustomEmotionSelectionPayload.TYPE,
+            CustomEmotionSelectionPayload.STREAM_CODEC,
+            ::receiveCustomEmotionSelection,
+        )
     }
 
     private fun receiveServerHello(payload: ServerHelloPayload, context: IPayloadContext) {
@@ -65,6 +82,24 @@ object EmotifyNetwork {
     }
 
     private fun receiveEmotionPlay(payload: EmotionPlayPayload, context: IPayloadContext) {
+        ClientPayloadReceiver.receive(context.connection(), payload.play)
+    }
+
+    private fun receiveCustomAsset(payload: CustomEmojiAssetPayload, context: IPayloadContext) {
+        ClientPayloadReceiver.receive(context.connection(), payload.transfer)
+    }
+
+    private fun receiveCustomAssetChunkClient(payload: CustomEmojiAssetChunkPayload, context: IPayloadContext) {
+        ClientPayloadReceiver.receive(context.connection(), payload.chunk)
+    }
+
+    private fun receiveCustomAssetChunkServer(payload: CustomEmojiAssetChunkPayload, context: IPayloadContext) {
+        val player = context.player() as? ServerPlayer ?: return
+        val connectionId = context.connection().channel().attr(ConnectionAttributes.serverConnectionId).get() ?: return
+        ServerHandshakeService.receiveCustomAssetChunk(player.server, player.uuid, connectionId, payload.chunk)
+    }
+
+    private fun receiveCustomPlay(payload: CustomEmotionPlayPayload, context: IPayloadContext) {
         ClientPayloadReceiver.receive(context.connection(), payload.play)
     }
 
@@ -157,6 +192,67 @@ object EmotifyNetwork {
                     Emotify.LOGGER.error(
                         "Failed to enqueue Emotify selection {} for player {} on connection {}",
                         emotionId,
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
+            },
+            onCompletion = {
+                try {
+                    guard.releaseMainThreadTask()
+                } finally {
+                    globalLease.release()
+                }
+            },
+        )
+    }
+
+    private fun receiveCustomEmotionSelection(payload: CustomEmotionSelectionPayload, context: IPayloadContext) {
+        val player = context.player() as? ServerPlayer ?: return
+        val connection = context.connection()
+        val connectionId = connection.channel().attr(ConnectionAttributes.serverConnectionId).get() ?: return
+        val worldEpoch = connection.channel().attr(ConnectionAttributes.serverWorldEpoch).get()?.current() ?: return
+        val guardAttribute = connection.channel().attr(ConnectionAttributes.selectionIngressGuard)
+        val existingGuard = guardAttribute.get()
+        val guard = existingGuard ?: SelectionIngressGuard(SystemMonotonicTimeSource).let { created ->
+            guardAttribute.setIfAbsent(created) ?: created
+        }
+        if (!guard.tryReserveMainThreadTask()) {
+            return
+        }
+        val globalLease = ServerHandshakeService.tryAcquireSelectionIngress()
+        if (globalLease == null) {
+            guard.releaseMainThreadTask()
+            return
+        }
+        val playerId = player.uuid
+        val server = player.server
+        NetworkMainThreadDispatcher.submit(
+            enqueue = context::enqueueWork,
+            task = {
+                ServerHandshakeService.selectCustom(
+                    server,
+                    playerId,
+                    connectionId,
+                    worldEpoch,
+                    payload.selection,
+                )
+            },
+            onTaskFailure = { exception ->
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to process Emotify custom selection for player {} on connection {}",
+                        playerId,
+                        connectionId,
+                        exception,
+                    )
+                }
+            },
+            onEnqueueFailure = { exception ->
+                if (diagnostics.tryAdmit()) {
+                    Emotify.LOGGER.error(
+                        "Failed to enqueue Emotify custom selection for player {} on connection {}",
                         playerId,
                         connectionId,
                         exception,

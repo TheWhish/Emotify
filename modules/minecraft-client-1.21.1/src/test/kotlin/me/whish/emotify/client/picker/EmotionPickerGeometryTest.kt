@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import kotlin.math.abs
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 
 @Suppress("unused")
@@ -14,8 +15,8 @@ class EmotionPickerGeometryTest : FunSpec({
         val geometry = EmotionPickerGeometry.calculate(300, 300, sections)
 
         geometry.panelWidth shouldBe 246
-        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 91, 91, 20)
-        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(33, 57, 152, 247)
+        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 60, 59, 59, 20)
+        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(33, 57, 121, 184, 247)
         geometry.tabBounds.last().x + geometry.tabBounds.last().width shouldBe
             geometry.contentX + geometry.listWidth
         geometry.listX - geometry.panelX shouldBe EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
@@ -73,17 +74,38 @@ class EmotionPickerGeometryTest : FunSpec({
             geometry.listWidth,
             scrollbarVisible = false,
         ) shouldContainExactly listOf(72, 71, 71)
+        geometry.panelX shouldBe 27
+        geometry.panelX + geometry.panelWidth / 2 shouldBe 150
+        geometry.sideActionX shouldBe 277
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 297
+        geometry.sideActionY(0) shouldBe geometry.tabY
+        geometry.sideActionY(1) shouldBe geometry.tabY + EmotionPickerSideActionLayout.STRIDE
+        geometry.panelX shouldBe (300 - geometry.panelWidth) / 2
     }
 
     test("minimum panel preserves usable group widths and reserves search input space") {
         val geometry = EmotionPickerGeometry.calculate(200, 180, sections)
 
-        geometry.panelWidth shouldBe 180
-        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 58, 58, 20)
+        geometry.panelWidth shouldBe 148
+        geometry.panelX shouldBe 26
+        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 27, 27, 26, 20)
+        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(32, 56, 87, 118, 148)
         geometry.searchListY - geometry.normalListY shouldBe 22
         geometry.normalListHeight - geometry.searchListHeight shouldBe 22
-        geometry.rowWidth shouldBe 156
-        geometry.cellWidths shouldContainExactly listOf(46, 46, 45)
+        geometry.rowWidth shouldBe 124
+        geometry.cellWidths shouldContainExactly listOf(35, 35, 35)
+        geometry.sideActionX shouldBe 178
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 198
+        geometry.panelX shouldBe (200 - geometry.panelWidth) / 2
+    }
+
+    test("centered picker keeps its side action inside a narrow viewport") {
+        val geometry = EmotionPickerGeometry.calculate(180, 180, sections)
+
+        geometry.panelWidth shouldBe 128
+        geometry.panelX shouldBe 26
+        geometry.sideActionX shouldBe 158
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 178
     }
 
     test("edge fade softly blends the complete list viewport") {
@@ -124,12 +146,41 @@ class EmotionPickerGeometryTest : FunSpec({
         EmotionPickerScrollMath.draggedAmount(0.0, 20.0, 0.0, 100) shouldBe 0.0
     }
 
-    test("smooth wheel scrolling reaches both boundaries without an asymptotic tail") {
-        val firstFrame = EmotionPickerScrollMath.animatedAmount(0.0, 32.0, 1.0 / 60.0)
+    test("critical scroll motion starts gently remains monotonic and settles exactly") {
+        val motion = EmotionPickerScrollMath.Motion()
+        val positions = ArrayList<Double>()
+        repeat(120) {
+            EmotionPickerScrollMath.advance(motion.position, 32.0, motion.velocity, 1.0 / 60.0, motion)
+            positions += motion.position
+        }
 
-        (firstFrame in 0.0..<32.0) shouldBe true
-        EmotionPickerScrollMath.animatedAmount(198.0, 200.0, 1.0 / 60.0) shouldBe 200.0
-        EmotionPickerScrollMath.animatedAmount(2.0, 0.0, 1.0 / 60.0) shouldBe 0.0
-        EmotionPickerScrollMath.animatedAmount(40.0, 40.0, 1.0 / 60.0) shouldBe 40.0
+        (positions.first() in 0.0..2.0) shouldBe true
+        positions.zipWithNext().all { (current, next) -> next >= current && next <= 32.0 } shouldBe true
+        motion.position shouldBe 32.0
+        motion.velocity shouldBe 0.0
+    }
+
+    test("critical scroll motion is frame-rate independent and reverses without a wrong-way jerk") {
+        fun simulate(frames: Int, elapsedSeconds: Double): EmotionPickerScrollMath.Motion {
+            val motion = EmotionPickerScrollMath.Motion()
+            repeat(frames) {
+                EmotionPickerScrollMath.advance(motion.position, 96.0, motion.velocity, elapsedSeconds, motion)
+            }
+            return motion
+        }
+
+        val sixtyFps = simulate(30, 1.0 / 60.0)
+        val thirtyFps = simulate(15, 1.0 / 30.0)
+        (abs(sixtyFps.position - thirtyFps.position) < 0.01) shouldBe true
+
+        val reversed = EmotionPickerScrollMath.Motion()
+        EmotionPickerScrollMath.advance(40.0, 0.0, 300.0, 1.0 / 60.0, reversed)
+        (reversed.position in 38.0..<40.0) shouldBe true
+        (reversed.velocity < 0.0) shouldBe true
+
+        val extremeReversal = EmotionPickerScrollMath.Motion()
+        EmotionPickerScrollMath.advance(1.0, 0.0, 720.0, 1.0 / 60.0, extremeReversal)
+        extremeReversal.position shouldBe 1.0
+        extremeReversal.velocity shouldBe 0.0
     }
 })

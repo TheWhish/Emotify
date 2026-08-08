@@ -2,10 +2,14 @@ package me.whish.emotify.fabric.server
 
 import java.util.UUID
 import me.whish.emotify.fabric.EmotifyFabric
+import me.whish.emotify.fabric.config.FabricServerConfig
 import me.whish.emotify.fabric.network.FabricChannelSupport
 import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
 import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
 import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetChunkPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import me.whish.emotify.server.core.OutboundDeliveryStatus
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
@@ -22,9 +26,16 @@ object FabricServerLifecycle {
         FabricServerHelloPayload.TYPE.id(),
         FabricEmotionPlayPayload.TYPE.id(),
         FabricSelectionRejectedPayload.TYPE.id(),
+        FabricCustomEmojiAssetPayload.TYPE.id(),
+        FabricCustomEmojiAssetChunkPayload.TYPE.id(),
+        FabricCustomEmotionPlayPayload.TYPE.id(),
     )
 
     fun register() {
+        ServerLifecycleEvents.SERVER_STARTING.register { server ->
+            FabricServerConfig.initialize()
+            FabricServerRuntime.initialize(server)
+        }
         S2CConfigurationChannelEvents.REGISTER.register { handler, _, server, channels ->
             if (FabricChannelSupport.registerConfigurationChannels(handler, channels)) {
                 reconcileConfigurationSupport(server, handler)

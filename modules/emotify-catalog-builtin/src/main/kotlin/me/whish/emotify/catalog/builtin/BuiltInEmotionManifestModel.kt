@@ -1,6 +1,7 @@
 package me.whish.emotify.catalog.builtin
 
 import java.net.URI
+import java.net.URISyntaxException
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
 
@@ -44,7 +45,11 @@ data class BuiltInEmotionSource(
         require(name.isSafeMetadataValue()) { "Invalid built-in emotion source name" }
         require(author.isSafeMetadataValue()) { "Invalid built-in emotion source author" }
         require(LICENSE_PATTERN.matches(license)) { "Invalid built-in emotion source license: '$license'" }
-        val sourceUri = runCatching { URI(url) }.getOrNull()
+        val sourceUri = try {
+            URI(url)
+        } catch (_: URISyntaxException) {
+            null
+        }
         require(sourceUri?.scheme == "https" && sourceUri.host != null && sourceUri.userInfo == null) {
             "Invalid built-in emotion source URL: '$url'"
         }

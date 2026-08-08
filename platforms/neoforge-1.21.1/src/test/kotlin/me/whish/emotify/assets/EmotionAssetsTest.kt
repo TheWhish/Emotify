@@ -188,25 +188,59 @@ class EmotionAssetsTest : FunSpec({
 
     test("english and russian translations cover every emotion and category") {
         val interfaceKeys = listOf(
+            "screen.emotify.settings",
+            "screen.emotify.settings.show_others",
+            "screen.emotify.settings.show_others.description",
+            "screen.emotify.settings.show_custom",
+            "screen.emotify.settings.show_custom.description",
+            "screen.emotify.settings.ignored_players",
+            "screen.emotify.settings.ignored_players.description",
+            "screen.emotify.settings.manage_ignored",
+            "screen.emotify.settings.reduced_motion",
+            "screen.emotify.settings.reduced_motion.description",
+            "screen.emotify.settings.sound_volume",
+            "screen.emotify.settings.sound_volume.value",
+            "screen.emotify.settings.sound_volume.description",
+            "screen.emotify.ignored_players",
+            "screen.emotify.ignored_players.search",
+            "screen.emotify.ignored_players.search_hint",
+            "screen.emotify.ignored_players.offline",
+            "screen.emotify.ignored_players.empty",
+            "screen.emotify.ignored_players.no_results",
+            "screen.emotify.ignored_players.ignore",
+            "screen.emotify.ignored_players.unignore",
+            "screen.emotify.ignored_players.capacity",
+            "screen.emotify.ignored_players.page",
+            "screen.emotify.ignored_players.previous_page",
+            "screen.emotify.ignored_players.next_page",
             "screen.emotify.emotion_picker",
+            "screen.emotify.open_emoji_folder",
             "screen.emotify.scroll_hint",
             "screen.emotify.favorite_hint",
             "screen.emotify.no_favorites",
             "screen.emotify.search_hint",
             "screen.emotify.search_footer",
             "screen.emotify.no_search_results",
+            "screen.emotify.no_custom_emojis",
             "screen.emotify.add_favorite",
             "screen.emotify.remove_favorite",
             "key.emotify.open_picker",
             "key.categories.emotify",
             "category.emotify.favorites",
             "category.emotify.search",
+            "category.emotify.custom",
             "message.emotify.unavailable",
             "message.emotify.no_emotions",
+            "message.emotify.emoji_folder_failed",
             "message.emotify.selection_cooldown",
             "message.emotify.selection_unavailable",
+            "message.emotify.custom_emojis_unsupported",
+            "message.emotify.custom_emoji_missing",
             "message.emotify.player_state",
             "message.emotify.server_busy",
+            "message.emotify.custom_asset_missing",
+            "message.emotify.custom_emojis_disabled",
+            "message.emotify.custom_emoji_too_large",
             "message.emotify.selection_failed",
             "message.emotify.request_pending",
             "message.emotify.request_throttled",
@@ -218,7 +252,7 @@ class EmotionAssetsTest : FunSpec({
         val english = resourceJson("/assets/emotify/lang/en_us.json")
         val russian = resourceJson("/assets/emotify/lang/ru_ru.json")
 
-        expectedKeys.size shouldBe 187
+        expectedKeys.size shouldBe 221
         english.keySet() shouldContainExactlyInAnyOrder expectedKeys
         russian.keySet() shouldContainExactlyInAnyOrder expectedKeys
         english.entrySet().all { entry -> entry.value.asString.isNotBlank() } shouldBe true

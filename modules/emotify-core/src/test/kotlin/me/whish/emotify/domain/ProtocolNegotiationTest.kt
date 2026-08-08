@@ -10,6 +10,15 @@ import io.kotest.property.checkAll
 
 @Suppress("unused")
 class ProtocolNegotiationTest : FunSpec({
+    test("current feature set enables bounded custom emoji sharing") {
+        ProtocolVersion.CURRENT shouldBe ProtocolVersion(1, 4)
+        EmotifyProtocolFeatures.supported.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING) shouldBe true
+        EmotifyProtocolFeatures.supported.contains(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING) shouldBe true
+        EmotifyProtocolFeatures.supported.contains(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS) shouldBe true
+        EmotifyProtocolFeatures.registry.supportedAt(0) shouldBe FeatureFlags.NONE
+        EmotifyProtocolFeatures.registry.supportedAt(1) shouldBe FeatureFlags.NONE
+    }
+
     test("major mismatch is unsupported") {
         val local = ProtocolCapabilities(ProtocolVersion(1, 0), FeatureFlags.NONE)
         val remote = ProtocolCapabilities(ProtocolVersion(2, 0), FeatureFlags.NONE)
@@ -24,6 +33,37 @@ class ProtocolNegotiationTest : FunSpec({
 
         ProtocolNegotiator.negotiate(local, remote, ProtocolFeatureRegistry.EMPTY) shouldBe
             ProtocolNegotiation.Supported(ProtocolVersion(1, 2), FeatureFlags.NONE)
+    }
+
+    test("custom emoji sharing is disabled for protocol 1 point 1 peers") {
+        val local = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
+        val remote = ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags(1L))
+
+        ProtocolNegotiator.negotiate(local, remote, EmotifyProtocolFeatures.registry) shouldBe
+            ProtocolNegotiation.Supported(ProtocolVersion(1, 1), FeatureFlags.NONE)
+    }
+
+    test("animated custom emojis require protocol 1 point 3 on both peers") {
+        val local = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
+        val remote = ProtocolCapabilities(ProtocolVersion(1, 2), EmotifyProtocolFeatures.supported)
+
+        val negotiated = ProtocolNegotiator.negotiate(local, remote, EmotifyProtocolFeatures.registry)
+            as ProtocolNegotiation.Supported
+
+        negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING) shouldBe true
+        negotiated.features.contains(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING) shouldBe false
+    }
+
+    test("lossless large custom emojis require protocol one point four on both peers") {
+        val local = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
+        val remote = ProtocolCapabilities(ProtocolVersion(1, 3), EmotifyProtocolFeatures.supported)
+
+        val negotiated = ProtocolNegotiator.negotiate(local, remote, EmotifyProtocolFeatures.registry)
+            as ProtocolNegotiation.Supported
+
+        negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING) shouldBe true
+        negotiated.features.contains(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING) shouldBe true
+        negotiated.features.contains(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS) shouldBe false
     }
 
     test("features require both peers recognition and negotiated minor") {

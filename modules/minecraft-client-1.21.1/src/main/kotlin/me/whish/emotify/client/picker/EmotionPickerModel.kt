@@ -142,6 +142,7 @@ class EmotionPickerModel private constructor(
 
     companion object {
         const val FAVORITES_SECTION_ID = "favorites"
+        const val CUSTOM_SECTION_ID = "custom"
         const val SEARCH_SECTION_ID = "search"
 
         private val COMBINING_MARKS = Regex("\\p{M}+")
@@ -150,11 +151,19 @@ class EmotionPickerModel private constructor(
         fun from(
             allowedEmotions: EmotionCatalog,
             favoriteEmotions: Set<EmotionId> = BuiltInEmotionManifest.defaultFavoriteIds.toSet(),
+            customEmojis: Collection<EmotionPresentation> = emptyList(),
             localizedName: (EmotionPresentation) -> String = EmotionPresentation::translationKey,
         ): EmotionPickerModel {
-            val allowedPresentations = EmotionPresentationCatalog.ordered.filter { presentation ->
+            val allowedBuiltIns = EmotionPresentationCatalog.ordered.filter { presentation ->
                 allowedEmotions.contains(presentation.emotionId)
             }
+            val customPresentations = customEmojis
+                .asSequence()
+                .filter { presentation -> presentation.category == CUSTOM_SECTION_ID }
+                .distinctBy(EmotionPresentation::emotionId)
+                .take(EmotionCatalog.MAX_SIZE)
+                .toList()
+            val allowedPresentations = allowedBuiltIns + customPresentations
             if (allowedPresentations.isEmpty()) {
                 return EmotionPickerModel(emptyList(), emptyMap())
             }
@@ -171,7 +180,7 @@ class EmotionPickerModel private constructor(
                     ),
                 )
                 EmotionPresentationCatalog.categories.forEach { category ->
-                    val emotions = allowedPresentations.filter { presentation ->
+                    val emotions = allowedBuiltIns.filter { presentation ->
                         presentation.category == category.id
                     }
                     if (emotions.isNotEmpty()) {
@@ -185,6 +194,14 @@ class EmotionPickerModel private constructor(
                         )
                     }
                 }
+                add(
+                    EmotionPickerSection(
+                        CUSTOM_SECTION_ID,
+                        "category.emotify.custom",
+                        EmotionPickerSectionKind.GROUP,
+                        customPresentations,
+                    ),
+                )
                 add(
                     EmotionPickerSection(
                         SEARCH_SECTION_ID,

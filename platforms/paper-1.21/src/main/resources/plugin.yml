@@ -2,7 +2,7 @@ name: Emotify
 version: '${pluginVersion}'
 main: me.whish.emotify.paper.PaperEmotifyPlugin
 description: Server-authoritative Emotify bridge for Paper and Purpur.
-author: Whish
+author: TheWhish
 api-version: '1.21.1'
 load: STARTUP
 commands:

@@ -40,8 +40,10 @@ object EmotionPickerController {
     internal fun matchesPickerKey(keyCode: Int, scanCode: Int): Boolean =
         openPickerKey.matches(keyCode, scanCode)
 
+    @Suppress("unused")
     internal fun matchesPickerMouse(button: Int): Boolean = openPickerKey.matchesMouse(button)
 
+    @Suppress("unused")
     internal fun shouldClosePicker(
         keyCode: Int,
         scanCode: Int,
@@ -66,7 +68,12 @@ object EmotionPickerController {
 
         val minecraft = Minecraft.getInstance()
         val context = ClientHandshakeController.pickerContext()
-        val model = context?.let { available -> EmotionPickerModel.from(available.allowedEmotions) }
+        val model = context?.let { available ->
+            EmotionPickerModel.from(
+                available.allowedEmotions,
+                customEmojis = CustomEmojiRegistry.presentations(),
+            )
+        }
         val decision = EmotionPickerAccessPolicy.decide(
             screenOpen = minecraft.screen != null,
             worldAvailable = minecraft.level != null,
@@ -90,8 +97,6 @@ object EmotionPickerController {
             EmotionPickerAccessDecision.OPEN -> Unit
         }
 
-        EmotionPickerMovement.begin(minecraft)
         minecraft.setScreen(EmotionPickerScreen(checkNotNull(context)))
-        EmotionPickerMovement.update(minecraft)
     }
 }

@@ -23,6 +23,9 @@ value class SelectionRejectionCode(
             2 -> SelectionRejectionReason.EMOTION_DISABLED
             3 -> SelectionRejectionReason.PLAYER_STATE
             4 -> SelectionRejectionReason.SERVER_BUSY
+            5 -> SelectionRejectionReason.CUSTOM_ASSET_MISSING
+            6 -> SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED
+            7 -> SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE
             else -> null
         }
 
@@ -33,6 +36,9 @@ value class SelectionRejectionCode(
             SelectionRejectionReason.EMOTION_DISABLED -> SelectionRejectionCode(2)
             SelectionRejectionReason.PLAYER_STATE -> SelectionRejectionCode(3)
             SelectionRejectionReason.SERVER_BUSY -> SelectionRejectionCode(4)
+            SelectionRejectionReason.CUSTOM_ASSET_MISSING -> SelectionRejectionCode(5)
+            SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED -> SelectionRejectionCode(6)
+            SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE -> SelectionRejectionCode(7)
         }
     }
 }

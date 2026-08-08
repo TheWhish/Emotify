@@ -1,4 +1,6 @@
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Arrays
 import java.util.zip.ZipFile
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
@@ -189,9 +191,13 @@ def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
             'me/whish/emotify/paper/runtime/PaperReloadGate.class',
             'me/whish/emotify/paper/runtime/PaperServerRuntime.class',
             'me/whish/emotify/domain/EmotionId.class',
+            'me/whish/emotify/domain/CustomEmojiAsset.class',
             'me/whish/emotify/wire/v1/ProtocolV1Codecs.class',
+            'me/whish/emotify/wire/v1/CustomEmojiLosslessCodec.class',
             'me/whish/emotify/server/core/EmotifyServerEngine.class',
             'me/whish/emotify/server/core/ServerPlayerSession.class',
+            'me/whish/emotify/server/core/ServerCustomAssetStore.class',
+            'me/whish/emotify/server/core/ServerRuntimeSettings.class',
             'me/whish/emotify/catalog/builtin/BuiltInEmotionCatalog.class'
         ]
         def forbiddenPrefixes = [
@@ -340,6 +346,72 @@ def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
         }
     }
 }
+
+def registerSmokePluginDeployment = { String taskName, String serverDirectoryName ->
+    def pluginDirectory = layout.projectDirectory.dir("${serverDirectoryName}/plugins")
+    def deployedPlugin = pluginDirectory.file("emotify-paper-1.21-${project.version}.jar")
+
+    tasks.register(taskName) {
+        group = 'development'
+        description = "Builds, verifies, and deploys the current Emotify plugin to ${serverDirectoryName}."
+        dependsOn verifyPaperReleaseJar
+        inputs.file(paperJar)
+        outputs.file(deployedPlugin)
+        outputs.upToDateWhen {
+            def target = deployedPlugin.asFile.toPath()
+            def candidates = Files.exists(pluginDirectory.asFile.toPath()) ?
+                pluginDirectory.asFile.listFiles({ file ->
+                    file.isFile() && file.name.startsWith('emotify-paper-1.21-') && file.name.endsWith('.jar')
+                } as FileFilter) : []
+            candidates.size() == 1 && candidates[0].toPath() == target
+        }
+
+        doLast {
+            def source = paperJar.get().asFile.toPath()
+            def targetDirectory = pluginDirectory.asFile.toPath()
+            def target = deployedPlugin.asFile.toPath()
+            Files.createDirectories(targetDirectory)
+            Files.newDirectoryStream(targetDirectory, 'emotify-paper-1.21-*.jar').withCloseable { candidates ->
+                candidates.each { candidate ->
+                    if (Files.isRegularFile(candidate) && candidate != target) {
+                        Files.delete(candidate)
+                    }
+                }
+            }
+            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}
+
+def paperSmokeDeployment = registerSmokePluginDeployment('deployPaperSmokePlugin', 'run-paper-smoke')
+def purpurSmokeDeployment = registerSmokePluginDeployment('deployPurpurSmokePlugin', 'run-purpur-smoke')
+def serverJavaLauncher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(21)
+}
+
+def registerSmokeServerRun = { String taskName, String serverDirectoryName, String serverJarName, deployment ->
+    tasks.register(taskName, Exec) {
+        group = 'application'
+        description = "Deploys Emotify and starts ${serverDirectoryName}."
+        dependsOn deployment
+        workingDir layout.projectDirectory.dir(serverDirectoryName)
+        executable serverJavaLauncher.get().executablePath.asFile.absolutePath
+        args '-jar', serverJarName, 'nogui'
+    }
+}
+
+registerSmokeServerRun(
+    'runPaperSmokeServer',
+    'run-paper-smoke',
+    'paper-1.21.1-133.jar',
+    paperSmokeDeployment,
+)
+registerSmokeServerRun(
+    'runPurpurSmokeServer',
+    'run-purpur-smoke',
+    'purpur-1.21.1-2329.jar',
+    purpurSmokeDeployment,
+)
 
 tasks.named('check') {
     dependsOn verifyPaperReleaseJar

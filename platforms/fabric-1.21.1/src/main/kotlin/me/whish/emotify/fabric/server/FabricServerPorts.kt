@@ -5,9 +5,15 @@ import me.whish.emotify.fabric.network.FabricChannelSupport
 import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
 import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
 import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetChunkPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.ServerHello
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.server.core.AudiencePort
 import me.whish.emotify.server.core.AudienceVisitCompletion
 import me.whish.emotify.server.core.AudienceVisitor
@@ -18,10 +24,13 @@ import me.whish.emotify.server.core.OutboundTransport
 import me.whish.emotify.server.core.PlayerSnapshot
 import me.whish.emotify.server.core.PreparedEmotionDelivery
 import me.whish.emotify.server.core.PreparedServerHelloDelivery
+import me.whish.emotify.server.core.PreparedCustomEmojiAssetDelivery
+import me.whish.emotify.server.core.PreparedCustomEmotionDelivery
 import net.fabricmc.fabric.api.networking.v1.PlayerLookup
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunkCache
 
 internal class FabricAudiencePort(
     private val server: MinecraftServer,
@@ -68,6 +77,8 @@ internal class FabricAudiencePort(
 internal class FabricOutboundTransport(
     private val server: MinecraftServer,
 ) : OutboundTransport {
+    private val customEmojiAssets = CustomEmojiAssetChunkCache()
+
     override fun prepareServerHello(hello: ServerHello): PreparedServerHelloDelivery {
         val payload = FabricServerHelloPayload(hello)
         return PreparedServerHelloDelivery { connection ->
@@ -96,6 +107,57 @@ internal class FabricOutboundTransport(
         }
     }
 
+    override fun prepareCustomEmojiAsset(transfer: CustomEmojiTransfer): PreparedCustomEmojiAssetDelivery {
+        return prepareCustomEmojiAsset(transfer, null)
+    }
+
+    override fun prepareCustomEmojiAsset(
+        transfer: CustomEmojiTransfer,
+        losslessChunks: List<CustomEmojiAssetChunk>?,
+    ): PreparedCustomEmojiAssetDelivery {
+        if (transfer.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+            val payloads = (losslessChunks ?: customEmojiAssets.chunks(transfer.asset))
+                .map(::FabricCustomEmojiAssetChunkPayload)
+            return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
+                sendCustom(playerId, connectionId, requireLossless = true) { player ->
+                    payloads.forEach { payload -> ServerPlayNetworking.send(player, payload) }
+                }
+            }
+        }
+        val payload = FabricCustomEmojiAssetPayload.prepared(transfer)
+        return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
+            sendCustom(playerId, connectionId) { player -> ServerPlayNetworking.send(player, payload) }
+        }
+    }
+
+    override fun prepareCustomEmotionPlay(play: CustomEmotionPlay): PreparedCustomEmotionDelivery {
+        val payload = FabricCustomEmotionPlayPayload(play)
+        return PreparedCustomEmotionDelivery { playerId, connectionId ->
+            sendCustom(playerId, connectionId) { player -> ServerPlayNetworking.send(player, payload) }
+        }
+    }
+
+    private fun sendCustom(
+        playerId: UUID,
+        connectionId: ConnectionId,
+        requireLossless: Boolean = false,
+        delivery: (ServerPlayer) -> Unit,
+    ): OutboundDeliveryStatus {
+        val player = server.playerList.getPlayer(playerId) ?: return OutboundDeliveryStatus.UNAVAILABLE
+        val state = FabricServerConnectionRegistry.current(playerId, player.connection)
+            ?: return OutboundDeliveryStatus.UNAVAILABLE
+        if (
+            state.connectionId != connectionId ||
+            !player.connection.isAcceptingMessages ||
+            !FabricChannelSupport.clientCanReceiveCustomEmojis(player) ||
+            requireLossless && !FabricChannelSupport.clientCanReceiveLosslessCustomEmojis(player)
+        ) {
+            return OutboundDeliveryStatus.UNAVAILABLE
+        }
+        delivery(player)
+        return OutboundDeliveryStatus.SENT
+    }
+
     private fun send(
         playerId: UUID,
         connectionId: ConnectionId,
@@ -113,5 +175,9 @@ internal class FabricOutboundTransport(
         }
         delivery(player)
         return OutboundDeliveryStatus.SENT
+    }
+
+    companion object {
+        private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
     }
 }

@@ -6,6 +6,9 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.nanoseconds
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiFrame
+import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.FakeMonotonicTimeSource
 import me.whish.emotify.domain.FeatureFlags
@@ -54,7 +57,7 @@ class ServerPlayerSessionTest : FunSpec({
     test("changed repeat permanently marks the session unsupported") {
         val playerSession = session()
         val changed = ClientHello(
-            ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags.NONE),
+            ProtocolCapabilities(ProtocolVersion(1, 2), FeatureFlags.NONE),
         )
 
         playerSession.receiveClientHello(changed) shouldBe ServerHandshakeTransition.UNSUPPORTED
@@ -147,6 +150,29 @@ class ServerPlayerSessionTest : FunSpec({
         playerSession.tryAdmitPlay(self = true) shouldBe false
         playerSession.refundPlay()
         playerSession.tryAdmitPlay(self = true) shouldBe true
+    }
+
+    test("delivered custom asset tracking mirrors the client raw byte cache") {
+        val playerSession = session()
+        fun animatedAsset(seed: Int): CustomEmojiAsset = CustomEmojiAsset.create(
+            List(CustomEmojiAsset.MAXIMUM_FRAME_COUNT) { frameIndex ->
+                val colors = IntArray(CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE * CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE)
+                colors[0] = seed
+                colors[1] = frameIndex
+                CustomEmojiFrame(
+                    CustomEmojiPixels.of(CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE, colors),
+                    CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS,
+                )
+            },
+        )
+        val first = animatedAsset(0)
+
+        playerSession.markCustomAssetDelivered(first)
+        repeat(34) { index ->
+            playerSession.markCustomAssetDelivered(animatedAsset(index + 1))
+        }
+
+        playerSession.needsCustomAsset(first.id) shouldBe true
     }
 
     test("selection rejection validates protocol retry boundaries") {

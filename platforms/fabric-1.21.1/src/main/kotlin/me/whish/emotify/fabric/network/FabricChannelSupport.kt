@@ -6,6 +6,9 @@ import me.whish.emotify.fabric.mixin.ServerCommonPacketListenerAccessor
 import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
 import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
 import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetChunkPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.network.Connection
 import net.minecraft.resources.ResourceLocation
@@ -42,6 +45,18 @@ object FabricChannelSupport {
         val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
         return FabricClientboundChannelSet.supportsProtocol(playChannels, configurationMask) &&
             !FabricClientboundChannelSet.supportsProtocol(playChannels, FabricClientboundChannelSet.EMPTY)
+    }
+
+    fun clientCanReceiveCustomEmojis(player: ServerPlayer): Boolean {
+        val playChannels = ServerPlayNetworking.getSendable(player)
+        val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
+        return FabricClientboundChannelSet.supportsCustomEmojis(playChannels, configurationMask)
+    }
+
+    fun clientCanReceiveLosslessCustomEmojis(player: ServerPlayer): Boolean {
+        val playChannels = ServerPlayNetworking.getSendable(player)
+        val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
+        return FabricClientboundChannelSet.supportsLosslessCustomEmojis(playChannels, configurationMask)
     }
 
     fun belongsToConfigurationConnection(
@@ -101,6 +116,14 @@ internal object FabricClientboundChannelSet {
             supports(FabricEmotionPlayPayload.TYPE.id(), playChannels, configurationMask) &&
             supports(FabricSelectionRejectedPayload.TYPE.id(), playChannels, configurationMask)
 
+    fun supportsCustomEmojis(playChannels: Set<ResourceLocation>, configurationMask: Int): Boolean =
+        supports(FabricCustomEmojiAssetPayload.TYPE.id(), playChannels, configurationMask) &&
+            supports(FabricCustomEmotionPlayPayload.TYPE.id(), playChannels, configurationMask)
+
+    fun supportsLosslessCustomEmojis(playChannels: Set<ResourceLocation>, configurationMask: Int): Boolean =
+        supportsCustomEmojis(playChannels, configurationMask) &&
+            supports(FabricCustomEmojiAssetChunkPayload.TYPE.id(), playChannels, configurationMask)
+
     fun supports(
         channel: ResourceLocation,
         playChannels: Set<ResourceLocation>,
@@ -115,10 +138,16 @@ internal object FabricClientboundChannelSet {
         FabricServerHelloPayload.TYPE.id() -> SERVER_HELLO
         FabricEmotionPlayPayload.TYPE.id() -> EMOTION_PLAY
         FabricSelectionRejectedPayload.TYPE.id() -> SELECTION_REJECTED
+        FabricCustomEmojiAssetPayload.TYPE.id() -> CUSTOM_ASSET
+        FabricCustomEmotionPlayPayload.TYPE.id() -> CUSTOM_PLAY
+        FabricCustomEmojiAssetChunkPayload.TYPE.id() -> CUSTOM_ASSET_CHUNK
         else -> EMPTY
     }
 
     private const val SERVER_HELLO = 1
     private const val EMOTION_PLAY = 1 shl 1
     private const val SELECTION_REJECTED = 1 shl 2
+    private const val CUSTOM_ASSET = 1 shl 3
+    private const val CUSTOM_PLAY = 1 shl 4
+    private const val CUSTOM_ASSET_CHUNK = 1 shl 5
 }

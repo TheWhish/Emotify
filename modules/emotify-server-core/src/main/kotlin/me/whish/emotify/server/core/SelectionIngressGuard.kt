@@ -24,6 +24,9 @@ class SelectionIngressGuard(
     fun tryReserveMainThreadTask(emotionId: EmotionId, catalog: EmotionCatalog): Boolean =
         shouldForward(emotionId, catalog) && mainThreadTaskPending.compareAndSet(false, true)
 
+    fun tryReserveMainThreadTask(): Boolean =
+        tryAdmit() && mainThreadTaskPending.compareAndSet(false, true)
+
     fun releaseMainThreadTask() {
         check(mainThreadTaskPending.compareAndSet(true, false)) {
             "No Emotify selection main-thread task is pending"

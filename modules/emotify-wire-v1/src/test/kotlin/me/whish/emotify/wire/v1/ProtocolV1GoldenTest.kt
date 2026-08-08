@@ -30,25 +30,33 @@ class ProtocolV1GoldenTest : FunSpec({
             ProtocolV1Channels.SELECT,
             ProtocolV1Channels.PLAY,
             ProtocolV1Channels.SELECTION_REJECTED,
+            ProtocolV1Channels.CUSTOM_SELECT,
+            ProtocolV1Channels.CUSTOM_ASSET,
+            ProtocolV1Channels.CUSTOM_ASSET_CHUNK,
+            ProtocolV1Channels.CUSTOM_PLAY,
         ) shouldContainExactly listOf(
             "emotify:client_hello",
             "emotify:server_hello",
             "emotify:select",
             "emotify:play",
             "emotify:selection_rejected",
+            "emotify:custom_select",
+            "emotify:custom_asset",
+            "emotify:custom_asset_chunk",
+            "emotify:custom_play",
         )
     }
 
     test("client hello has stable golden bytes") {
         ProtocolV1Codecs.clientHello.encodeToByteArray(ClientHello(capabilities)).toList() shouldContainExactly
-            hex("01 00 00").toList()
+            hex("01 04 00").toList()
     }
 
     test("minimum server hello has stable golden bytes") {
         val envelope = ServerHelloEnvelope.Valid(ServerHello(capabilities, 250, EmotionCatalog.of(emptyList())))
 
         ProtocolV1Codecs.serverHello.encodeToByteArray(envelope).toList() shouldContainExactly
-            hex("01 00 00 FA 01 00").toList()
+            hex("01 04 00 FA 01 00").toList()
     }
 
     test("selection has stable golden bytes") {

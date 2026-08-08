@@ -23,4 +23,13 @@ class ServerSelectionPolicyTest : FunSpec({
         disabled.enabled shouldBe false
         disabled.catalog shouldBe policy.catalog
     }
+
+    test("custom emoji availability is an independent immutable policy value") {
+        val disabled = TEST_ENABLED_POLICY.copy(customEmojisEnabled = false)
+
+        TEST_ENABLED_POLICY.customEmojisEnabled shouldBe true
+        disabled.enabled shouldBe true
+        disabled.customEmojisEnabled shouldBe false
+        disabled.allowedEmotions shouldBe TEST_ENABLED_POLICY.allowedEmotions
+    }
 })

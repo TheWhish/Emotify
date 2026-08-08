@@ -6,6 +6,10 @@ object ProtocolV1Channels {
     const val SELECT = "emotify:select"
     const val PLAY = "emotify:play"
     const val SELECTION_REJECTED = "emotify:selection_rejected"
+    const val CUSTOM_SELECT = "emotify:custom_select"
+    const val CUSTOM_ASSET = "emotify:custom_asset"
+    const val CUSTOM_ASSET_CHUNK = "emotify:custom_asset_chunk"
+    const val CUSTOM_PLAY = "emotify:custom_play"
 }
 
 object ProtocolV1Limits {
@@ -15,6 +19,10 @@ object ProtocolV1Limits {
     const val SELECT_BODY_BYTES = 65
     const val PLAY_BODY_BYTES = 95
     const val SELECTION_REJECTED_BODY_BYTES = 3
+    const val CUSTOM_SELECT_BODY_BYTES = 30_811
+    const val CUSTOM_ASSET_BODY_BYTES = 30_810
+    const val CUSTOM_ASSET_CHUNK_BODY_BYTES = 30_810
+    const val CUSTOM_PLAY_BODY_BYTES = 55
 }
 
 enum class WireDecodeViolation {
@@ -26,6 +34,7 @@ enum class WireDecodeViolation {
     INVALID_EMOTION_ID,
     INVALID_CATALOG,
     INVALID_FIELD_VALUE,
+    INVALID_CUSTOM_EMOJI,
 }
 
 enum class WireEncodeViolation {

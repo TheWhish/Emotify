@@ -1,15 +1,20 @@
 package me.whish.emotify.fabric.server
 
 import java.util.UUID
+import me.whish.emotify.domain.EmotifyProtocolFeatures
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import me.whish.emotify.domain.TokenBucket
 import me.whish.emotify.fabric.EmotifyFabric
+import me.whish.emotify.fabric.config.FabricServerConfig
 import me.whish.emotify.fabric.network.FabricChannelSupport
 import me.whish.emotify.fabric.runtime.FabricProtocol
 import me.whish.emotify.protocol.ClientHello
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.protocol.RuntimeEntityId
 import me.whish.emotify.server.core.AudienceTraversalOutcome
+import me.whish.emotify.server.core.AudienceBudget
 import me.whish.emotify.server.core.ConnectionId
 import me.whish.emotify.server.core.ConnectionKey
 import me.whish.emotify.server.core.EmotifyServerEngine
@@ -21,7 +26,6 @@ import me.whish.emotify.server.core.PlayerSnapshot
 import me.whish.emotify.server.core.RejectionDispatch
 import me.whish.emotify.server.core.ServerHandshakeTransition
 import me.whish.emotify.server.core.ServerHelloResult
-import me.whish.emotify.server.core.ServerSelectionPolicy
 import me.whish.emotify.server.core.ServerSelectionResult
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
@@ -36,19 +40,19 @@ object FabricServerRuntime {
         refillTokensPerSecond = DIAGNOSTIC_TOKENS_PER_SECOND,
         timeSource = SystemMonotonicTimeSource,
     )
-    private val selectionPolicy = ServerSelectionPolicy(
-        enabled = true,
-        catalog = FabricProtocol.serverHello.emotionCatalog,
-        allowedEmotions = FabricProtocol.serverHello.emotionCatalog,
-    )
     private var activeRuntime: Runtime? = null
+
+    fun initialize(server: MinecraftServer) {
+        check(server.isSameThread) { "Emotify Fabric runtime must be initialized on the main server thread" }
+        runtimeFor(server)
+    }
 
     fun tryAcquireSelectionIngress(): GlobalSelectionIngressAdmission = selectionIngressBudget.tryAcquire()
 
     fun open(server: MinecraftServer, playerId: UUID, connectionId: ConnectionId): OutboundDeliveryStatus {
         check(server.isSameThread) { "Emotify sessions must be opened on the main server thread" }
         val connection = ConnectionKey(playerId, connectionId)
-        val result = runtimeForOpen(server).engine.open(connection)
+        val result = runtimeFor(server).engine.open(connection)
         reportOutboundFailure("server hello", playerId, connectionId, result.hello)
         when (result.hello.status) {
             OutboundDeliveryStatus.SENT -> EmotifyFabric.LOGGER.debug(
@@ -144,6 +148,47 @@ object FabricServerRuntime {
         reportSelectionFailures(player.uuid, state.connectionId, runtime.engine.select(snapshot, emotionId))
     }
 
+    fun selectCustom(
+        server: MinecraftServer,
+        player: ServerPlayer,
+        state: FabricServerConnectionState,
+        selection: CustomEmotionSelection,
+    ) {
+        check(server.isSameThread) { "Emotify selections must be processed on the main server thread" }
+        val runtime = activeRuntime(server) ?: return
+        if (
+            FabricServerConnectionRegistry.current(player.uuid) !== state ||
+            !FabricChannelSupport.clientCanReceiveCustomEmojis(player)
+        ) {
+            return
+        }
+        val runtimeEntityId = RuntimeEntityId.parse(player.id) ?: return
+        val snapshot = PlayerSnapshot(
+            connection = ConnectionKey(player.uuid, state.connectionId),
+            entityId = runtimeEntityId,
+            alive = player.isAlive,
+            spectator = player.isSpectator,
+            invisible = player.isInvisible,
+            dimensionId = runtime.dimensionOrdinals.resolve(player.level().dimension()),
+            regionKey = ChunkPos.asLong(player.blockX shr 4, player.blockZ shr 4),
+        )
+        reportSelectionFailures(player.uuid, state.connectionId, runtime.engine.selectCustom(snapshot, selection))
+    }
+
+    fun receiveCustomAssetChunk(
+        server: MinecraftServer,
+        player: ServerPlayer,
+        state: FabricServerConnectionState,
+        chunk: CustomEmojiAssetChunk,
+    ) {
+        check(server.isSameThread) { "Emotify custom asset chunks must be processed on the main server thread" }
+        val runtime = activeRuntime(server) ?: return
+        if (FabricServerConnectionRegistry.current(player.uuid) !== state) {
+            return
+        }
+        runtime.engine.receiveCustomAssetChunk(ConnectionKey(player.uuid, state.connectionId), chunk)
+    }
+
     fun close(server: MinecraftServer, playerId: UUID, connectionId: ConnectionId) {
         check(server.isSameThread) { "Emotify sessions must be closed on the main server thread" }
         val runtime = activeRuntime(server) ?: return
@@ -163,22 +208,28 @@ object FabricServerRuntime {
         diagnostics.reset()
     }
 
-    private fun runtimeForOpen(server: MinecraftServer): Runtime {
+    private fun runtimeFor(server: MinecraftServer): Runtime {
         val existing = activeRuntime
         if (existing != null) {
             check(existing.server === server) { "Emotify server runtime was not cleared before a new server started" }
             return existing
         }
+        val settings = FabricServerConfig.snapshot().runtimeSettings()
+        val configuration = settings.configuration(FabricProtocol.serverHello)
+        selectionIngressBudget.reconfigure(settings.selectionIngressLimits)
         return Runtime(
             server,
             DimensionOrdinalRegistry(),
             EmotifyServerEngine(
-                serverHello = FabricProtocol.serverHello,
-                selectionPolicy = selectionPolicy,
+                serverHello = configuration.serverHello,
+                selectionPolicy = configuration.selectionPolicy,
                 timeSource = SystemMonotonicTimeSource,
                 audiencePort = FabricAudiencePort(server),
                 outboundTransport = FabricOutboundTransport(server),
+                audienceBudget = AudienceBudget(settings.audienceBudgetLimits, SystemMonotonicTimeSource),
                 ingressBudget = selectionIngressBudget,
+                featureRegistry = EmotifyProtocolFeatures.registry,
+                audiencePolicy = configuration.audiencePolicy,
             ),
         ).also { created -> activeRuntime = created }
     }

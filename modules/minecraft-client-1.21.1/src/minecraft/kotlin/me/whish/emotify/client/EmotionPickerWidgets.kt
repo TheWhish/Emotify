@@ -8,6 +8,7 @@ import me.whish.emotify.client.picker.EmotionPickerGridMetrics
 import me.whish.emotify.client.picker.EmotionPickerHitArea
 import me.whish.emotify.client.picker.EmotionPickerListMetrics
 import me.whish.emotify.client.picker.EmotionPickerScrollMath
+import me.whish.emotify.client.picker.EmotionPickerSideActionLayout
 import me.whish.emotify.client.presentation.EmotionPresentation
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
@@ -26,6 +27,41 @@ internal enum class EmotionTabIcon {
     NONE,
     FAVORITES,
     SEARCH,
+}
+
+internal enum class EmotionPickerSideActionIcon(internal val rows: IntArray) {
+    FOLDER(
+        intArrayOf(
+            0b000000000000,
+            0b001111000000,
+            0b011111100000,
+            0b011111111110,
+            0b011111111110,
+            0b011111111110,
+            0b011111111110,
+            0b011111111110,
+            0b011111111110,
+            0b011111111110,
+            0b001111111100,
+            0b000000000000,
+        ),
+    ),
+    SETTINGS(
+        intArrayOf(
+            0b000110011000,
+            0b001110011100,
+            0b011111111110,
+            0b111100001111,
+            0b111000000111,
+            0b011000000110,
+            0b011000000110,
+            0b111000000111,
+            0b111100001111,
+            0b011111111110,
+            0b001110011100,
+            0b000110011000,
+        ),
+    ),
 }
 
 internal class EmotionSearchBox(
@@ -91,6 +127,8 @@ internal class EmotionGridList(
 ) {
     private var targetScrollAmount = 0.0
     private var animatedScrollAmount = 0.0
+    private var scrollVelocity = 0.0
+    private val scrollMotion = EmotionPickerScrollMath.Motion()
     private var lastFrameNanos = 0L
     private var topFadeVisibility = 0.0
     private var bottomFadeVisibility = 0.0
@@ -274,6 +312,7 @@ internal class EmotionGridList(
         val clamped = clampScroll(scroll)
         targetScrollAmount = clamped
         animatedScrollAmount = clamped
+        scrollVelocity = 0.0
         super.setScrollAmount(clamped)
         lastFrameNanos = 0L
     }
@@ -291,6 +330,7 @@ internal class EmotionGridList(
         if (abs(currentScroll - animatedScrollAmount) > EXTERNAL_SCROLL_EPSILON) {
             animatedScrollAmount = currentScroll
             targetScrollAmount = currentScroll
+            scrollVelocity = 0.0
         }
         targetScrollAmount = clampScroll(targetScrollAmount)
         val now = System.nanoTime()
@@ -300,11 +340,15 @@ internal class EmotionGridList(
         }
         val elapsedSeconds = ((now - lastFrameNanos) / NANOS_PER_SECOND).coerceAtMost(MAX_FRAME_SECONDS)
         lastFrameNanos = now
-        animatedScrollAmount = EmotionPickerScrollMath.animatedAmount(
+        EmotionPickerScrollMath.advance(
             animatedScrollAmount,
             targetScrollAmount,
+            scrollVelocity,
             elapsedSeconds,
+            scrollMotion,
         )
+        animatedScrollAmount = scrollMotion.position
+        scrollVelocity = scrollMotion.velocity
         super.setScrollAmount(animatedScrollAmount)
     }
 
@@ -477,7 +521,7 @@ private class EmotionIconButton(
     0,
     1,
     EmotionPickerGridLayout.CELL_HEIGHT,
-    Component.translatable(presentation.translationKey),
+    presentation.nameComponent(),
 ) {
     private val texture = EmotionTextureResources.resolve(presentation.textureId)
     private val titleTooltip = Tooltip.create(message)
@@ -509,7 +553,7 @@ private class EmotionIconButton(
             height,
             if (hovered) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button,
         )
-        val region = presentation.region
+        val region = presentation.regionAt(System.nanoTime() / 1_000_000L)
         guiGraphics.blit(
             texture,
             x + (width - ICON_SIZE) / 2,
@@ -686,6 +730,80 @@ internal class EmotionTabButton(
     }
 }
 
+internal class EmotionPickerSideActionButton(
+    x: Int,
+    y: Int,
+    message: Component,
+    private val icon: EmotionPickerSideActionIcon,
+    private val onPressed: () -> Unit,
+) : AbstractButton(
+    x,
+    y,
+    EmotionPickerSideActionLayout.SIZE,
+    EmotionPickerSideActionLayout.SIZE,
+    message,
+) {
+    init {
+        tooltip = Tooltip.create(message)
+    }
+
+    override fun onPress() {
+        onPressed()
+    }
+
+    override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        EmotionPickerTheme.renderButton(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            if (isHoveredOrFocused) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button,
+            EmotionPickerTheme.buttonOutline,
+            false,
+        )
+        renderIcon(guiGraphics)
+    }
+
+    override fun updateWidgetNarration(narrationElementOutput: NarrationElementOutput) {
+        defaultButtonNarrationText(narrationElementOutput)
+    }
+
+    private fun renderIcon(guiGraphics: GuiGraphics) {
+        val left = x + (width - ICON_SIZE) / 2
+        val top = y + (height - ICON_SIZE) / 2
+        for (row in icon.rows.indices) {
+            val mask = icon.rows[row]
+            var column = 0
+            while (column < ICON_SIZE) {
+                while (column < ICON_SIZE && !isSet(mask, column)) {
+                    column++
+                }
+                val start = column
+                while (column < ICON_SIZE && isSet(mask, column)) {
+                    column++
+                }
+                if (start < column) {
+                    guiGraphics.fill(
+                        left + start,
+                        top + row,
+                        left + column,
+                        top + row + 1,
+                        EmotionPickerTheme.tabText,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun isSet(mask: Int, column: Int): Boolean =
+        mask and (1 shl (ICON_SIZE - column - 1)) != 0
+
+    companion object {
+        private const val ICON_SIZE = 12
+    }
+}
+
 private class FavoriteButton(
     private val presentation: EmotionPresentation,
     private val isFavorite: () -> Boolean,
@@ -735,7 +853,7 @@ private class FavoriteButton(
     private fun updateAction() {
         val action = Component.translatable(
             if (favorite) "screen.emotify.remove_favorite" else "screen.emotify.add_favorite",
-            Component.translatable(presentation.translationKey),
+            presentation.nameComponent(),
         )
         message = action
         tooltip = Tooltip.create(action)
@@ -749,3 +867,6 @@ private class FavoriteButton(
         private const val HOVER_BACKGROUND_COLOR = 0x55FFFFFF
     }
 }
+
+private fun EmotionPresentation.nameComponent(): Component =
+    literalName?.let(Component::literal) ?: Component.translatable(translationKey)

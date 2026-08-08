@@ -10,4 +10,7 @@ enum class SelectionRejectionReason {
     EMOTION_DISABLED,
     PLAYER_STATE,
     SERVER_BUSY,
+    CUSTOM_ASSET_MISSING,
+    CUSTOM_EMOJIS_DISABLED,
+    CUSTOM_EMOJI_TOO_LARGE,
 }

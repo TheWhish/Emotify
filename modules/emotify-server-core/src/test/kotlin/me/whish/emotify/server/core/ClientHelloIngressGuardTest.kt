@@ -27,7 +27,7 @@ class ClientHelloIngressGuardTest : FunSpec({
     test("one changed repeat is admitted and all later packets are blocked") {
         val guard = ClientHelloIngressGuard()
         val changed = ClientHello(
-            ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags.NONE),
+            ProtocolCapabilities(ProtocolVersion(1, 2), FeatureFlags.NONE),
         )
 
         guard.evaluate(initial) shouldBe ClientHelloIngressDecision.FORWARD_INITIAL
@@ -39,7 +39,7 @@ class ClientHelloIngressGuardTest : FunSpec({
     test("ten thousand mixed hellos admit at most two main thread tasks") {
         val guard = ClientHelloIngressGuard()
         val changed = ClientHello(
-            ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags.NONE),
+            ProtocolCapabilities(ProtocolVersion(1, 2), FeatureFlags.NONE),
         )
         var admitted = 0
 

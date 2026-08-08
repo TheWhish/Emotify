@@ -1,25 +1,66 @@
-# Gradle and Kotlin
-/.gradle/
-/.kotlin/
-/build/
-/modules/*/build/
-/platforms/*/build/
+# Build systems and compiler output
+**/.gradle/
+**/.kotlin/
+**/build/
 /out/
 /repo/
+/coverage/
+*.class
+*.exec
 
-# Generated sources and Minecraft runtimes
-/src/generated/resources/
-/modules/*/src/generated/resources/
-/platforms/*/src/generated/resources/
+# Generated sources
+**/src/generated/
+
+# Minecraft development runtimes
 /run/
 /run-*/
 /platforms/*/run/
 /platforms/*/run-*/
 
-# IDE and editor state
+# Accidental Minecraft server or client runtime in the repository root
+/assets/
+/config/
+/crash-reports/
+/debug/
+/libraries/
+/logs/
+/mods/
+/natives/
+/plugins/
+/resourcepacks/
+/saves/
+/screenshots/
+/shaderpacks/
+/world/
+/world_nether/
+/world_the_end/
+/.fabric/
+/.paper-remapped/
+/banned-ips.json
+/banned-players.json
+/bukkit.yml
+/commands.yml
+/eula.txt
+/ops.json
+/paper-global.yml
+/paper-world-defaults.yml
+/purpur.yml
+/server-icon.png
+/server.properties
+/spigot.yml
+/usercache.json
+/whitelist.json
+
+# Shared portable IntelliJ configurations in /.run are intentionally tracked
+# Local IDE and editor state
 /.idea/
 /.fleet/
 /.vscode/
+/.bsp/
+/.settings/
+.classpath
+.factorypath
+.project
 *.iml
 *.ipr
 *.iws
@@ -27,22 +68,29 @@
 *.swo
 *~
 
-# Compiled output and diagnostics
-*.class
+# Diagnostics, profiler output and process state
 *.log
 *.log.gz
 *.jfr
 *.hprof
 *.heapdump
+*.pid
 hs_err_pid*
 replay_pid*
-/crash-reports/
+
+# Temporary and conflict files
+*.bak
+*.orig
+*.rej
+*.temp
+*.tmp
 
 # Local credentials and signing material
 .env
 .env.*
 !.env.example
 local.properties
+gradle.properties.local
 credentials.properties
 publishing.properties
 keystore.properties
@@ -60,15 +108,23 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Local project notes
+# Local technical notes and project media
 /docs/
 /DOCS/
 /CHANGELOG.md
 /RELEASE_CHECKLIST.md
-
-# Local project media
 /project-media/
 
-# Locally copied release artifacts
-/emotify-*.jar
+# Locally copied server cores and release artifacts
+/artifacts/
+/dist/
 /versions/
+/emotify-*.jar
+/fabric-server*.jar
+/minecraft_server*.jar
+/neoforge-*.jar
+/paper-*.jar
+/purpur-*.jar
+/server.jar
+
+# Do not ignore *.jar globally: gradle/wrapper/gradle-wrapper.jar is required

@@ -14,11 +14,16 @@ import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.domain.SelectionRejectionReason
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.fabric.network.payload.FabricClientHelloPayload
 import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
 import me.whish.emotify.fabric.network.payload.FabricEmotionSelectionPayload
 import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
 import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionSelectionPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import me.whish.emotify.fabric.runtime.FabricProtocol
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.EmotionSelection
@@ -28,6 +33,9 @@ import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.SelectionRejectionCode
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.protocol.ServerHelloEnvelope
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.wire.v1.ProtocolV1Codecs
 import me.whish.emotify.wire.v1.ProtocolV1MaliciousCorpus
 import me.whish.emotify.wire.v1.ProtocolV1PayloadKind
@@ -41,6 +49,7 @@ class ProtocolV1FabricParityTest : FunSpec({
     val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE)
 
     test("Fabric adapters match every frozen valid wire fixture") {
+        val customAsset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(64) { it }))
         assertParity(
             ProtocolV1Codecs.clientHello,
             FabricClientHelloPayload.STREAM_CODEC,
@@ -91,6 +100,24 @@ class ProtocolV1FabricParityTest : FunSpec({
             SelectionRejected(SelectionRejectionCode(255), 0),
             ::FabricSelectionRejectedPayload,
         )
+        assertParity(
+            ProtocolV1Codecs.customSelection,
+            FabricCustomEmotionSelectionPayload.STREAM_CODEC,
+            CustomEmotionSelection(customAsset.id, customAsset),
+            ::FabricCustomEmotionSelectionPayload,
+        )
+        assertParity(
+            ProtocolV1Codecs.customAsset,
+            FabricCustomEmojiAssetPayload.STREAM_CODEC,
+            CustomEmojiTransfer(customAsset),
+            ::FabricCustomEmojiAssetPayload,
+        )
+        assertParity(
+            ProtocolV1Codecs.customPlay,
+            FabricCustomEmotionPlayPayload.STREAM_CODEC,
+            CustomEmotionPlay(RuntimeEntityId.of(1), UUID(0L, 1L), EventSequence.of(1), customAsset.id),
+            ::FabricCustomEmotionPlayPayload,
+        )
     }
 
     test("Fabric built in server hello matches the cross-platform golden payload") {
@@ -99,7 +126,7 @@ class ProtocolV1FabricParityTest : FunSpec({
         )
 
         encoded.size shouldBe 2_929
-        encoded.sha256() shouldBe "3469DB560E9BE655FA2F239B0FB219EFB45CBF6C78DCFB8813B93E42FEA1AB8E"
+        encoded.sha256() shouldBe "A89BC95A424C297FD4F07BDDCD9283E32E76F3EED101EF3C7412C3F03E0BC657"
     }
 
     ProtocolV1MaliciousCorpus.inputs.forEach { input ->
@@ -126,7 +153,47 @@ class ProtocolV1FabricParityTest : FunSpec({
             adapter.envelope shouldBe pure
         }
     }
+
+    test("Fabric prepared custom asset body is reused across fanout") {
+        val asset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(256) { index -> index % 5 }))
+        val transfer = CustomEmojiTransfer(asset)
+        val expected = ProtocolV1Codecs.customAsset.encodeToByteArray(transfer)
+        val payload = FabricCustomEmojiAssetPayload.prepared(transfer)
+        val adapter = me.whish.emotify.fabric.network.payload.ProtocolV1PayloadCodec(
+            FailingWireCodec<CustomEmojiTransfer>(ProtocolV1Codecs.customAsset.maxBodyBytes),
+            FabricCustomEmojiAssetPayload::transfer,
+            ::FabricCustomEmojiAssetPayload,
+            preEncodedBody = FabricCustomEmojiAssetPayload::preEncodedBody,
+        )
+
+        repeat(256) {
+            val buffer = FriendlyByteBuf(Unpooled.buffer())
+            try {
+                adapter.encode(buffer, payload)
+                val actual = ByteArray(buffer.readableBytes())
+                buffer.readBytes(actual)
+                actual.toList() shouldContainExactly expected.toList()
+            } finally {
+                buffer.release()
+            }
+        }
+    }
 })
+
+private class FailingWireCodec<T : Any>(
+    override val maxBodyBytes: Int,
+) : WireCodec<T> {
+    override fun encodedSize(value: T): Int = error("Prepared payload must not be measured again")
+
+    override fun encode(writer: me.whish.emotify.wire.v1.WireWriter, value: T) =
+        error("Prepared payload must not be encoded again")
+
+    override fun encodeToByteArray(value: T): ByteArray = error("Prepared payload must not be encoded again")
+
+    override fun decode(reader: me.whish.emotify.wire.v1.WireReader): T = error("Decode is not used by this test")
+
+    override fun decode(source: ByteArray): T = error("Decode is not used by this test")
+}
 
 private fun <TMessage : Any, TPayload : Any> assertParity(
     wireCodec: WireCodec<TMessage>,

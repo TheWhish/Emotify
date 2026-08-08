@@ -21,6 +21,9 @@ data class PaperBroadcastConfiguration(
 
 data class PaperRuntimeConfig(
     val enabled: Boolean,
+    val customEmojisEnabled: Boolean,
+    val maximumStaticCustomEmojiSize: Int,
+    val maximumAnimatedCustomEmojiSize: Int,
     val cooldownMillis: Int,
     val allowedEmotions: EmotionCatalog,
     val ingress: PaperIngressConfiguration,
@@ -64,6 +67,9 @@ object PaperRuntimeConfigParser {
     private const val CONFIG_VERSION = 1
     private const val ENABLED_PATH = "enabled"
     private const val DEFAULT_ENABLED = true
+    private const val CUSTOM_EMOJIS_ENABLED_PATH = "custom-emojis.enabled"
+    private const val MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH = "custom-emojis.maximum-static-resolution"
+    private const val MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH = "custom-emojis.maximum-animated-resolution"
     private const val BROADCAST_RADIUS_PATH = "broadcast.radius-blocks"
     private const val DEFAULT_BROADCAST_RADIUS = 64.0
     private const val MAXIMUM_QUEUED_MAIN_THREAD_TASKS = 512
@@ -83,6 +89,9 @@ object PaperRuntimeConfigParser {
     private val knownPaths = setOf(
         "config-version",
         ENABLED_PATH,
+        CUSTOM_EMOJIS_ENABLED_PATH,
+        MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH,
+        MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH,
         "cooldown-millis",
         "emotions.allow",
         "emotions.deny",
@@ -113,6 +122,27 @@ object PaperRuntimeConfigParser {
             violations += "config-version must be $CONFIG_VERSION: $version"
         }
         val enabled = readEnabled(document, violations)
+        val customEmojisEnabled = readBoolean(
+            document,
+            CUSTOM_EMOJIS_ENABLED_PATH,
+            true,
+            violations,
+        )
+        val maximumStaticCustomEmojiSize = readInt(
+            document,
+            MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH,
+            128,
+            violations,
+        ).validatedCustomEmojiSize(MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH, 128, violations)
+        val maximumAnimatedCustomEmojiSize = readInt(
+            document,
+            MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH,
+            64,
+            violations,
+        ).validatedCustomEmojiSize(MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH, 64, violations)
+        if (maximumAnimatedCustomEmojiSize > maximumStaticCustomEmojiSize) {
+            violations += "$MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH cannot exceed $MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH"
+        }
         val cooldownMillis = readInt(
             document,
             "cooldown-millis",
@@ -241,10 +271,13 @@ object PaperRuntimeConfigParser {
         val allowedEmotions = EmotionCatalog.of(catalog.ids.filter { id -> id in allowFilter && id !in deny })
         return PaperConfigParseResult.Loaded(
             PaperRuntimeConfig(
-                enabled,
-                cooldownMillis,
-                allowedEmotions,
-                PaperIngressConfiguration(
+                enabled = enabled,
+                customEmojisEnabled = customEmojisEnabled,
+                maximumStaticCustomEmojiSize = maximumStaticCustomEmojiSize,
+                maximumAnimatedCustomEmojiSize = maximumAnimatedCustomEmojiSize,
+                cooldownMillis = cooldownMillis,
+                allowedEmotions = allowedEmotions,
+                ingress = PaperIngressConfiguration(
                     maximumQueuedTasks,
                     GlobalSelectionIngressLimits(
                         maximumOutstandingSelections,
@@ -252,7 +285,7 @@ object PaperRuntimeConfigParser {
                         selectionRefill,
                     ),
                 ),
-                PaperBroadcastConfiguration(
+                broadcast = PaperBroadcastConfiguration(
                     ServerAudiencePolicy(radius, maximumTrackingCandidates),
                     AudienceBudgetLimits(
                         broadcastGlobalCapacity,
@@ -269,12 +302,19 @@ object PaperRuntimeConfigParser {
     private fun readEnabled(
         document: PaperConfigDocument,
         violations: BoundedViolations,
-    ): Boolean = when (val value = document.value(ENABLED_PATH)) {
-        null -> DEFAULT_ENABLED
+    ): Boolean = readBoolean(document, ENABLED_PATH, DEFAULT_ENABLED, violations)
+
+    private fun readBoolean(
+        document: PaperConfigDocument,
+        path: String,
+        default: Boolean,
+        violations: BoundedViolations,
+    ): Boolean = when (val value = document.value(path)) {
+        null -> default
         is Boolean -> value
         else -> {
-            violations += "$ENABLED_PATH must be a boolean"
-            DEFAULT_ENABLED
+            violations += "$path must be a boolean"
+            default
         }
     }
 
@@ -358,6 +398,17 @@ object PaperRuntimeConfigParser {
         return this
     }
 
+    private fun Int.validatedCustomEmojiSize(
+        path: String,
+        maximum: Int,
+        violations: BoundedViolations,
+    ): Int {
+        if (this !in CUSTOM_EMOJI_SIZES || this > maximum) {
+            violations += "$path must be one of ${CUSTOM_EMOJI_SIZES.filter { size -> size <= maximum }}: $this"
+        }
+        return this
+    }
+
     private fun Double.validatedRange(
         path: String,
         minimum: Double,
@@ -383,4 +434,6 @@ object PaperRuntimeConfigParser {
 
         fun snapshot(): List<String> = java.util.List.copyOf(values)
     }
+
+    private val CUSTOM_EMOJI_SIZES = setOf(8, 16, 32, 64, 128)
 }

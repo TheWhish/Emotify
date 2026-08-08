@@ -120,4 +120,28 @@ class AudienceBudgetTest : FunSpec({
         budget.tryReserve(1, 1L) shouldBe AudienceReservation.RESERVED
         budget.tryReserve(1, 2L) shouldBe AudienceReservation.REGION_BUSY
     }
+
+    test("lowering the region limit evicts the least recently touched buckets immediately") {
+        val time = FakeMonotonicTimeSource()
+        val budget = AudienceBudget(
+            globalCapacity = 16,
+            globalRefillTokensPerSecond = 16,
+            regionCapacity = 2,
+            regionRefillTokensPerSecond = 16,
+            maxRegions = 4,
+            timeSource = time,
+        )
+        budget.tryReserve(1, 1L) shouldBe AudienceReservation.RESERVED
+        time.advanceBy(100.milliseconds)
+        budget.tryReserve(1, 2L) shouldBe AudienceReservation.RESERVED
+        time.advanceBy(100.milliseconds)
+        budget.tryReserve(1, 3L) shouldBe AudienceReservation.RESERVED
+
+        budget.reconfigure(AudienceBudgetLimits(16, 16, 2, 16, 1))
+
+        budget.trackedRegionCount shouldBe 1
+        time.advanceBy(100.milliseconds)
+        budget.tryReserve(1, 3L) shouldBe AudienceReservation.RESERVED
+        budget.tryReserve(1, 1L) shouldBe AudienceReservation.REGION_BUSY
+    }
 })

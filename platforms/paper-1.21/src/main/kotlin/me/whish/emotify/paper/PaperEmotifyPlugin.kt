@@ -2,13 +2,14 @@ package me.whish.emotify.paper
 
 import java.util.logging.Level
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
-import me.whish.emotify.domain.FeatureFlags
+import me.whish.emotify.domain.EmotifyProtocolFeatures
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import me.whish.emotify.paper.config.BukkitPaperConfigLoader
 import me.whish.emotify.paper.config.PaperConfigLoadResult
 import me.whish.emotify.paper.config.PaperConfigurationApplyResult
+import me.whish.emotify.paper.config.PaperConfigurationApplyTransaction
 import me.whish.emotify.paper.config.PaperConfigurationState
 import me.whish.emotify.paper.config.PaperReloadCoordinator
 import me.whish.emotify.paper.config.PaperRuntimeConfig
@@ -16,6 +17,7 @@ import me.whish.emotify.paper.network.PaperProtocolChannels
 import me.whish.emotify.paper.network.PaperProtocolV1Bridge
 import me.whish.emotify.paper.runtime.PaperClientHelloIngress
 import me.whish.emotify.paper.runtime.PaperConnectionIngress
+import me.whish.emotify.paper.runtime.PaperCustomSelectionIngress
 import me.whish.emotify.paper.runtime.PaperDiagnosticGate
 import me.whish.emotify.paper.runtime.PaperDimensionOrdinalRegistry
 import me.whish.emotify.paper.runtime.PaperIngressGate
@@ -27,6 +29,7 @@ import me.whish.emotify.paper.runtime.PaperServerOpenResult
 import me.whish.emotify.paper.runtime.PaperServerRuntime
 import me.whish.emotify.paper.runtime.PaperSelectionIngress
 import me.whish.emotify.protocol.ClientHello
+import me.whish.emotify.protocol.CustomEmotionSelection
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.server.core.AudienceTraversalOutcome
@@ -56,7 +59,7 @@ import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.plugin.messaging.PluginMessageListener
 
 class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
-    private val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE)
+    private val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
     private lateinit var connections: PaperConnectionIngress
     private lateinit var runtime: PaperServerRuntime
     private lateinit var snapshotFactory: BukkitPaperPlayerSnapshotFactory
@@ -67,6 +70,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     private lateinit var configurationState: PaperConfigurationState
     private lateinit var reloadCoordinator: PaperReloadCoordinator
     private lateinit var policyRefreshDispatcher: PaperPolicyRefreshDispatcher
+    private lateinit var configurationApplyTransaction: PaperConfigurationApplyTransaction<
+        PaperRuntimeConfig,
+        PaperConfigurationApplyResult,
+    >
 
     override fun onEnable() {
         check(server.isPrimaryThread) { "Emotify Paper must be enabled on the primary server thread" }
@@ -115,10 +122,15 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                 timeSource = SystemMonotonicTimeSource,
             ),
             configuration.broadcast.audience,
+            EmotifyProtocolFeatures.registry,
         )
         snapshotFactory = BukkitPaperPlayerSnapshotFactory(server, connections, dimensions)
         policyRefreshDispatcher = PaperPolicyRefreshDispatcher(this, reportBatch = ::reportPolicyRefreshBatch)
         policyRefreshDispatcher.start()
+        configurationApplyTransaction = PaperConfigurationApplyTransaction(
+            configurationState::current,
+            ::applyConfigurationUnsafe,
+        )
         reloadCoordinator = PaperReloadCoordinator(
             this,
             configurationLoader,
@@ -180,7 +192,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     @EventHandler
     fun onPlayerRegisterChannel(event: PlayerRegisterChannelEvent) {
-        if (event.channel in PaperProtocolChannels.outgoing) {
+        if (
+            event.channel in PaperProtocolChannels.outgoing &&
+            PaperProtocolChannels.requiresBukkitSubscription(event.channel)
+        ) {
             val connection = connections.current(event.player.uniqueId, event.player) ?: return
             connections.registerOutgoingChannel(connection, event.channel)
             tryOpen(event.player, connection, refreshExisting = true)
@@ -189,7 +204,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     @EventHandler
     fun onPlayerUnregisterChannel(event: PlayerUnregisterChannelEvent) {
-        if (event.channel in PaperProtocolChannels.outgoing) {
+        if (
+            event.channel in PaperProtocolChannels.outgoing &&
+            PaperProtocolChannels.requiresBukkitSubscription(event.channel)
+        ) {
             val connection = connections.current(event.player.uniqueId, event.player) ?: return
             connections.unregisterOutgoingChannel(connection, event.channel)
         }
@@ -231,6 +249,34 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                     PaperSelectionIngress.PROTOCOL_INACTIVE,
                     PaperSelectionIngress.STALE_CONNECTION,
                     PaperSelectionIngress.UNKNOWN_EMOTION,
+                    -> Unit
+                }
+                ProtocolV1Channels.CUSTOM_SELECT -> when (
+                    val admission = connections.admitCustomSelection(connection) {
+                        PaperProtocolV1Bridge.decodeCustomSelection(message)
+                    }
+                ) {
+                    is PaperCustomSelectionIngress.Admitted -> dispatchCustomSelection(
+                        connection,
+                        admission.selection,
+                        admission.lease,
+                    )
+                    PaperCustomSelectionIngress.RATE_LIMITED,
+                    PaperCustomSelectionIngress.PROTOCOL_INACTIVE,
+                    PaperCustomSelectionIngress.STALE_CONNECTION,
+                    -> Unit
+                }
+                ProtocolV1Channels.CUSTOM_ASSET_CHUNK -> when (
+                    val admission = connections.admitCustomAssetChunk(connection, message.size) {
+                        PaperProtocolV1Bridge.decodeCustomAssetChunk(message)
+                    }
+                ) {
+                    is me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.Admitted ->
+                        runtime.receiveCustomAssetChunk(connection, admission.chunk)
+                    me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.INVALID_SIZE,
+                    me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.PROTOCOL_INACTIVE,
+                    me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.RATE_LIMITED,
+                    me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.STALE_CONNECTION,
                     -> Unit
                 }
             }
@@ -322,6 +368,17 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         dispatch(connection, selectionLease) {
             val snapshot = snapshotFactory.create(connection) ?: return@dispatch
             reportSelectionResult(connection, runtime.select(snapshot, selection))
+        }
+    }
+
+    private fun dispatchCustomSelection(
+        connection: ConnectionKey,
+        selection: CustomEmotionSelection,
+        selectionLease: GlobalSelectionIngressLease,
+    ) {
+        dispatch(connection, selectionLease) {
+            val snapshot = snapshotFactory.create(connection) ?: return@dispatch
+            reportSelectionResult(connection, runtime.selectCustom(snapshot, selection))
         }
     }
 
@@ -458,6 +515,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         if (configurationState.current() == configuration) {
             return PaperConfigurationApplyResult(changed = false, queuedPolicyRefreshes = 0)
         }
+        return configurationApplyTransaction.execute(configuration)
+    }
+
+    private fun applyConfigurationUnsafe(configuration: PaperRuntimeConfig): PaperConfigurationApplyResult {
         globalSelectionBudget.reconfigure(configuration.ingress.globalSelectionLimits)
         ingressGate.reconfigure(configuration.ingress.maximumQueuedMainThreadTasks)
         val result = runtime.reconfigure(
@@ -493,9 +554,12 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         ServerRuntimeConfiguration(
             ServerHello(capabilities, configuration.cooldownMillis, configuration.allowedEmotions),
             ServerSelectionPolicy(
-                configuration.enabled,
-                BuiltInEmotionCatalog.catalog,
-                configuration.allowedEmotions,
+                enabled = configuration.enabled,
+                catalog = BuiltInEmotionCatalog.catalog,
+                allowedEmotions = configuration.allowedEmotions,
+                customEmojisEnabled = configuration.customEmojisEnabled,
+                maximumStaticCustomEmojiSize = configuration.maximumStaticCustomEmojiSize,
+                maximumAnimatedCustomEmojiSize = configuration.maximumAnimatedCustomEmojiSize,
             ),
             configuration.broadcast.audience,
         )

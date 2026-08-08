@@ -6,6 +6,11 @@ interface WireReader {
 
     fun readUnsignedByte(): Int
 
+    fun readBytes(length: Int): ByteArray {
+        require(length >= 0) { "Wire byte count must not be negative: $length" }
+        return ByteArray(length) { readUnsignedByte().toByte() }
+    }
+
     fun reset(position: Int)
 }
 
@@ -13,6 +18,10 @@ interface WireWriter {
     val position: Int
 
     fun writeUnsignedByte(value: Int)
+
+    fun writeBytes(source: ByteArray) {
+        source.forEach { value -> writeUnsignedByte(value.toInt() and 0xFF) }
+    }
 
     fun reset(position: Int)
 }
@@ -33,6 +42,16 @@ internal class ByteArrayWireReader(
             throw WireDecodeException(WireDecodeViolation.TRUNCATED_BODY, "Protocol 1 payload is truncated")
         }
         return source[currentPosition++].toInt() and 0xFF
+    }
+
+    override fun readBytes(length: Int): ByteArray {
+        require(length >= 0) { "Wire byte count must not be negative: $length" }
+        if (length > remainingBytes) {
+            throw WireDecodeException(WireDecodeViolation.TRUNCATED_BODY, "Protocol 1 payload is truncated")
+        }
+        return source.copyOfRange(currentPosition, currentPosition + length).also {
+            currentPosition += length
+        }
     }
 
     override fun reset(position: Int) {
@@ -59,6 +78,17 @@ internal class ByteArrayWireWriter(
             )
         }
         destination[currentPosition++] = value.toByte()
+    }
+
+    override fun writeBytes(source: ByteArray) {
+        if (source.size > destination.size - currentPosition) {
+            throw WireEncodeException(
+                WireEncodeViolation.DESTINATION_EXHAUSTED,
+                "Protocol 1 destination is exhausted",
+            )
+        }
+        source.copyInto(destination, currentPosition)
+        currentPosition += source.size
     }
 
     override fun reset(position: Int) {

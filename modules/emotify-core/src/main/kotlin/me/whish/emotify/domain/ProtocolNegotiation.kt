@@ -14,7 +14,7 @@ data class ProtocolVersion(
     companion object {
         private val U8_RANGE = 0..255
 
-        val CURRENT = ProtocolVersion(major = 1, minor = 0)
+        val CURRENT = ProtocolVersion(major = 1, minor = 4)
     }
 }
 
@@ -22,9 +22,23 @@ data class ProtocolVersion(
 value class FeatureFlags(val bits: Long) {
     infix fun intersect(other: FeatureFlags): FeatureFlags = FeatureFlags(bits and other.bits)
 
+    fun contains(feature: ProtocolFeature): Boolean = bits and feature.bit != 0L
+
     companion object {
         val NONE = FeatureFlags(0L)
     }
+}
+
+object EmotifyProtocolFeatures {
+    val CUSTOM_EMOJI_SHARING = ProtocolFeature(bit = 1L, minimumMinor = 2)
+    val ANIMATED_CUSTOM_EMOJI_SHARING = ProtocolFeature(bit = 1L shl 1, minimumMinor = 3)
+    val LOSSLESS_CUSTOM_EMOJI_ASSETS = ProtocolFeature(bit = 1L shl 2, minimumMinor = 4)
+    val registry = ProtocolFeatureRegistry.of(
+        CUSTOM_EMOJI_SHARING,
+        ANIMATED_CUSTOM_EMOJI_SHARING,
+        LOSSLESS_CUSTOM_EMOJI_ASSETS,
+    )
+    val supported = registry.supportedAt(ProtocolVersion.CURRENT.minor)
 }
 
 data class ProtocolCapabilities(

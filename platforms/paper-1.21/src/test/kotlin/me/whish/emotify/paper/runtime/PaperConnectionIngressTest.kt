@@ -14,6 +14,14 @@ import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.paper.network.PaperProtocolChannels
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.EmotionSelection
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiPixels
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
+import me.whish.emotify.wire.v1.ProtocolV1Limits
+import me.whish.emotify.domain.CustomEmojiId
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.paper.network.PaperProtocolV1Bridge
+import me.whish.emotify.wire.v1.CustomEmojiLosslessCodec
 import me.whish.emotify.server.core.GlobalSelectionIngressBudget
 import me.whish.emotify.server.core.GlobalSelectionIngressRelease
 import me.whish.emotify.wire.v1.ProtocolV1Channels
@@ -58,7 +66,7 @@ class PaperConnectionIngressTest : FunSpec({
         val time = FakeMonotonicTimeSource()
         val ingress = PaperConnectionIngress(catalog, time)
         val connection = beginActive(ingress)
-        val changed = ClientHello(ProtocolCapabilities(ProtocolVersion(1, 1), FeatureFlags.NONE))
+        val changed = ClientHello(ProtocolCapabilities(ProtocolVersion(1, 2), FeatureFlags.NONE))
 
         ingress.admitClientHello(connection) { hello }.shouldBeInstanceOf<PaperClientHelloIngress.Admitted>()
         ingress.admitClientHello(connection) { changed }.shouldBeInstanceOf<PaperClientHelloIngress.Admitted>()
@@ -92,6 +100,58 @@ class PaperConnectionIngressTest : FunSpec({
 
         decoded shouldBe 3
         admitted shouldBe 3
+    }
+
+    test("custom asset chunks are byte limited before decode") {
+        val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
+        val connection = beginActive(ingress)
+        val chunk = CustomEmojiAssetChunker.split(
+            CustomEmojiAsset.create(CustomEmojiPixels.of(128, IntArray(128 * 128) { it })),
+        ).first()
+        var decoded = 0
+
+        repeat(100) {
+            ingress.admitCustomAssetChunk(connection, ProtocolV1Limits.CUSTOM_ASSET_CHUNK_BODY_BYTES) {
+                decoded += 1
+                chunk
+            }
+        }
+
+        decoded shouldBe 17
+        ingress.admitCustomAssetChunk(connection, ProtocolV1Limits.CUSTOM_ASSET_CHUNK_BODY_BYTES + 1) {
+            error("oversized payload must not be decoded")
+        } shouldBe PaperCustomAssetChunkIngress.INVALID_SIZE
+    }
+
+    test("one maximum encoded custom asset fits the predecode wire budget") {
+        val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
+        val connection = beginActive(ingress)
+        val totalBytes = CustomEmojiLosslessCodec.MAXIMUM_ENCODED_BYTES
+        val count = (totalBytes + CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES - 1) /
+            CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES
+        val id = CustomEmojiId(1L, 2L, 3L)
+
+        repeat(count) { index ->
+            val length = if (index == count - 1) {
+                totalBytes - index * CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES
+            } else {
+                CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES
+            }
+            val chunk = CustomEmojiAssetChunk(id, totalBytes, index, count, ByteArray(length))
+            val encoded = PaperProtocolV1Bridge.encodeCustomAssetChunk(chunk)
+            ingress.admitCustomAssetChunk(connection, encoded.size) { chunk }
+                .shouldBeInstanceOf<PaperCustomAssetChunkIngress.Admitted>()
+        }
+
+        val next = CustomEmojiAssetChunk(
+            CustomEmojiId(4L, 5L, 6L),
+            CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES,
+            0,
+            1,
+            ByteArray(CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES),
+        )
+        ingress.admitCustomAssetChunk(connection, PaperProtocolV1Bridge.encodeCustomAssetChunk(next).size) { next } shouldBe
+            PaperCustomAssetChunkIngress.RATE_LIMITED
     }
 
     test("unknown selections consume both per connection and global request budgets") {

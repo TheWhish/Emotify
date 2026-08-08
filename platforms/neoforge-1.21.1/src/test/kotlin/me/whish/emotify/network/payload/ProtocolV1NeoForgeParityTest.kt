@@ -13,6 +13,8 @@ import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.domain.SelectionRejectionReason
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.EventSequence
@@ -21,6 +23,9 @@ import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.SelectionRejectionCode
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.protocol.ServerHelloEnvelope
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.runtime.EmotifyProtocol
 import me.whish.emotify.wire.v1.ProtocolV1Codecs
 import me.whish.emotify.wire.v1.ProtocolV1MaliciousCorpus
@@ -35,6 +40,7 @@ class ProtocolV1NeoForgeParityTest : FunSpec({
     val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE)
 
     test("NeoForge adapters match every frozen valid wire fixture") {
+        val customAsset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(64) { it }))
         assertParity(
             ProtocolV1Codecs.clientHello,
             ClientHelloPayload.STREAM_CODEC,
@@ -85,6 +91,24 @@ class ProtocolV1NeoForgeParityTest : FunSpec({
             SelectionRejected(SelectionRejectionCode(255), 0),
             ::SelectionRejectedPayload,
         )
+        assertParity(
+            ProtocolV1Codecs.customSelection,
+            CustomEmotionSelectionPayload.STREAM_CODEC,
+            CustomEmotionSelection(customAsset.id, customAsset),
+            ::CustomEmotionSelectionPayload,
+        )
+        assertParity(
+            ProtocolV1Codecs.customAsset,
+            CustomEmojiAssetPayload.STREAM_CODEC,
+            CustomEmojiTransfer(customAsset),
+            ::CustomEmojiAssetPayload,
+        )
+        assertParity(
+            ProtocolV1Codecs.customPlay,
+            CustomEmotionPlayPayload.STREAM_CODEC,
+            CustomEmotionPlay(RuntimeEntityId.of(1), UUID(0L, 1L), EventSequence.of(1), customAsset.id),
+            ::CustomEmotionPlayPayload,
+        )
     }
 
     ProtocolV1MaliciousCorpus.inputs.forEach { input ->
@@ -112,7 +136,47 @@ class ProtocolV1NeoForgeParityTest : FunSpec({
             adapter.envelope shouldBe pure
         }
     }
+
+    test("NeoForge prepared custom asset body is reused across fanout") {
+        val asset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(256) { index -> index % 5 }))
+        val transfer = CustomEmojiTransfer(asset)
+        val expected = ProtocolV1Codecs.customAsset.encodeToByteArray(transfer)
+        val payload = CustomEmojiAssetPayload.prepared(transfer)
+        val adapter = ProtocolV1PayloadCodec(
+            FailingWireCodec<CustomEmojiTransfer>(ProtocolV1Codecs.customAsset.maxBodyBytes),
+            CustomEmojiAssetPayload::transfer,
+            ::CustomEmojiAssetPayload,
+            preEncodedBody = CustomEmojiAssetPayload::preEncodedBody,
+        )
+
+        repeat(256) {
+            val buffer = FriendlyByteBuf(Unpooled.buffer())
+            try {
+                adapter.encode(buffer, payload)
+                val actual = ByteArray(buffer.readableBytes())
+                buffer.readBytes(actual)
+                actual.toList() shouldContainExactly expected.toList()
+            } finally {
+                buffer.release()
+            }
+        }
+    }
 })
+
+private class FailingWireCodec<T : Any>(
+    override val maxBodyBytes: Int,
+) : WireCodec<T> {
+    override fun encodedSize(value: T): Int = error("Prepared payload must not be measured again")
+
+    override fun encode(writer: me.whish.emotify.wire.v1.WireWriter, value: T) =
+        error("Prepared payload must not be encoded again")
+
+    override fun encodeToByteArray(value: T): ByteArray = error("Prepared payload must not be encoded again")
+
+    override fun decode(reader: me.whish.emotify.wire.v1.WireReader): T = error("Decode is not used by this test")
+
+    override fun decode(source: ByteArray): T = error("Decode is not used by this test")
+}
 
 private fun <TMessage : Any, TPayload : Any> assertParity(
     wireCodec: WireCodec<TMessage>,

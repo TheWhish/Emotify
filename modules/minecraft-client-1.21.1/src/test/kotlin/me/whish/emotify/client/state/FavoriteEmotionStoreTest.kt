@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import me.whish.emotify.catalog.builtin.BuiltInEmotionManifest
+import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
 
 @Suppress("unused")
@@ -54,5 +55,26 @@ class FavoriteEmotionStoreTest : FunSpec({
 
         store.toggle(happy) shouldBe FavoriteToggleResult.REMOVED
         store.snapshot shouldBe emptySet()
+    }
+
+    test("custom emoji can be toggled only while it is available") {
+        val custom = EmotionId.of("emotify_custom:0123456789abcdef")
+        val store = FavoriteEmotionStore.from(emptyList())
+
+        store.toggle(custom) shouldBe FavoriteToggleResult.UNKNOWN_EMOTION
+        store.toggle(custom, listOf(custom)) shouldBe FavoriteToggleResult.ADDED
+        store.orderedIds() shouldContainExactly listOf(custom)
+        store.toggle(custom, listOf(custom)) shouldBe FavoriteToggleResult.REMOVED
+    }
+
+    test("favorite collection remains bounded when configuration already fills capacity") {
+        val configured = List(EmotionCatalog.MAX_SIZE) { index ->
+            EmotionId.of("external:emoji_$index")
+        }
+        val additional = EmotionId.of("external:additional")
+        val store = FavoriteEmotionStore.from(configured)
+
+        store.toggle(additional, listOf(additional)) shouldBe FavoriteToggleResult.CAPACITY_REACHED
+        store.snapshot.size shouldBe EmotionCatalog.MAX_SIZE
     }
 })

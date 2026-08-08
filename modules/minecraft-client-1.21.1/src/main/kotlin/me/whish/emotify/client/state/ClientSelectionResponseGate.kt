@@ -34,7 +34,18 @@ class ClientSelectionResponseGate(
         clearPending()
     }
 
-    fun tryConsumeRejection(): Boolean = tryConsumePending()
+    fun tryConsumeRejection(): Boolean = consumeRejection() != null
+
+    fun consumeRejection(): EmotionId? {
+        val nowNanos = observeTime()
+        expireAt(nowNanos)
+        if (!pending) {
+            return null
+        }
+        val rejected = pendingEmotion
+        clearPending()
+        return rejected
+    }
 
     fun tryConsumeSuccess(emotionId: EmotionId): Boolean {
         if (pendingEmotion != emotionId) {

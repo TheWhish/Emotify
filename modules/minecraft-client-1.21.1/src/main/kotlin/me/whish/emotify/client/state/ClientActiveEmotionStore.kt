@@ -5,7 +5,6 @@ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap
 import java.util.UUID
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 import me.whish.emotify.domain.EmotionAnimation
-import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.protocol.EmotionPlay
@@ -32,7 +31,7 @@ enum class EmotionActivationResult {
 
 class ClientActiveEmotionStore(
     private val timeSource: MonotonicTimeSource,
-    private val allowedCatalog: EmotionCatalog = BuiltInEmotionCatalog.catalog,
+    private val isKnownEmotion: (EmotionId) -> Boolean = BuiltInEmotionCatalog.catalog::contains,
     private val maximumActive: Int = MAXIMUM_ACTIVE,
 ) {
     private val activeByEntityId = Int2ObjectOpenHashMap<ActiveEmotion>()
@@ -61,7 +60,7 @@ class ClientActiveEmotionStore(
         if (connectionId != activeConnectionId) {
             return EmotionActivationResult.STALE_CONNECTION
         }
-        if (!allowedCatalog.contains(play.emotionId)) {
+        if (!isKnownEmotion(play.emotionId)) {
             return EmotionActivationResult.UNKNOWN_EMOTION
         }
 

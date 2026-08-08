@@ -44,6 +44,18 @@ class AudienceBudget(
     private var maxRegions: Int = 4_096,
     private val timeSource: MonotonicTimeSource = SystemMonotonicTimeSource,
 ) {
+    constructor(
+        limits: AudienceBudgetLimits,
+        timeSource: MonotonicTimeSource = SystemMonotonicTimeSource,
+    ) : this(
+        limits.globalCapacity,
+        limits.globalRefillTokensPerSecond,
+        limits.regionCapacity,
+        limits.regionRefillTokensPerSecond,
+        maxRegions = limits.maximumRegions,
+        timeSource = timeSource,
+    )
+
     private val global = TokenBucket(globalCapacity, globalRefillTokensPerSecond, timeSource)
     private val regionIdleTtlNanos = regionIdleTtl.inWholeNanoseconds
     private val sweepIntervalNanos = sweepInterval.inWholeNanoseconds
@@ -111,6 +123,7 @@ class AudienceBudget(
         regionCapacity = limits.regionCapacity
         regionRefillTokensPerSecond = limits.regionRefillTokensPerSecond
         maxRegions = limits.maximumRegions
+        trimRegionsToLimit()
     }
 
     private fun findOrCreateRegion(dimensionId: Int, regionKey: Long, nowNanos: Long): RegionBucket? {
@@ -160,8 +173,44 @@ class AudienceBudget(
         }
     }
 
+    private fun trimRegionsToLimit() {
+        if (regionCount <= maxRegions) {
+            return
+        }
+        val tracked = ArrayList<TrackedRegion>(regionCount)
+        val dimensionIterator = regions.int2ObjectEntrySet().fastIterator()
+        while (dimensionIterator.hasNext()) {
+            val dimensionEntry = dimensionIterator.next()
+            val regionIterator = dimensionEntry.value.long2ObjectEntrySet().fastIterator()
+            while (regionIterator.hasNext()) {
+                val regionEntry = regionIterator.next()
+                tracked += TrackedRegion(
+                    dimensionEntry.intKey,
+                    regionEntry.longKey,
+                    regionEntry.value.lastTouchedNanos,
+                )
+            }
+        }
+        tracked.sortWith(compareBy(TrackedRegion::lastTouchedNanos, TrackedRegion::dimensionId, TrackedRegion::regionKey))
+        tracked.take(regionCount - maxRegions).forEach { region ->
+            val dimensionRegions = regions[region.dimensionId] ?: return@forEach
+            if (dimensionRegions.remove(region.regionKey) != null) {
+                regionCount -= 1
+            }
+            if (dimensionRegions.isEmpty()) {
+                regions.remove(region.dimensionId)
+            }
+        }
+    }
+
     private class RegionBucket(
         val bucket: TokenBucket,
         var lastTouchedNanos: Long,
+    )
+
+    private data class TrackedRegion(
+        val dimensionId: Int,
+        val regionKey: Long,
+        val lastTouchedNanos: Long,
     )
 }

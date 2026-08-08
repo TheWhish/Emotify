@@ -17,6 +17,25 @@ data class PaperConfigurationApplyResult(
     val queuedPolicyRefreshes: Int,
 )
 
+internal class PaperConfigurationApplyTransaction<T : Any, R : Any>(
+    private val current: () -> T,
+    private val apply: (T) -> R,
+) {
+    fun execute(replacement: T): R {
+        val previous = current()
+        try {
+            return apply(replacement)
+        } catch (failure: RuntimeException) {
+            try {
+                apply(previous)
+            } catch (rollbackFailure: RuntimeException) {
+                failure.addSuppressed(rollbackFailure)
+            }
+            throw failure
+        }
+    }
+}
+
 class PaperReloadCoordinator(
     private val plugin: JavaPlugin,
     private val loader: BukkitPaperConfigLoader,

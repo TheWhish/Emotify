@@ -18,25 +18,43 @@ class TokenBucket(
     }
 
     fun tryConsume(): Boolean {
-        return tryConsumeRetaining(0)
+        return tryConsume(1)
     }
 
+    fun tryConsume(tokens: Int): Boolean = tryConsumeRetaining(tokens, 0)
+
     fun tryConsumeRetaining(minimumWholeTokens: Int): Boolean {
+        return tryConsumeRetaining(1, minimumWholeTokens)
+    }
+
+    fun tryConsumeRetaining(tokens: Int, minimumWholeTokens: Int): Boolean {
+        require(tokens > 0) { "Consumed token count must be positive: $tokens" }
         require(minimumWholeTokens >= 0) { "Retained token count must not be negative: $minimumWholeTokens" }
+        val consumedUnits = tokens.toLong() * UNITS_PER_TOKEN
         val retainedUnits = minimumWholeTokens.toLong() * UNITS_PER_TOKEN
         require(retainedUnits <= capacityUnits) { "Retained token count exceeds bucket capacity: $minimumWholeTokens" }
         refill()
-        if (availableUnits - retainedUnits < UNITS_PER_TOKEN) {
+        if (availableUnits - retainedUnits < consumedUnits) {
             return false
         }
 
-        availableUnits -= UNITS_PER_TOKEN
+        availableUnits -= consumedUnits
         return true
     }
 
     fun refundOne() {
+        refund(1)
+    }
+
+    fun refund(tokens: Int) {
+        require(tokens > 0) { "Refunded token count must be positive: $tokens" }
         refill()
-        availableUnits = (availableUnits + UNITS_PER_TOKEN).coerceAtMost(capacityUnits)
+        val refundedUnits = tokens.toLong() * UNITS_PER_TOKEN
+        availableUnits = if (refundedUnits >= capacityUnits - availableUnits) {
+            capacityUnits
+        } else {
+            availableUnits + refundedUnits
+        }
     }
 
     fun reset() {

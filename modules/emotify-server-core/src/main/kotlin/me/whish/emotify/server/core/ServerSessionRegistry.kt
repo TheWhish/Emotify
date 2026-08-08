@@ -11,6 +11,8 @@ class ServerSessionRegistry(
     private var selectionCooldown: Duration,
     private val timeSource: MonotonicTimeSource,
     private val featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
+    private val customAssets: ServerCustomAssetStore = ServerCustomAssetStore(),
+    private val customAssetIngressBudget: CustomAssetIngressBudget = CustomAssetIngressBudget(timeSource = timeSource),
 ) {
     private val sessions = HashMap<UUID, Entry>()
     val size: Int
@@ -30,7 +32,10 @@ class ServerSessionRegistry(
             selectionCooldown,
             timeSource,
             featureRegistry,
+            customAssets,
+            customAssetIngressBudget,
         )
+        active?.session?.close()
         sessions[connection.playerId] = Entry(connection, session)
         return session
     }
@@ -51,6 +56,10 @@ class ServerSessionRegistry(
         this.selectionCooldown = selectionCooldown
     }
 
+    fun clearCustomAssetRejections() {
+        sessions.values.forEach { entry -> entry.session.clearCustomAssetRejections() }
+    }
+
     fun visitRefreshable(visitor: (ConnectionKey) -> Unit) {
         sessions.values.forEach { entry ->
             if (entry.session.handshakeState !is ServerHandshakeState.Unsupported) {
@@ -69,11 +78,13 @@ class ServerSessionRegistry(
         if (active.connection.connectionId != connection.connectionId) {
             return false
         }
+        active.session.close()
         return sessions.remove(connection.playerId, active)
     }
 
     fun clear(): Int {
         val closedSessions = sessions.size
+        sessions.values.forEach { entry -> entry.session.close() }
         sessions.clear()
         return closedSessions
     }

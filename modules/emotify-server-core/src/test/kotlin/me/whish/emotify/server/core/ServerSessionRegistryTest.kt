@@ -4,10 +4,18 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import java.util.SplittableRandom
 import java.util.UUID
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import me.whish.emotify.domain.FakeMonotonicTimeSource
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiPixels
+import me.whish.emotify.domain.EmotifyProtocolFeatures
+import me.whish.emotify.domain.ProtocolCapabilities
+import me.whish.emotify.domain.ProtocolVersion
+import me.whish.emotify.protocol.ClientHello
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
 
 @Suppress("unused")
 class ServerSessionRegistryTest : FunSpec({
@@ -34,6 +42,33 @@ class ServerSessionRegistryTest : FunSpec({
         registry.get(secondConnection) shouldBe second
         registry.activeConnection(playerId) shouldBe secondConnection
         registry.size shouldBe 1
+    }
+
+    test("reconnect immediately releases an abandoned custom asset upload lease") {
+        val time = FakeMonotonicTimeSource()
+        val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
+        val ingress = CustomAssetIngressBudget(timeSource = time)
+        val registry = ServerSessionRegistry(
+            capabilities,
+            1_200.milliseconds,
+            time,
+            EmotifyProtocolFeatures.registry,
+            customAssetIngressBudget = ingress,
+        )
+        val playerId = UUID(0L, 1L)
+        val firstConnection = testConnection(1L, playerId)
+        val first = registry.open(firstConnection)
+        first.receiveClientHello(ClientHello(capabilities))
+        val random = SplittableRandom(0x51A7E)
+        val asset = CustomEmojiAsset.create(
+            CustomEmojiPixels.of(128, IntArray(128 * 128) { random.nextInt() }),
+        )
+
+        first.receiveCustomAssetChunk(CustomEmojiAssetChunker.split(asset).first(), TEST_ENABLED_POLICY) shouldBe true
+        (ingress.retainedBytes() > 0L) shouldBe true
+
+        registry.open(testConnection(2L, playerId))
+        ingress.retainedBytes() shouldBe 0L
     }
 
     test("opening the same active connection fails fast") {

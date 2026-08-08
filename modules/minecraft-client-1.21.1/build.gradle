@@ -153,6 +153,7 @@ def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
             }
             def entries = archive.entries().collect { entry -> entry.name }
             def expectedClientAssets = [
+                'assets/emotify/icon.png',
                 'assets/emotify/lang/en_us.json',
                 'assets/emotify/lang/ru_ru.json',
                 'assets/emotify/textures/emotions/animals.png',
@@ -163,7 +164,12 @@ def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
                 'me/whish/emotify/client/picker/EmotionPickerModel.class',
                 'me/whish/emotify/client/input/PickerMovementInputState.class',
                 'me/whish/emotify/client/presentation/EmotionBillboardLayout.class',
-                'me/whish/emotify/client/presentation/EmotionPresentationCatalog.class'
+                'me/whish/emotify/client/presentation/EmotionPresentationCatalog.class',
+                'me/whish/emotify/client/state/ClientEmotionPlayCoordinator.class',
+                'me/whish/emotify/client/custom/CustomEmojiFileScanner.class',
+                'me/whish/emotify/client/custom/CustomEmojiReloadCoordinator.class',
+                'me/whish/emotify/client/settings/ClientSettingsSnapshot.class',
+                'me/whish/emotify/client/sound/EmotionSoundPlayback.class'
             ] + expectedClientAssets
             def missingEntries = requiredEntries.findAll { requiredEntry -> requiredEntry !in entries }
             if (!missingEntries.isEmpty()) {
@@ -181,9 +187,12 @@ def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
             }
             def ownedClassPrefixes = [
                 'me/whish/emotify/client/state/',
+                'me/whish/emotify/client/custom/',
                 'me/whish/emotify/client/picker/',
                 'me/whish/emotify/client/input/',
-                'me/whish/emotify/client/presentation/'
+                'me/whish/emotify/client/presentation/',
+                'me/whish/emotify/client/settings/',
+                'me/whish/emotify/client/sound/'
             ]
             def misplacedClasses = entries.findAll { entry ->
                 entry.endsWith('.class') && !ownedClassPrefixes.any { prefix -> entry.startsWith(prefix) }

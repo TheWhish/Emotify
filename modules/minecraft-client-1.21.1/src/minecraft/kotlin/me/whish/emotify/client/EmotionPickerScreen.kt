@@ -39,6 +39,7 @@ class EmotionPickerScreen(
     private lateinit var geometry: EmotionPickerGeometry
     private lateinit var grid: EmotionGridList
     private lateinit var searchBox: EmotionSearchBox
+    private var retainedWidgetState: PickerWidgetState? = null
 
     override fun init() {
         val client = requireNotNull(minecraft) { "Minecraft client is unavailable" }
@@ -58,6 +59,24 @@ class EmotionPickerScreen(
                 ),
             )
         }
+        addRenderableWidget(
+            EmotionPickerSideActionButton(
+                geometry.sideActionX,
+                geometry.sideActionY(0),
+                Component.translatable("screen.emotify.open_emoji_folder"),
+                EmotionPickerSideActionIcon.FOLDER,
+                ::openEmojiFolder,
+            ),
+        )
+        addRenderableWidget(
+            EmotionPickerSideActionButton(
+                geometry.sideActionX,
+                geometry.sideActionY(1),
+                Component.translatable("screen.emotify.settings"),
+                EmotionPickerSideActionIcon.SETTINGS,
+                ::openSettings,
+            ),
+        )
         searchBox = EmotionSearchBox(
             font,
             geometry.searchFieldX,
@@ -88,6 +107,8 @@ class EmotionPickerScreen(
         grid.replaceEmotions(displayedEmotions)
         addRenderableWidget(grid)
         configureSearchMode()
+        retainedWidgetState?.let(::restoreWidgetState)
+        retainedWidgetState = null
     }
 
     override fun repositionElements() {
@@ -110,6 +131,13 @@ class EmotionPickerScreen(
         }
         if (currentContext.allowedEmotions != context.allowedEmotions) {
             applyPolicy(currentContext)
+        }
+        minecraft?.let { client ->
+            CustomEmojiRegistry.refreshIfChanged(client) {
+                if (client.screen === this) {
+                    applyPolicy(context)
+                }
+            }
         }
         val nowNanos = timeSource.nowNanos()
         notice = notice?.takeUnless { current -> current.isFinished(nowNanos) }
@@ -154,7 +182,11 @@ class EmotionPickerScreen(
             val emptyMessage = when (model.section(state).kind) {
                 EmotionPickerSectionKind.FAVORITES -> NO_FAVORITES_MESSAGE
                 EmotionPickerSectionKind.SEARCH -> NO_SEARCH_RESULTS_MESSAGE
-                EmotionPickerSectionKind.GROUP -> NO_EMOTIONS_MESSAGE
+                EmotionPickerSectionKind.GROUP -> if (state.sectionId == EmotionPickerModel.CUSTOM_SECTION_ID) {
+                    NO_CUSTOM_EMOJIS_MESSAGE
+                } else {
+                    NO_EMOTIONS_MESSAGE
+                }
             }
             val searching = isSearching()
             val listY = geometry.listY(searching)
@@ -172,6 +204,23 @@ class EmotionPickerScreen(
     }
 
     override fun isPauseScreen(): Boolean = false
+
+    override fun added() {
+        super.added()
+        minecraft?.let { client ->
+            EmotionPickerMovement.begin(client)
+            if (allowsMovementInput()) {
+                EmotionPickerMovement.update(client)
+            } else {
+                EmotionPickerMovement.release(client)
+            }
+            CustomEmojiRegistry.refreshIfChanged(client) {
+                if (client.screen === this) {
+                    applyPolicy(context)
+                }
+            }
+        }
+    }
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         val enteringSearch = isSearching() && searchBox.isMouseOver(mouseX, mouseY)
@@ -273,6 +322,21 @@ class EmotionPickerScreen(
         configureSearchMode()
     }
 
+    private fun openSettings() {
+        retainedWidgetState = captureWidgetState()
+        minecraft?.setScreen(EmotifySettingsScreen(this))
+    }
+
+    private fun openEmojiFolder() {
+        minecraft?.let { client ->
+            CustomEmojiRegistry.openDirectory(client) {
+                if (client.screen === this) {
+                    showNotice(Component.translatable("message.emotify.emoji_folder_failed"))
+                }
+            }
+        }
+    }
+
     private fun onSearchChanged(query: String) {
         val nextState = model.updateQuery(state, query)
         if (nextState == state) {
@@ -288,7 +352,11 @@ class EmotionPickerScreen(
         val result = if (listener == null) {
             ClientSelectionSendResult.NOT_CONNECTED
         } else {
-            ClientHandshakeController.sendSelection(listener, presentation.emotionId)
+            if (CustomEmojiRegistry.contains(presentation.emotionId)) {
+                ClientHandshakeController.sendCustomSelection(presentation.emotionId)
+            } else {
+                ClientHandshakeController.sendSelection(listener, presentation.emotionId)
+            }
         }
         if (result == ClientSelectionSendResult.SENT) {
             return
@@ -327,7 +395,9 @@ class EmotionPickerScreen(
     }
 
     private fun toggleFavorite(presentation: EmotionPresentation) {
-        if (favorites.toggle(presentation.emotionId) == FavoriteToggleResult.UNKNOWN_EMOTION) {
+        val availableIds = model.sections.last().emotions.map(EmotionPresentation::emotionId)
+        val result = favorites.toggle(presentation.emotionId, availableIds)
+        if (result != FavoriteToggleResult.ADDED && result != FavoriteToggleResult.REMOVED) {
             return
         }
         val orderedIds = favorites.orderedIds()
@@ -426,8 +496,9 @@ class EmotionPickerScreen(
         EmotionPickerModel.from(
             pickerContext.allowedEmotions,
             favorites.snapshot,
+            CustomEmojiRegistry.presentations(),
         ) { presentation ->
-            Component.translatable(presentation.translationKey).string
+            presentation.literalName ?: Component.translatable(presentation.translationKey).string
         }
 
     private fun EmotionPickerSection.tabIcon(): EmotionTabIcon = when (kind) {
@@ -440,6 +511,7 @@ class EmotionPickerScreen(
         private val NO_FAVORITES_MESSAGE = Component.translatable("screen.emotify.no_favorites")
         private val NO_SEARCH_RESULTS_MESSAGE = Component.translatable("screen.emotify.no_search_results")
         private val NO_EMOTIONS_MESSAGE = Component.translatable("message.emotify.no_emotions")
+        private val NO_CUSTOM_EMOJIS_MESSAGE = Component.translatable("screen.emotify.no_custom_emojis")
         private const val MAXIMUM_SEARCH_LENGTH = 64
         private const val TRUNCATION_MARK = ".."
     }

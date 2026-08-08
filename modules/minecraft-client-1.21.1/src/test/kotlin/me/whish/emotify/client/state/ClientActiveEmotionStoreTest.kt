@@ -137,6 +137,17 @@ class ClientActiveEmotionStoreTest : FunSpec({
         store.size shouldBe 1
     }
 
+    test("caller supplied catalog predicate admits a bounded custom emoji") {
+        val time = FakeMonotonicTimeSource()
+        val custom = EmotionId.of("emotify_custom:0123456789abcdef")
+        val store = ClientActiveEmotionStore(time, isKnownEmotion = { emotionId -> emotionId == custom })
+        store.begin(1)
+
+        store.activate(1, play(emotionId = happy)) shouldBe EmotionActivationResult.UNKNOWN_EMOTION
+        store.activate(1, play(emotionId = custom)) shouldBe EmotionActivationResult.ADDED
+        store.visibleFor(7, sourceUuid)?.emotionId shouldBe custom
+    }
+
     test("same player moving to a new runtime entity id replaces the old index") {
         val time = FakeMonotonicTimeSource()
         val store = ClientActiveEmotionStore(time)
@@ -177,6 +188,23 @@ class ClientActiveEmotionStoreTest : FunSpec({
 
         store.shouldHideNameTagFor(7, sourceUuid) shouldBe false
         store.size shouldBe 0
+    }
+
+    test("preference purge removes remote visual and grace while preserving local state") {
+        val time = FakeMonotonicTimeSource()
+        val store = ClientActiveEmotionStore(time)
+        val localUuid = UUID.fromString("30000000-0000-0000-0000-000000000001")
+        val remoteUuid = UUID.fromString("30000000-0000-0000-0000-000000000002")
+        store.begin(1)
+        store.activate(1, play(1, localUuid, 1)) shouldBe EmotionActivationResult.ADDED
+        store.activate(1, play(2, remoteUuid, 2)) shouldBe EmotionActivationResult.ADDED
+
+        store.discardIf { active -> active.sourceUuid != localUuid } shouldBe 1
+
+        store.visibleFor(1, localUuid)?.sourceUuid shouldBe localUuid
+        store.visibleFor(2, remoteUuid).shouldBeNull()
+        store.shouldHideNameTagFor(2, remoteUuid) shouldBe false
+        store.size shouldBe 1
     }
 
     test("render lookup does not read the clock and lifecycle filtering is bounded") {

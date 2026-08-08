@@ -7,11 +7,15 @@ import me.whish.emotify.domain.FakeMonotonicTimeSource
 import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
+import me.whish.emotify.domain.ProtocolFeatureRegistry
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.RuntimeEntityId
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.ServerHello
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmotionPlay
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
 
 internal val TEST_HAPPY = EmotionId.of("emotify:happy")
 internal val TEST_LOVE = EmotionId.of("emotify:love")
@@ -50,6 +54,14 @@ internal data class RecordedPlay(
     val play: EmotionPlay,
 )
 
+internal data class RecordedCustomAsset(
+    val playerId: UUID,
+    val connectionId: ConnectionId,
+    val transfer: CustomEmojiTransfer,
+    val losslessChunks: List<CustomEmojiAssetChunk>?,
+)
+internal data class RecordedCustomPlay(val playerId: UUID, val connectionId: ConnectionId, val play: CustomEmotionPlay)
+
 internal class RecordingOutboundTransport : OutboundTransport {
     var helloStatus = OutboundDeliveryStatus.SENT
     var rejectionStatus = OutboundDeliveryStatus.SENT
@@ -59,6 +71,8 @@ internal class RecordingOutboundTransport : OutboundTransport {
     val hellos = mutableListOf<Pair<ConnectionKey, ServerHello>>()
     val rejections = mutableListOf<Pair<ConnectionKey, SelectionRejected>>()
     val plays = mutableListOf<RecordedPlay>()
+    val customAssets = mutableListOf<RecordedCustomAsset>()
+    val customPlays = mutableListOf<RecordedCustomPlay>()
     var preparedHelloCount = 0
     var preparedPlayCount = 0
 
@@ -85,6 +99,24 @@ internal class RecordingOutboundTransport : OutboundTransport {
             playResponder(playerId, connectionId, play)
         }
     }
+
+    override fun prepareCustomEmojiAsset(transfer: CustomEmojiTransfer): PreparedCustomEmojiAssetDelivery =
+        prepareCustomEmojiAsset(transfer, null)
+
+    override fun prepareCustomEmojiAsset(
+        transfer: CustomEmojiTransfer,
+        losslessChunks: List<CustomEmojiAssetChunk>?,
+    ): PreparedCustomEmojiAssetDelivery =
+        PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
+            customAssets += RecordedCustomAsset(playerId, connectionId, transfer, losslessChunks)
+            OutboundDeliveryStatus.SENT
+        }
+
+    override fun prepareCustomEmotionPlay(play: CustomEmotionPlay): PreparedCustomEmotionDelivery =
+        PreparedCustomEmotionDelivery { playerId, connectionId ->
+            customPlays += RecordedCustomPlay(playerId, connectionId, play)
+            OutboundDeliveryStatus.SENT
+        }
 }
 
 internal class MutableAudiencePort : AudiencePort {
@@ -141,9 +173,11 @@ internal fun engineHarness(
     sequence: ServerEventSequence = ServerEventSequence(),
     ingressBudget: GlobalSelectionIngressBudget = GlobalSelectionIngressBudget(timeSource = time),
     policy: ServerSelectionPolicy = TEST_ENABLED_POLICY,
+    serverHello: ServerHello = TEST_SERVER_HELLO,
+    featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
 ): EngineHarness {
     val engine = EmotifyServerEngine(
-        TEST_SERVER_HELLO,
+        serverHello,
         policy,
         time,
         audiencePort,
@@ -151,8 +185,14 @@ internal fun engineHarness(
         audienceBudget,
         sequence,
         ingressBudget,
+        featureRegistry = featureRegistry,
     )
     return EngineHarness(time, audiencePort, transport, audienceBudget, sequence, ingressBudget, engine)
+}
+
+internal fun EngineHarness.openSupported(connection: ConnectionKey, hello: ClientHello) {
+    engine.open(connection)
+    engine.receiveClientHello(connection, hello)
 }
 
 internal fun EngineHarness.openSupported(connection: ConnectionKey) {

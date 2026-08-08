@@ -6,6 +6,7 @@ import io.kotest.matchers.ints.shouldBeExactly
 import io.kotest.matchers.shouldBe
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 @Suppress("unused")
 class ClientFavoritesPersistenceTest : FunSpec({
@@ -75,6 +76,7 @@ class ClientFavoritesPersistenceTest : FunSpec({
                 }
             },
             onFailure = failures::add,
+            retryDelayMillis = 0L,
         )
 
         store.submit("broken")
@@ -82,9 +84,122 @@ class ClientFavoritesPersistenceTest : FunSpec({
         store.submit("recovered")
         executor.runAll()
 
-        attempts.shouldContainExactly("broken", "recovered")
-        failures.map(Throwable::message).shouldContainExactly("read-only")
+        attempts.shouldContainExactly("broken", "broken", "broken", "recovered")
+        failures.map(Throwable::message).shouldContainExactly("read-only", "read-only", "read-only")
         store.load() shouldBe "recovered"
+    }
+
+    test("a transient sink failure retries and persists the latest snapshot") {
+        val executor = ManualExecutor()
+        val attempts = mutableListOf<String>()
+        val failures = mutableListOf<Throwable>()
+        var fail = true
+        val store = SerializedSnapshotStore(
+            loader = { "disk" },
+            executor = executor,
+            sink = { snapshot ->
+                attempts += snapshot
+                if (fail) {
+                    fail = false
+                    throw IllegalStateException("temporary")
+                }
+            },
+            onFailure = failures::add,
+            retryDelayMillis = 0L,
+        )
+
+        store.submit("latest")
+        executor.runAll()
+
+        attempts.shouldContainExactly("latest", "latest")
+        failures.map(Throwable::message).shouldContainExactly("temporary")
+        store.flush(0, TimeUnit.NANOSECONDS) shouldBe true
+    }
+
+    test("a newer snapshot supersedes a failed write without retrying stale data") {
+        val executor = ManualExecutor()
+        val attempts = mutableListOf<String>()
+        val failures = mutableListOf<Throwable>()
+        lateinit var store: SerializedSnapshotStore<String>
+        store = SerializedSnapshotStore(
+            loader = { "disk" },
+            executor = executor,
+            sink = { snapshot ->
+                attempts += snapshot
+                if (snapshot == "first") {
+                    store.submit("latest")
+                    throw IllegalStateException("stale")
+                }
+            },
+            onFailure = failures::add,
+            retryDelayMillis = 0L,
+        )
+
+        store.submit("first")
+        executor.runAll()
+
+        attempts.shouldContainExactly("first", "latest")
+        failures.map(Throwable::message).shouldContainExactly("stale")
+        store.flush(0, TimeUnit.NANOSECONDS) shouldBe true
+    }
+
+    test("a permanent sink failure stops after the bounded attempts and remains unflushed") {
+        val executor = ManualExecutor()
+        val attempts = mutableListOf<String>()
+        val failures = mutableListOf<Throwable>()
+        val store = SerializedSnapshotStore(
+            loader = { "disk" },
+            executor = executor,
+            sink = { snapshot ->
+                attempts += snapshot
+                throw IllegalStateException("permanent")
+            },
+            onFailure = failures::add,
+            maximumWriteAttempts = 3,
+            retryDelayMillis = 0L,
+        )
+
+        store.submit("latest")
+        executor.runAll()
+
+        attempts.shouldContainExactly("latest", "latest", "latest")
+        failures.size shouldBeExactly 3
+        executor.pendingTasks shouldBeExactly 0
+        store.flush(0, TimeUnit.NANOSECONDS) shouldBe false
+    }
+
+    test("flush reports pending work and completes after the writer becomes idle") {
+        val executor = ManualExecutor()
+        val store = SerializedSnapshotStore(
+            loader = { "disk" },
+            executor = executor,
+            sink = {},
+            onFailure = { error -> throw error },
+        )
+
+        store.submit("latest")
+
+        store.flush(0, TimeUnit.NANOSECONDS) shouldBe false
+        executor.runAll()
+        store.flush(0, TimeUnit.NANOSECONDS) shouldBe true
+    }
+
+    test("atomic updates compose against the latest in-memory snapshot") {
+        val executor = ManualExecutor()
+        val writes = mutableListOf<String>()
+        val store = SerializedSnapshotStore(
+            loader = { "base" },
+            executor = executor,
+            sink = writes::add,
+            onFailure = { error -> throw error },
+        )
+
+        store.update { current -> "$current-settings" }
+        store.update { current -> "$current-favorites" }
+        executor.runAll()
+
+        store.load() shouldBe "base-settings-favorites"
+        writes.shouldContainExactly("base-settings-favorites")
     }
 
     test("failure log gate admits immediately and rate limits repeated failures") {

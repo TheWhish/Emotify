@@ -12,6 +12,9 @@ class SelectionRejectionReasonTest : FunSpec({
             SelectionRejectionReason.EMOTION_DISABLED,
             SelectionRejectionReason.PLAYER_STATE,
             SelectionRejectionReason.SERVER_BUSY,
+            SelectionRejectionReason.CUSTOM_ASSET_MISSING,
+            SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED,
+            SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE,
         )
     }
 })

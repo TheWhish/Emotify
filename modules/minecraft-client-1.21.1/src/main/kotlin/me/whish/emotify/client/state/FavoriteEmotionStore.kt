@@ -8,6 +8,7 @@ import me.whish.emotify.domain.EmotionId
 enum class FavoriteToggleResult {
     ADDED,
     REMOVED,
+    CAPACITY_REACHED,
     UNKNOWN_EMOTION,
 }
 
@@ -19,14 +20,20 @@ class FavoriteEmotionStore private constructor(initial: Collection<EmotionId>) {
 
     fun isFavorite(emotionId: EmotionId): Boolean = emotionId in favorites
 
-    fun toggle(emotionId: EmotionId): FavoriteToggleResult {
-        if (!BuiltInEmotionCatalog.catalog.contains(emotionId)) {
+    fun toggle(
+        emotionId: EmotionId,
+        availableEmotions: Collection<EmotionId> = BuiltInEmotionCatalog.catalog.ids,
+    ): FavoriteToggleResult {
+        if (emotionId !in availableEmotions) {
             return FavoriteToggleResult.UNKNOWN_EMOTION
         }
         val updated = LinkedHashSet(favorites)
         val result = if (updated.remove(emotionId)) {
             FavoriteToggleResult.REMOVED
         } else {
+            if (updated.size >= EmotionCatalog.MAX_SIZE) {
+                return FavoriteToggleResult.CAPACITY_REACHED
+            }
             updated.add(emotionId)
             FavoriteToggleResult.ADDED
         }

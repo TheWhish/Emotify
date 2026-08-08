@@ -20,6 +20,9 @@ class SelectionMessagesTest : FunSpec({
         SelectionRejectionCode.from(SelectionRejectionReason.EMOTION_DISABLED).value shouldBe 2
         SelectionRejectionCode.from(SelectionRejectionReason.PLAYER_STATE).value shouldBe 3
         SelectionRejectionCode.from(SelectionRejectionReason.SERVER_BUSY).value shouldBe 4
+        SelectionRejectionCode.from(SelectionRejectionReason.CUSTOM_ASSET_MISSING).value shouldBe 5
+        SelectionRejectionCode.from(SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED).value shouldBe 6
+        SelectionRejectionCode.from(SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE).value shouldBe 7
     }
 
     test("unknown rejection code remains decodable") {

@@ -5,13 +5,13 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import me.whish.emotify.catalog.builtin.BuiltInEmotionManifest
 import me.whish.emotify.client.state.FailureLogGate
 import me.whish.emotify.client.state.SerializedSnapshotStore
+import me.whish.emotify.client.settings.ClientSettingsSnapshot
 import me.whish.emotify.domain.AnimationMotion
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
@@ -24,7 +24,7 @@ object EmotifyClientConfig {
     private val configPath = FabricLoader.getInstance().configDir.resolve("emotify-client.properties")
     private val failureLogGate = FailureLogGate(TimeUnit.SECONDS.toNanos(30))
     private val persistenceExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "Emotify Favorites Persistence").apply {
+        Thread(task, "Emotify Client Config Persistence").apply {
             isDaemon = true
         }
     }
@@ -35,27 +35,43 @@ object EmotifyClientConfig {
         onFailure = ::logPersistenceFailure,
     )
     @Volatile
-    private var currentAnimationMotion = AnimationMotion.FULL
+    private var currentSettings = ClientSettingsSnapshot.defaults()
 
     fun initialize() {
         val initial = snapshots.load()
-        currentAnimationMotion = if (initial.reducedMotion) {
-            AnimationMotion.REDUCED
-        } else {
-            AnimationMotion.FULL
-        }
+        currentSettings = initial.settings
         if (!Files.exists(configPath)) {
             snapshots.submit(initial)
         }
     }
 
-    fun animationMotion(): AnimationMotion = currentAnimationMotion
+    fun animationMotion(): AnimationMotion = if (currentSettings.reducedMotion) {
+        AnimationMotion.REDUCED
+    } else {
+        AnimationMotion.FULL
+    }
+
+    fun settings(): ClientSettingsSnapshot = currentSettings
+
+    fun saveSettings(settings: ClientSettingsSnapshot) {
+        snapshots.update { current -> current.copy(settings = settings) }
+        currentSettings = settings
+    }
 
     fun loadFavorites(): List<EmotionId> = snapshots.load().favorites
 
     fun saveFavorites(ids: Collection<EmotionId>) {
-        val current = snapshots.load()
-        snapshots.submit(current.copy(favorites = normalizedFavorites(ids)))
+        val favorites = normalizedFavorites(ids)
+        snapshots.update { current -> current.copy(favorites = favorites) }
+    }
+
+    fun flush() {
+        if (
+            !snapshots.flush(CONFIG_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS) &&
+            failureLogGate.tryAcquire(System.nanoTime())
+        ) {
+            EmotifyFabric.LOGGER.warn("Emotify client config was not fully persisted before shutdown")
+        }
     }
 
     private fun loadSnapshot(): FabricClientConfigSnapshot {
@@ -63,7 +79,7 @@ object EmotifyClientConfig {
             return defaultSnapshot()
         }
         return try {
-            FabricClientConfigCodec.decode(readBoundedUtf8(configPath), defaultFavorites())
+            FabricClientConfigCodec.decode(readBoundedUtf8(), defaultSnapshot())
         } catch (error: Exception) {
             EmotifyFabric.LOGGER.error("Failed to load Emotify client config from {}", configPath, error)
             defaultSnapshot()
@@ -87,10 +103,10 @@ object EmotifyClientConfig {
         }
     }
 
-    private fun readBoundedUtf8(path: Path): String {
-        val size = Files.size(path)
-        require(size <= MAXIMUM_CONFIG_BYTES) { "Emotify client config exceeds $MAXIMUM_CONFIG_BYTES bytes" }
-        val bytes = Files.readAllBytes(path)
+    private fun readBoundedUtf8(): String {
+        val bytes = Files.newInputStream(configPath).use { input ->
+            input.readNBytes(MAXIMUM_CONFIG_BYTES + 1)
+        }
         require(bytes.size <= MAXIMUM_CONFIG_BYTES) { "Emotify client config exceeds $MAXIMUM_CONFIG_BYTES bytes" }
         return StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -100,7 +116,7 @@ object EmotifyClientConfig {
     }
 
     private fun defaultSnapshot(): FabricClientConfigSnapshot = FabricClientConfigSnapshot(
-        reducedMotion = false,
+        settings = ClientSettingsSnapshot.defaults(),
         favorites = defaultFavorites(),
     )
 
@@ -116,9 +132,10 @@ object EmotifyClientConfig {
 
     private fun logPersistenceFailure(error: Throwable) {
         if (failureLogGate.tryAcquire(System.nanoTime())) {
-            EmotifyFabric.LOGGER.error("Failed to persist Emotify client favorites", error)
+            EmotifyFabric.LOGGER.error("Failed to persist Emotify client config", error)
         }
     }
 
     private const val MAXIMUM_CONFIG_BYTES = 65_536
+    private const val CONFIG_FLUSH_TIMEOUT_SECONDS = 2L
 }

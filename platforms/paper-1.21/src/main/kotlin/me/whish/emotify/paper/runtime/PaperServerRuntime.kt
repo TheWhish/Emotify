@@ -4,6 +4,9 @@ import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.ServerHello
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.domain.ProtocolFeatureRegistry
 import me.whish.emotify.server.core.AudiencePort
 import me.whish.emotify.server.core.AudienceBudget
 import me.whish.emotify.server.core.AudienceBudgetLimits
@@ -48,6 +51,7 @@ class PaperServerRuntime(
     ingressBudget: GlobalSelectionIngressBudget = GlobalSelectionIngressBudget(timeSource = timeSource),
     audienceBudget: AudienceBudget = AudienceBudget(timeSource = timeSource),
     audiencePolicy: ServerAudiencePolicy = ServerAudiencePolicy.DEFAULT,
+    featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
 ) {
     private val portableServerHello = ProtocolV1PortableProfile.requireServerHello(serverHello)
     private val engine = EmotifyServerEngine(
@@ -59,6 +63,7 @@ class PaperServerRuntime(
         audienceBudget = audienceBudget,
         ingressBudget = ingressBudget,
         audiencePolicy = audiencePolicy,
+        featureRegistry = featureRegistry,
     )
 
     val activeSessionCount: Int
@@ -93,6 +98,16 @@ class PaperServerRuntime(
     fun select(player: PlayerSnapshot, selection: EmotionSelection): ServerSelectionResult {
         requireMainThread()
         return engine.select(player, selection.emotionId)
+    }
+
+    fun selectCustom(player: PlayerSnapshot, selection: CustomEmotionSelection): ServerSelectionResult {
+        requireMainThread()
+        return engine.selectCustom(player, selection)
+    }
+
+    fun receiveCustomAssetChunk(connection: ConnectionKey, chunk: CustomEmojiAssetChunk): Boolean {
+        requireMainThread()
+        return engine.receiveCustomAssetChunk(connection, chunk)
     }
 
     fun close(connection: ConnectionKey): ServerCloseResult {

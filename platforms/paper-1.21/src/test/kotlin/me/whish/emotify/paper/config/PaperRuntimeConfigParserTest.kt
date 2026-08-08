@@ -17,11 +17,23 @@ class PaperRuntimeConfigParserTest : FunSpec({
             .config
 
         config.enabled shouldBe true
+        config.customEmojisEnabled shouldBe true
         config.cooldownMillis shouldBe EmotionAnimation.DURATION_MILLIS.toInt()
         config.allowedEmotions shouldBe catalog
         config.broadcast.audience.radius shouldBe 64.0
         config.broadcast.audience.maximumTrackingCandidates shouldBe 256
         config.ingress.maximumQueuedMainThreadTasks shouldBe 512
+    }
+
+    test("custom emoji switch is independent from built in emotions") {
+        val config = PaperRuntimeConfigParser.parse(
+            PaperConfigDocument(mapOf("custom-emojis.enabled" to false)),
+            catalog,
+        ).shouldBeInstanceOf<PaperConfigParseResult.Loaded>().config
+
+        config.enabled shouldBe true
+        config.customEmojisEnabled shouldBe false
+        config.allowedEmotions shouldBe catalog
     }
 
     test("allow and deny lists produce one canonical catalog ordered like the manifest") {
@@ -119,6 +131,7 @@ class PaperRuntimeConfigParserTest : FunSpec({
             PaperConfigDocument(
                 mapOf(
                     "enabled" to "true",
+                    "custom-emojis.enabled" to "false",
                     "cooldown" to 2_200,
                 ),
             ),
@@ -126,6 +139,7 @@ class PaperRuntimeConfigParserTest : FunSpec({
         ).shouldBeInstanceOf<PaperConfigParseResult.Invalid>()
 
         result.violations shouldContain "enabled must be a boolean"
+        result.violations shouldContain "custom-emojis.enabled must be a boolean"
         result.violations shouldContain "Unknown configuration key: cooldown"
     }
 

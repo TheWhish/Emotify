@@ -7,6 +7,7 @@ import me.whish.emotify.server.core.OutboundDeliveryStatus
 import net.minecraft.server.level.ServerPlayer
 import net.neoforged.neoforge.common.NeoForge
 import net.neoforged.neoforge.event.entity.player.PlayerEvent
+import net.neoforged.neoforge.event.server.ServerStartingEvent
 import net.neoforged.neoforge.event.server.ServerStoppedEvent
 import net.neoforged.neoforge.event.tick.ServerTickEvent
 
@@ -14,12 +15,17 @@ object ServerHandshakeLifecycle {
     private val serverHelloRetries = ServerHelloRetryQueue()
 
     fun register() {
+        NeoForge.EVENT_BUS.addListener(::onServerStarting)
         NeoForge.EVENT_BUS.addListener(::onPlayerLoggedIn)
         NeoForge.EVENT_BUS.addListener(::onPlayerLoggedOut)
         NeoForge.EVENT_BUS.addListener(::onPlayerClone)
         NeoForge.EVENT_BUS.addListener(::onPlayerChangedDimension)
         NeoForge.EVENT_BUS.addListener(::onServerTick)
         NeoForge.EVENT_BUS.addListener(::onServerStopped)
+    }
+
+    private fun onServerStarting(event: ServerStartingEvent) {
+        ServerHandshakeService.initialize(event.server)
     }
 
     private fun onPlayerLoggedIn(event: PlayerEvent.PlayerLoggedInEvent) {

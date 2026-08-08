@@ -3,14 +3,20 @@ package me.whish.emotify.server.core
 import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
 import me.whish.emotify.domain.EmotionId
+import me.whish.emotify.domain.CustomEmojiAsset
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.domain.ProtocolFeatureRegistry
 import me.whish.emotify.domain.SelectionRejectionReason
 import me.whish.emotify.protocol.ClientHello
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmotionPlay
+import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.SelectionRejected
 import me.whish.emotify.protocol.SelectionRejectionCode
 import me.whish.emotify.protocol.ServerHello
+import me.whish.emotify.wire.v1.ProtocolV1Codecs
 
 enum class OutboundDeliveryStatus {
     SENT,
@@ -35,6 +41,17 @@ interface OutboundTransport {
     fun sendSelectionRejected(connection: ConnectionKey, rejection: SelectionRejected): OutboundDeliveryStatus
 
     fun prepareEmotionPlay(play: EmotionPlay): PreparedEmotionDelivery
+
+    fun prepareCustomEmojiAsset(transfer: CustomEmojiTransfer): PreparedCustomEmojiAssetDelivery =
+        PreparedCustomEmojiAssetDelivery { _, _ -> OutboundDeliveryStatus.UNAVAILABLE }
+
+    fun prepareCustomEmojiAsset(
+        transfer: CustomEmojiTransfer,
+        losslessChunks: List<CustomEmojiAssetChunk>?,
+    ): PreparedCustomEmojiAssetDelivery = prepareCustomEmojiAsset(transfer)
+
+    fun prepareCustomEmotionPlay(play: CustomEmotionPlay): PreparedCustomEmotionDelivery =
+        PreparedCustomEmotionDelivery { _, _ -> OutboundDeliveryStatus.UNAVAILABLE }
 }
 
 fun interface PreparedServerHelloDelivery {
@@ -42,6 +59,14 @@ fun interface PreparedServerHelloDelivery {
 }
 
 fun interface PreparedEmotionDelivery {
+    fun send(playerId: UUID, connectionId: ConnectionId): OutboundDeliveryStatus
+}
+
+fun interface PreparedCustomEmojiAssetDelivery {
+    fun send(playerId: UUID, connectionId: ConnectionId): OutboundDeliveryStatus
+}
+
+fun interface PreparedCustomEmotionDelivery {
     fun send(playerId: UUID, connectionId: ConnectionId): OutboundDeliveryStatus
 }
 
@@ -172,6 +197,9 @@ class EmotifyServerEngine(
     val ingressBudget: GlobalSelectionIngressBudget = GlobalSelectionIngressBudget(timeSource = timeSource),
     featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
     audiencePolicy: ServerAudiencePolicy = ServerAudiencePolicy.DEFAULT,
+    private val customAssets: ServerCustomAssetStore = ServerCustomAssetStore(),
+    private val customAssetIngressBudget: CustomAssetIngressBudget = CustomAssetIngressBudget(timeSource = timeSource),
+    private val customAssetEgressBudget: CustomAssetEgressBudget = CustomAssetEgressBudget(timeSource = timeSource),
 ) {
     private var configuration = ServerRuntimeConfiguration(serverHello, selectionPolicy, audiencePolicy)
 
@@ -180,6 +208,8 @@ class EmotifyServerEngine(
         configuration.serverHello.cooldownMillis.milliseconds,
         timeSource,
         featureRegistry,
+        customAssets,
+        customAssetIngressBudget,
     )
 
     val activeSessionCount: Int
@@ -223,6 +253,35 @@ class EmotifyServerEngine(
         }
     }
 
+    fun selectCustom(player: PlayerSnapshot, selection: CustomEmotionSelection): ServerSelectionResult {
+        val session = sessions.get(player.connection)
+            ?: return ServerSelectionResult.Ignored(SelectionIgnoreReason.STALE_CONNECTION)
+        if (session.handshakeState !is ServerHandshakeState.Supported) {
+            return ServerSelectionResult.Ignored(SelectionIgnoreReason.HANDSHAKE_INCOMPLETE)
+        }
+
+        return when (val preparation = session.prepareCustomSelection(selection, configuration.selectionPolicy, player)) {
+            is CustomSelectionPreparation.Ready -> publishCustom(
+                player,
+                session,
+                preparation.asset,
+                preparation.losslessChunks,
+            )
+            CustomSelectionPreparation.Ignored -> ServerSelectionResult.Ignored(SelectionIgnoreReason.UNKNOWN_EMOTION)
+            is CustomSelectionPreparation.Rejected -> reject(
+                player.connection,
+                session,
+                SelectionPreparation.Rejected(preparation.reason, preparation.retryAfterMillis),
+            )
+        }
+    }
+
+    fun receiveCustomAssetChunk(connection: ConnectionKey, chunk: CustomEmojiAssetChunk): Boolean =
+        sessions.get(connection)?.receiveCustomAssetChunk(
+            chunk,
+            configuration.selectionPolicy,
+        ) == true
+
     fun close(connection: ConnectionKey): ServerCloseResult =
         if (sessions.close(connection)) ServerCloseResult.CLOSED else ServerCloseResult.STALE_OR_MISSING
 
@@ -235,6 +294,7 @@ class EmotifyServerEngine(
             serverHello = configuration.serverHello.copy(emotionCatalog = newPolicy.allowedEmotions),
             selectionPolicy = newPolicy,
         )
+        sessions.clearCustomAssetRejections()
         return ServerPolicyReplacement(previous, newPolicy)
     }
 
@@ -247,6 +307,7 @@ class EmotifyServerEngine(
             "Server catalog cannot change while sessions are active"
         }
         sessions.reconfigureSelectionCooldown(newConfiguration.serverHello.cooldownMillis.milliseconds)
+        sessions.clearCustomAssetRejections()
         configuration = newConfiguration
         return ServerConfigurationReplacement(previous, newConfiguration)
     }
@@ -308,6 +369,9 @@ class EmotifyServerEngine(
         audienceBudget.clear()
         eventSequence.reset()
         ingressBudget.reset()
+        customAssets.clear()
+        customAssetIngressBudget.reset()
+        customAssetEgressBudget.reset()
         return ServerClearResult(closedSessions)
     }
 
@@ -353,6 +417,108 @@ class EmotifyServerEngine(
             )
         }
         val delivery = DeliveryAccumulator(preparedDelivery)
+        val traversal = try {
+            delivery.deliver(
+                player.connection.playerId,
+                player.connection.connectionId,
+                session,
+                self = true,
+            )
+            val completion = audiencePort.visitTracking(
+                player,
+                configuration.audiencePolicy.maximumTrackingCandidates,
+                delivery,
+            )
+            AudienceTraversalOutcome.Completed(delivery.normalize(completion))
+        } catch (exception: RuntimeException) {
+            AudienceTraversalOutcome.Failed(exception)
+        } catch (error: Error) {
+            if (delivery.deliveredRecipients == 0) {
+                audienceBudget.refund(player.dimensionId, player.regionKey)
+            } else {
+                session.commitSelection()
+            }
+            throw error
+        }
+
+        if (delivery.deliveredRecipients == 0) {
+            audienceBudget.refund(player.dimensionId, player.regionKey)
+            return ServerSelectionResult.Undelivered(
+                play,
+                delivery.failedRecipients,
+                delivery.throttledRecipients,
+                delivery.visitedCandidates,
+                traversal,
+                delivery.firstSendFailure,
+            )
+        }
+
+        session.commitSelection()
+        return ServerSelectionResult.Published(
+            play,
+            delivery.deliveredRecipients,
+            delivery.failedRecipients,
+            delivery.throttledRecipients,
+            delivery.visitedCandidates,
+            traversal,
+            delivery.firstSendFailure,
+        )
+    }
+
+    private fun publishCustom(
+        player: PlayerSnapshot,
+        session: ServerPlayerSession,
+        asset: CustomEmojiAsset,
+        losslessChunks: List<CustomEmojiAssetChunk>?,
+    ): ServerSelectionResult {
+        if (!eventSequence.hasCapacity()) {
+            return reject(
+                player.connection,
+                session,
+                SelectionPreparation.Rejected(SelectionRejectionReason.SERVER_BUSY, 0),
+            )
+        }
+
+        when (audienceBudget.tryReserve(player.dimensionId, player.regionKey)) {
+            AudienceReservation.GLOBAL_BUSY,
+            AudienceReservation.REGION_BUSY,
+            -> return reject(
+                player.connection,
+                session,
+                SelectionPreparation.Rejected(SelectionRejectionReason.SERVER_BUSY, 0),
+            )
+            AudienceReservation.RESERVED -> Unit
+        }
+
+        val sequence = checkNotNull(eventSequence.nextOrNull()) {
+            "Event sequence exhausted after a successful capacity check"
+        }
+        val play = EmotionPlay(player.entityId, player.connection.playerId, sequence, asset.id.emotionId)
+        val customPlay = CustomEmotionPlay(player.entityId, player.connection.playerId, sequence, asset.id)
+        val preparedAsset: PreparedCustomEmojiAssetDelivery
+        val preparedPlay: PreparedCustomEmotionDelivery
+        try {
+            preparedAsset = outboundTransport.prepareCustomEmojiAsset(CustomEmojiTransfer(asset), losslessChunks)
+            preparedPlay = outboundTransport.prepareCustomEmotionPlay(customPlay)
+        } catch (exception: RuntimeException) {
+            audienceBudget.refund(player.dimensionId, player.regionKey)
+            return ServerSelectionResult.Undelivered(
+                play,
+                failedRecipients = 1,
+                throttledRecipients = 0,
+                visitedCandidates = 0,
+                traversal = AudienceTraversalOutcome.Failed(exception),
+                firstSendFailure = exception,
+            )
+        }
+        val delivery = CustomDeliveryAccumulator(
+            preparedAsset,
+            preparedPlay,
+            asset,
+            losslessChunks?.size ?: 1,
+            losslessChunks?.sumOf(ProtocolV1Codecs.customAssetChunk::encodedSize)
+                ?: (asset.rawByteLength + LEGACY_CUSTOM_ASSET_MAXIMUM_OVERHEAD_BYTES),
+        )
         val traversal = try {
             delivery.deliver(
                 player.connection.playerId,
@@ -513,5 +679,124 @@ class EmotifyServerEngine(
 
         fun normalize(completion: AudienceVisitCompletion): AudienceVisitCompletion =
             if (limitReached) AudienceVisitCompletion.LIMIT_REACHED else completion
+    }
+
+    private inner class CustomDeliveryAccumulator(
+        private val preparedAsset: PreparedCustomEmojiAssetDelivery,
+        private val preparedPlay: PreparedCustomEmotionDelivery,
+        private val asset: CustomEmojiAsset,
+        private val assetTransferUnits: Int,
+        private val assetTransferBytes: Int,
+    ) : AudienceVisitor {
+        var deliveredRecipients = 0
+            private set
+        var failedRecipients = 0
+            private set
+        var throttledRecipients = 0
+            private set
+        var visitedCandidates = 0
+            private set
+        var firstSendFailure: RuntimeException? = null
+            private set
+        private var limitReached = false
+
+        override fun visit(
+            playerId: UUID,
+            connectionId: ConnectionId,
+            visible: Boolean,
+            sameDimension: Boolean,
+            distanceSquared: Double,
+        ): Boolean {
+            val audiencePolicy = configuration.audiencePolicy
+            if (visitedCandidates >= audiencePolicy.maximumTrackingCandidates) {
+                limitReached = true
+                return false
+            }
+            visitedCandidates += 1
+            if (visitedCandidates == audiencePolicy.maximumTrackingCandidates) {
+                limitReached = true
+            }
+
+            val recipientSession = sessions.get(playerId, connectionId)
+            val negotiated = recipientSession?.supportsCustomEmojiAsset(asset) == true
+            if (recipientSession != null && AudiencePolicy.isEligible(
+                    audiencePolicy,
+                    tracking = true,
+                    negotiated = negotiated,
+                    visible = visible,
+                    sameDimension = sameDimension,
+                    distanceSquared = distanceSquared,
+                )
+            ) {
+                deliver(playerId, connectionId, recipientSession, self = false)
+            }
+            return !limitReached
+        }
+
+        fun deliver(
+            playerId: UUID,
+            connectionId: ConnectionId,
+            session: ServerPlayerSession,
+            self: Boolean,
+        ) {
+            if (!session.tryAdmitPlay(self)) {
+                throttledRecipients += 1
+                return
+            }
+
+            if (!self && session.needsCustomAsset(asset.id)) {
+                if (!session.tryAdmitCustomAssetTransfer(assetTransferUnits)) {
+                    session.refundPlay()
+                    throttledRecipients += 1
+                    return
+                }
+                if (!customAssetEgressBudget.tryReserve(assetTransferBytes)) {
+                    session.refundCustomAssetTransfer(assetTransferUnits)
+                    session.refundPlay()
+                    throttledRecipients += 1
+                    return
+                }
+                val assetOutbound = try {
+                    attempt { preparedAsset.send(playerId, connectionId) }
+                } catch (error: Error) {
+                    session.refundPlay()
+                    throw error
+                }
+                if (assetOutbound.status != OutboundDeliveryStatus.SENT) {
+                    session.refundPlay()
+                    recordFailure(assetOutbound)
+                    return
+                }
+                session.markCustomAssetDelivered(asset)
+            }
+
+            val playOutbound = try {
+                attempt { preparedPlay.send(playerId, connectionId) }
+            } catch (error: Error) {
+                session.refundPlay()
+                throw error
+            }
+            if (playOutbound.status == OutboundDeliveryStatus.SENT) {
+                deliveredRecipients += 1
+                return
+            }
+
+            session.refundPlay()
+            recordFailure(playOutbound)
+        }
+
+        private fun recordFailure(outbound: OutboundAttempt) {
+            failedRecipients += 1
+            if (firstSendFailure == null) {
+                firstSendFailure = outbound.failure
+            }
+        }
+
+        fun normalize(completion: AudienceVisitCompletion): AudienceVisitCompletion =
+            if (limitReached) AudienceVisitCompletion.LIMIT_REACHED else completion
+    }
+
+    private companion object {
+        const val LEGACY_CUSTOM_ASSET_MAXIMUM_OVERHEAD_BYTES = 90
     }
 }

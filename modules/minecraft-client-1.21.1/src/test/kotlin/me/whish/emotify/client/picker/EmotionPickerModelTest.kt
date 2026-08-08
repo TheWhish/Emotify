@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 import me.whish.emotify.catalog.builtin.BuiltInEmotionManifest
+import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.presentation.EmotionPresentation
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
@@ -19,6 +20,16 @@ class EmotionPickerModelTest : FunSpec({
     val angry = EmotionId.of("emotify:angry")
     val dog = EmotionId.of("emotify:dog")
     val wolf = EmotionId.of("emotify:wolf")
+    val custom = EmotionPresentation(
+        EmotionId.of("emotify_custom:0123456789abcdef"),
+        "emotify_custom:0123456789abcdef",
+        "",
+        EmotionPickerModel.CUSTOM_SECTION_ID,
+        "",
+        0,
+        EmotionSpriteRegion(0, 0, 8, 8, 8, 8),
+        "Party Parrot",
+    )
 
     test("complete catalog creates pinned virtual tabs around ordered groups") {
         val model = EmotionPickerModel.from(
@@ -30,15 +41,17 @@ class EmotionPickerModelTest : FunSpec({
             EmotionPickerModel.FAVORITES_SECTION_ID,
             "faces",
             "animals",
+            EmotionPickerModel.CUSTOM_SECTION_ID,
             EmotionPickerModel.SEARCH_SECTION_ID,
         )
         model.sections.map(EmotionPickerSection::kind) shouldContainExactly listOf(
             EmotionPickerSectionKind.FAVORITES,
             EmotionPickerSectionKind.GROUP,
             EmotionPickerSectionKind.GROUP,
+            EmotionPickerSectionKind.GROUP,
             EmotionPickerSectionKind.SEARCH,
         )
-        model.sections.map { section -> section.emotions.size } shouldContainExactly listOf(6, 130, 32, 162)
+        model.sections.map { section -> section.emotions.size } shouldContainExactly listOf(6, 130, 32, 0, 162)
         model.initialState() shouldBe EmotionPickerState(EmotionPickerModel.FAVORITES_SECTION_ID, 0)
     }
 
@@ -95,12 +108,14 @@ class EmotionPickerModelTest : FunSpec({
             EmotionPickerModel.FAVORITES_SECTION_ID,
             "faces",
             "animals",
+            EmotionPickerModel.CUSTOM_SECTION_ID,
             EmotionPickerModel.SEARCH_SECTION_ID,
         )
         model.sections[0].emotions.map(EmotionPresentation::emotionId) shouldContainExactly listOf(happy, dog)
         model.sections[1].emotions.map(EmotionPresentation::emotionId) shouldContainExactly listOf(happy)
         model.sections[2].emotions.map(EmotionPresentation::emotionId) shouldContainExactly listOf(dog, wolf)
-        model.sections[3].emotions.map(EmotionPresentation::emotionId) shouldContainExactly listOf(happy, dog, wolf)
+        model.sections[3].emotions shouldBe emptyList()
+        model.sections[4].emotions.map(EmotionPresentation::emotionId) shouldContainExactly listOf(happy, dog, wolf)
     }
 
     test("empty server policy produces no selectable state") {
@@ -130,9 +145,30 @@ class EmotionPickerModelTest : FunSpec({
         model.sections.map(EmotionPickerSection::id) shouldContainExactly listOf(
             EmotionPickerModel.FAVORITES_SECTION_ID,
             "animals",
+            EmotionPickerModel.CUSTOM_SECTION_ID,
             EmotionPickerModel.SEARCH_SECTION_ID,
         )
         model.initialState() shouldBe EmotionPickerState("animals", 0)
+    }
+
+    test("custom emojis form the third content tab and participate in favorites and search") {
+        val model = EmotionPickerModel.from(
+            EmotionCatalog.of(listOf(happy)),
+            setOf(custom.emotionId),
+            listOf(custom),
+        ) { presentation -> presentation.literalName ?: presentation.translationKey }
+        val customSection = model.sections.first { section -> section.id == EmotionPickerModel.CUSTOM_SECTION_ID }
+        val search = model.selectSection(requireNotNull(model.initialState()), EmotionPickerModel.SEARCH_SECTION_ID)
+
+        model.sections.map(EmotionPickerSection::id) shouldContainExactly listOf(
+            EmotionPickerModel.FAVORITES_SECTION_ID,
+            "faces",
+            EmotionPickerModel.CUSTOM_SECTION_ID,
+            EmotionPickerModel.SEARCH_SECTION_ID,
+        )
+        customSection.emotions shouldContainExactly listOf(custom)
+        model.sections.first().emotions shouldContainExactly listOf(custom)
+        model.emotions(model.updateQuery(search, "party parrot")) shouldContainExactly listOf(custom)
     }
 
     test("localized search matches normalized names and namespaced ids") {

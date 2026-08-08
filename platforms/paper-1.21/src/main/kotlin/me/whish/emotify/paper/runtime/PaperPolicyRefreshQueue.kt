@@ -5,6 +5,7 @@ import me.whish.emotify.server.core.ConnectionKey
 import me.whish.emotify.server.core.OutboundDeliveryStatus
 import me.whish.emotify.server.core.ServerHelloRefreshPlan
 import org.bukkit.plugin.java.JavaPlugin
+import org.bukkit.scheduler.BukkitTask
 
 data class PaperPolicyRefreshBatchResult(
     val attemptedSessions: Int,
@@ -30,13 +31,13 @@ class PaperPolicyRefreshQueue(
 
     fun replace(connections: Collection<ConnectionKey>, replacementPlan: ServerHelloRefreshPlan): Int {
         pending.clear()
-        plan = replacementPlan
         val unique = HashSet<ConnectionKey>(connections.size)
         connections.forEach { connection ->
             if (unique.add(connection)) {
                 pending.addLast(connection)
             }
         }
+        plan = replacementPlan.takeIf { pending.isNotEmpty() }
         return pending.size
     }
 
@@ -95,23 +96,64 @@ class PaperPolicyRefreshDispatcher(
     private val queue: PaperPolicyRefreshQueue = PaperPolicyRefreshQueue(),
     private val reportBatch: (PaperPolicyRefreshBatchResult) -> Unit,
 ) {
+    private var started = false
+    private var scheduledTask: BukkitTask? = null
+
     fun start() {
         check(plugin.server.isPrimaryThread) { "Policy refresh dispatcher must start on the primary server thread" }
-        plugin.server.scheduler.runTaskTimer(plugin, Runnable {
-            val result = queue.drain()
-            if (result.attemptedSessions > 0) {
-                reportBatch(result)
-            }
-        }, 1L, 1L)
+        check(!started) { "Policy refresh dispatcher has already started" }
+        started = true
     }
 
     fun replace(connections: Collection<ConnectionKey>, plan: ServerHelloRefreshPlan): Int {
         check(plugin.server.isPrimaryThread) { "Policy refresh queue must be replaced on the primary server thread" }
-        return queue.replace(connections, plan)
+        check(started) { "Policy refresh dispatcher has not started" }
+        val queued = queue.replace(connections, plan)
+        try {
+            if (queued > 0) {
+                ensureScheduled()
+            } else {
+                cancelScheduledTask()
+            }
+        } catch (failure: RuntimeException) {
+            queue.clear()
+            cancelScheduledTask()
+            throw failure
+        }
+        return queued
     }
 
     fun clear(): Int {
         check(plugin.server.isPrimaryThread) { "Policy refresh queue must be cleared on the primary server thread" }
+        cancelScheduledTask()
+        started = false
         return queue.clear()
+    }
+
+    private fun ensureScheduled() {
+        if (scheduledTask != null) {
+            return
+        }
+        scheduledTask = plugin.server.scheduler.runTaskTimer(plugin, Runnable(::drain), 1L, 1L)
+    }
+
+    private fun drain() {
+        try {
+            val result = queue.drain()
+            if (result.attemptedSessions > 0) {
+                reportBatch(result)
+            }
+            if (result.remainingSessions == 0) {
+                cancelScheduledTask()
+            }
+        } catch (error: Throwable) {
+            cancelScheduledTask()
+            throw error
+        }
+    }
+
+    private fun cancelScheduledTask() {
+        scheduledTask?.cancel()
+        scheduledTask = null
     }
 }

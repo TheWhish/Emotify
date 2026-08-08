@@ -5,8 +5,11 @@ import io.kotest.matchers.shouldBe
 import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
 import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
 import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
+import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import net.minecraft.resources.ResourceLocation
 
+@Suppress("unused")
 class FabricClientboundChannelSetTest : FunSpec({
     test("NeoForge configuration advertisement enables Fabric play payloads") {
         val configurationMask = FabricClientboundChannelSet.register(
@@ -78,6 +81,16 @@ class FabricClientboundChannelSetTest : FunSpec({
 
         configurationMask shouldBe FabricClientboundChannelSet.EMPTY
         FabricClientboundChannelSet.supportsProtocol(emptySet(), configurationMask) shouldBe false
+    }
+
+    test("custom emoji channels are tracked independently from base channels") {
+        val customMask = FabricClientboundChannelSet.register(
+            FabricClientboundChannelSet.EMPTY,
+            listOf(FabricCustomEmojiAssetPayload.TYPE.id(), FabricCustomEmotionPlayPayload.TYPE.id()),
+        )
+
+        FabricClientboundChannelSet.supportsCustomEmojis(emptySet(), customMask) shouldBe true
+        FabricClientboundChannelSet.supportsProtocol(emptySet(), customMask) shouldBe false
     }
 })
 

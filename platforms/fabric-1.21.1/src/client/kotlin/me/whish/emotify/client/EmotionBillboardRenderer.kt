@@ -5,33 +5,37 @@ import com.mojang.blaze3d.vertex.VertexConsumer
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.presentation.EmotionBillboardLayout
 import me.whish.emotify.client.presentation.EmotionBillboardPose
-import me.whish.emotify.client.presentation.EmotionPresentation
-import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionAnimationFrameBuffer
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import net.minecraft.client.Minecraft
 import net.minecraft.client.player.AbstractClientPlayer
-import net.minecraft.client.renderer.MultiBufferSource
-import net.minecraft.client.renderer.RenderType
 import net.minecraft.client.renderer.entity.player.PlayerRenderer
 import net.minecraft.client.renderer.texture.OverlayTexture
 import net.minecraft.world.entity.Pose
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents
 
 object EmotionBillboardRenderer {
     private val animationFrame = EmotionAnimationFrameBuffer()
-    private val renderTypes = java.util.Map.copyOf(
-        EmotionPresentationCatalog.ordered.map(EmotionPresentation::textureId).distinct().associateWith { textureId ->
-            RenderType.entityTranslucent(EmotionTextureResources.resolve(textureId), false)
-        },
-    )
+
+    fun register() {
+        WorldRenderEvents.AFTER_TRANSLUCENT.register { context ->
+            if (context.advancedTranslucency()) {
+                EmotionBillboardDeferredBuffer.flush()
+            }
+        }
+        WorldRenderEvents.LAST.register { context ->
+            if (!context.advancedTranslucency()) {
+                EmotionBillboardDeferredBuffer.flush()
+            }
+        }
+    }
 
     @JvmStatic
     fun render(
         player: AbstractClientPlayer,
         partialTick: Float,
         poseStack: PoseStack,
-        multiBufferSource: MultiBufferSource,
         packedLight: Int,
         renderer: PlayerRenderer,
     ) {
@@ -59,8 +63,7 @@ object EmotionBillboardRenderer {
         if (!hasVisibleSprite()) {
             return
         }
-        val presentation = EmotionPresentationCatalog.find(active.emotionId) ?: return
-        val renderType = renderTypes[presentation.textureId] ?: return
+        val presentation = EmotionPresentationRegistry.find(active.emotionId) ?: return
         poseStack.pushPose()
         try {
             val renderOffset = renderer.getRenderOffset(player, partialTick)
@@ -99,8 +102,13 @@ object EmotionBillboardRenderer {
             )
             poseStack.mulPose(minecraft.entityRenderDispatcher.cameraOrientation())
             val pose = poseStack.last()
-            val consumer = multiBufferSource.getBuffer(renderType)
-            val region = presentation.region
+            val pass = if (Minecraft.useShaderTransparency()) {
+                EmotionBillboardRenderPass.COMPOSITED
+            } else {
+                EmotionBillboardRenderPass.FINAL_DIRECT
+            }
+            val consumer = EmotionBillboardDeferredBuffer.consumer(presentation.textureId, pass)
+            val region = presentation.regionAt(elapsedMillis.toLong())
             var spriteIndex = animationFrame.spriteCount - 1
             while (spriteIndex >= 0) {
                 renderSprite(

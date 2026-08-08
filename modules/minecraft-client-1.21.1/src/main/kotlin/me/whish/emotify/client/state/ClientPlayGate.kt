@@ -3,6 +3,7 @@ package me.whish.emotify.client.state
 import java.util.UUID
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.protocol.EmotionPlay
+import me.whish.emotify.protocol.CustomEmotionPlay
 
 class ClientPlayGate {
     private var activeConnectionId = 0L
@@ -30,20 +31,56 @@ class ClientPlayGate {
         sourceUuid: UUID,
         sourceVisible: Boolean,
     ): Boolean {
-        if (activeConnectionId != connectionId) {
-            return false
-        }
         if (!allowedCatalog.contains(play.emotionId)) {
             return false
         }
-        if (play.entityId.value != sourceEntityId || play.sourceUuid != sourceUuid || !sourceVisible) {
+        return admitIdentity(
+            connectionId,
+            play.entityId.value,
+            play.sourceUuid,
+            play.sequence.value,
+            sourceEntityId,
+            sourceUuid,
+            sourceVisible,
+        )
+    }
+
+    fun admitCustom(
+        connectionId: Long,
+        play: CustomEmotionPlay,
+        sourceEntityId: Int,
+        sourceUuid: UUID,
+        sourceVisible: Boolean,
+    ): Boolean = admitIdentity(
+        connectionId,
+        play.entityId.value,
+        play.sourceUuid,
+        play.sequence.value,
+        sourceEntityId,
+        sourceUuid,
+        sourceVisible,
+    )
+
+    private fun admitIdentity(
+        connectionId: Long,
+        entityId: Int,
+        sourceUuid: UUID,
+        sequence: Long,
+        expectedEntityId: Int,
+        expectedSourceUuid: UUID,
+        sourceVisible: Boolean,
+    ): Boolean {
+        if (activeConnectionId != connectionId) {
             return false
         }
-        if (play.sequence.value <= lastAcceptedSequence) {
+        if (entityId != expectedEntityId || sourceUuid != expectedSourceUuid || !sourceVisible) {
+            return false
+        }
+        if (sequence <= lastAcceptedSequence) {
             return false
         }
 
-        lastAcceptedSequence = play.sequence.value
+        lastAcceptedSequence = sequence
         return true
     }
 }

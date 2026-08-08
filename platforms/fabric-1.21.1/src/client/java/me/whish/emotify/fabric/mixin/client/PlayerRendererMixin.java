@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(PlayerRenderer.class)
+@SuppressWarnings("unused")
 abstract class PlayerRendererMixin {
     @Inject(
         method = "render(Lnet/minecraft/client/player/AbstractClientPlayer;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V",
@@ -30,7 +31,6 @@ abstract class PlayerRendererMixin {
             player,
             partialTick,
             poseStack,
-            multiBufferSource,
             packedLight,
             (PlayerRenderer) (Object) this
         );

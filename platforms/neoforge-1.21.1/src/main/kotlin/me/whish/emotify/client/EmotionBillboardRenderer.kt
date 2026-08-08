@@ -1,20 +1,19 @@
 package me.whish.emotify.client
 
+import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.PoseStack
 import com.mojang.blaze3d.vertex.VertexConsumer
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.presentation.EmotionBillboardLayout
 import me.whish.emotify.client.presentation.EmotionBillboardPose
-import me.whish.emotify.client.presentation.EmotionPresentation
-import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionAnimationFrameBuffer
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import net.minecraft.client.Minecraft
 import net.minecraft.client.player.AbstractClientPlayer
-import net.minecraft.client.renderer.RenderType
 import net.minecraft.client.renderer.texture.OverlayTexture
 import net.minecraft.world.entity.Pose
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent
 import net.neoforged.neoforge.client.event.RenderPlayerEvent
 import net.neoforged.neoforge.client.event.RenderNameTagEvent
 import net.neoforged.bus.api.EventPriority
@@ -23,14 +22,10 @@ import net.neoforged.neoforge.common.util.TriState
 
 object EmotionBillboardRenderer {
     private val animationFrame = EmotionAnimationFrameBuffer()
-    private val renderTypes = java.util.Map.copyOf(
-        EmotionPresentationCatalog.ordered.map(EmotionPresentation::textureId).distinct().associateWith { textureId ->
-            RenderType.entityTranslucent(EmotionTextureResources.resolve(textureId), false)
-        },
-    )
 
     fun register() {
         NeoForge.EVENT_BUS.addListener(::onRenderPlayer)
+        NeoForge.EVENT_BUS.addListener(::onRenderLevelStage)
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST, ::onRenderNameTag)
     }
 
@@ -60,8 +55,7 @@ object EmotionBillboardRenderer {
         if (!hasVisibleSprite()) {
             return
         }
-        val presentation = EmotionPresentationCatalog.find(active.emotionId) ?: return
-        val renderType = renderTypes[presentation.textureId] ?: return
+        val presentation = EmotionPresentationRegistry.find(active.emotionId) ?: return
         val poseStack = event.poseStack
         poseStack.pushPose()
         try {
@@ -101,8 +95,13 @@ object EmotionBillboardRenderer {
             )
             poseStack.mulPose(minecraft.entityRenderDispatcher.cameraOrientation())
             val pose = poseStack.last()
-            val consumer = event.multiBufferSource.getBuffer(renderType)
-            val region = presentation.region
+            val pass = if (Minecraft.useShaderTransparency()) {
+                EmotionBillboardRenderPass.COMPOSITED
+            } else {
+                EmotionBillboardRenderPass.FINAL_DIRECT
+            }
+            val consumer = EmotionBillboardDeferredBuffer.consumer(presentation.textureId, pass)
+            val region = presentation.regionAt(elapsedMillis.toLong())
             var spriteIndex = animationFrame.spriteCount - 1
             while (spriteIndex >= 0) {
                 renderSprite(
@@ -117,6 +116,25 @@ object EmotionBillboardRenderer {
             }
         } finally {
             poseStack.popPose()
+        }
+    }
+
+    private fun onRenderLevelStage(event: RenderLevelStageEvent) {
+        when (event.stage) {
+            RenderLevelStageEvent.Stage.AFTER_PARTICLES -> {
+                if (Minecraft.useShaderTransparency()) {
+                    EmotionBillboardDeferredBuffer.flush()
+                }
+            }
+            RenderLevelStageEvent.Stage.AFTER_WEATHER -> {
+                if (!Minecraft.useShaderTransparency()) {
+                    try {
+                        EmotionBillboardDeferredBuffer.flush()
+                    } finally {
+                        RenderSystem.depthMask(false)
+                    }
+                }
+            }
         }
     }
 

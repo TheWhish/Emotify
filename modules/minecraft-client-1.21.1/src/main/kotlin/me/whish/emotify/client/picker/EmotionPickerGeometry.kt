@@ -2,7 +2,6 @@ package me.whish.emotify.client.picker
 
 import kotlin.math.abs
 import kotlin.math.exp
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 data class EmotionPickerTabBounds(
@@ -65,6 +64,11 @@ object EmotionPickerHitArea {
 }
 
 object EmotionPickerScrollMath {
+    class Motion(
+        var position: Double = 0.0,
+        var velocity: Double = 0.0,
+    )
+
     fun draggedAmount(
         current: Double,
         dragY: Double,
@@ -76,24 +80,56 @@ object EmotionPickerScrollMath {
         return (current + dragY * maximum / travel).coerceIn(0.0, maximum)
     }
 
-    fun animatedAmount(current: Double, target: Double, elapsedSeconds: Double): Double {
-        require(elapsedSeconds >= 0.0) { "Scroll elapsed time must not be negative: $elapsedSeconds" }
+    fun advance(
+        current: Double,
+        target: Double,
+        velocity: Double,
+        elapsedSeconds: Double,
+        output: Motion,
+    ) {
+        require(current.isFinite() && target.isFinite() && velocity.isFinite()) {
+            "Scroll motion must contain only finite values"
+        }
+        require(elapsedSeconds.isFinite() && elapsedSeconds >= 0.0) {
+            "Scroll elapsed time must be finite and non-negative: $elapsedSeconds"
+        }
         val distance = target - current
-        val absoluteDistance = abs(distance)
-        if (absoluteDistance <= SNAP_DISTANCE) {
-            return target
+        if (abs(distance) <= SNAP_DISTANCE && abs(velocity) <= SNAP_VELOCITY) {
+            output.position = target
+            output.velocity = 0.0
+            return
         }
-        val easedStep = absoluteDistance * (1.0 - exp(-RESPONSE * elapsedSeconds))
-        val step = max(easedStep, MINIMUM_SPEED * elapsedSeconds)
-        if (step >= absoluteDistance) {
-            return target
+        val directedVelocity = if (distance * velocity < 0.0) {
+            velocity * REVERSAL_VELOCITY_RETENTION
+        } else {
+            velocity
         }
-        return current + if (distance > 0.0) step else -step
+        val displacement = current - target
+        val decay = exp(-ANGULAR_FREQUENCY * elapsedSeconds)
+        val impulse = (directedVelocity + ANGULAR_FREQUENCY * displacement) * elapsedSeconds
+        val nextPosition = target + (displacement + impulse) * decay
+        val nextVelocity = ((directedVelocity - ANGULAR_FREQUENCY * impulse) * decay)
+            .coerceIn(-MAXIMUM_VELOCITY, MAXIMUM_VELOCITY)
+        val movement = nextPosition - current
+        if (distance * movement < 0.0) {
+            output.position = current
+            output.velocity = 0.0
+            return
+        }
+        if (distance * (target - nextPosition) <= 0.0) {
+            output.position = target
+            output.velocity = 0.0
+            return
+        }
+        output.position = nextPosition
+        output.velocity = nextVelocity
     }
 
-    private const val RESPONSE = 15.0
-    private const val MINIMUM_SPEED = 120.0
-    private const val SNAP_DISTANCE = 0.05
+    private const val ANGULAR_FREQUENCY = 20.0
+    private const val REVERSAL_VELOCITY_RETENTION = 0.25
+    private const val MAXIMUM_VELOCITY = 720.0
+    private const val SNAP_DISTANCE = 0.02
+    private const val SNAP_VELOCITY = 0.25
 }
 
 object EmotionPickerListMetrics {
@@ -144,6 +180,7 @@ object EmotionPickerGridMetrics {
 }
 
 object EmotionPickerLayoutMetrics {
+    const val PANEL_WIDTH = 246
     const val PANEL_EDGE_PADDING = EmotionPickerVisualMetrics.GAP + EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val TITLE_AREA_TOP = EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val TITLE_AREA_HEIGHT = 15
@@ -156,6 +193,13 @@ object EmotionPickerLayoutMetrics {
     const val NORMAL_LIST_Y_OFFSET = TAB_Y_OFFSET + TAB_HEIGHT + CONTROL_GAP
     const val SEARCH_FIELD_Y_OFFSET = NORMAL_LIST_Y_OFFSET
     const val SEARCH_LIST_Y_OFFSET = SEARCH_FIELD_Y_OFFSET + SEARCH_FIELD_HEIGHT + CONTROL_GAP
+}
+
+object EmotionPickerSideActionLayout {
+    const val SIZE = 20
+    const val GAP = EmotionPickerVisualMetrics.GAP
+    const val STRIDE = SIZE + GAP
+    const val RAIL_WIDTH = STRIDE
 }
 
 data class EmotionPickerGeometry(
@@ -191,6 +235,14 @@ data class EmotionPickerGeometry(
     val gridWidth: Int
         get() = cellWidths.sum() + (EmotionPickerGridLayout.COLUMNS - 1) * EmotionPickerListMetrics.CELL_GAP
 
+    val sideActionX: Int
+        get() = panelX + panelWidth + EmotionPickerSideActionLayout.GAP
+
+    fun sideActionY(index: Int): Int {
+        require(index >= 0) { "Side action index must not be negative: $index" }
+        return tabY + index * EmotionPickerSideActionLayout.STRIDE
+    }
+
     fun centeredTitleY(lineHeight: Int): Int = titleAreaY + (titleAreaHeight - lineHeight) / 2
 
     companion object {
@@ -200,7 +252,10 @@ data class EmotionPickerGeometry(
             sections: List<EmotionPickerSection>,
         ): EmotionPickerGeometry {
             require(sections.isNotEmpty()) { "Emotion picker requires at least one section" }
-            val panelWidth = (screenWidth - SCREEN_MARGIN * 2).coerceIn(MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)
+            val panelWidth = (
+                screenWidth -
+                    (EmotionPickerSideActionLayout.RAIL_WIDTH + SIDE_ACTION_VIEWPORT_MARGIN) * 2
+                ).coerceIn(MIN_PANEL_WIDTH, EmotionPickerLayoutMetrics.PANEL_WIDTH)
             val panelHeight = (screenHeight - SCREEN_MARGIN * 2).coerceIn(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT)
             val panelX = (screenWidth - panelWidth) / 2
             val panelY = (screenHeight - panelHeight) / 2
@@ -274,8 +329,8 @@ data class EmotionPickerGeometry(
         }
 
         private const val SCREEN_MARGIN = 10
-        private const val MIN_PANEL_WIDTH = 180
-        private const val MAX_PANEL_WIDTH = 246
+        private const val SIDE_ACTION_VIEWPORT_MARGIN = 2
+        private const val MIN_PANEL_WIDTH = 128
         private const val MIN_PANEL_HEIGHT = 150
         private const val MAX_PANEL_HEIGHT = 226
         private const val ICON_TAB_WIDTH = 20

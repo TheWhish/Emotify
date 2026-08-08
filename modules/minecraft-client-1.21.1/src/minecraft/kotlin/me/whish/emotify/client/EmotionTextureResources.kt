@@ -12,5 +12,11 @@ object EmotionTextureResources {
     )
 
     fun resolve(textureId: String): ResourceLocation =
-        requireNotNull(byTextureId[textureId]) { "Unknown emotion texture: $textureId" }
+        requireNotNull(
+            byTextureId[textureId]
+                ?: CustomEmojiRegistry.resolveTexture(textureId)
+                ?: RemoteCustomEmojiRegistry.resolveTexture(textureId),
+        ) {
+            "Unknown emotion texture: $textureId"
+        }
 }

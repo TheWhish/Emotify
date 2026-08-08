@@ -1,5 +1,9 @@
 config-version: 1
 enabled: true
+custom-emojis:
+  enabled: true
+  maximum-static-resolution: 128
+  maximum-animated-resolution: 64
 cooldown-millis: 2200
 emotions:
   allow: []

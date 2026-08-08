@@ -1,6 +1,10 @@
 package me.whish.emotify.wire.v1
 
 import me.whish.emotify.domain.EmotionCatalog
+import me.whish.emotify.protocol.CustomEmojiTransfer
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionPlay
+import me.whish.emotify.protocol.CustomEmotionSelection
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.EmotionSelection
@@ -17,6 +21,122 @@ object ProtocolV1Codecs {
     val selection: WireCodec<EmotionSelection> = EmotionSelectionCodec
     val play: WireCodec<EmotionPlay> = EmotionPlayCodec
     val selectionRejected: WireCodec<SelectionRejected> = SelectionRejectedCodec
+    val customSelection: WireCodec<CustomEmotionSelection> = CustomEmotionSelectionCodec
+    val customAsset: WireCodec<CustomEmojiTransfer> = CustomEmojiTransferCodec
+    val customAssetChunk: WireCodec<CustomEmojiAssetChunk> = CustomEmojiAssetChunkCodec
+    val customPlay: WireCodec<CustomEmotionPlay> = CustomEmotionPlayCodec
+}
+
+private object CustomEmojiAssetChunkCodec : BoundedWireCodec<CustomEmojiAssetChunk>(
+    ProtocolV1Limits.CUSTOM_ASSET_CHUNK_BODY_BYTES,
+) {
+    override fun computeEncodedSize(value: CustomEmojiAssetChunk): Int {
+        requireEncodableChunk(value)
+        return me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH +
+            varIntSize(value.totalBytes) +
+            varIntSize(value.index) +
+            varIntSize(value.count) +
+            value.dataLength
+    }
+
+    override fun encodeBody(writer: WireWriter, value: CustomEmojiAssetChunk) {
+        writer.writeCustomEmojiId(value.customEmojiId)
+        writer.writeVarInt(value.totalBytes)
+        writer.writeVarInt(value.index)
+        writer.writeVarInt(value.count)
+        value.writeData(writer)
+    }
+
+    override fun decodeBody(reader: WireReader): CustomEmojiAssetChunk {
+        val id = reader.readCustomEmojiId()
+        val totalBytes = reader.readCanonicalVarInt()
+        val index = reader.readCanonicalVarInt()
+        val count = reader.readCanonicalVarInt()
+        val data = reader.readBytes(reader.remainingBytes)
+        return try {
+            CustomEmojiAssetChunk.takeOwnership(id, totalBytes, index, count, data)
+                .also(::validateCustomEmojiAssetChunk)
+        } catch (exception: IllegalArgumentException) {
+            throw WireDecodeException(
+                WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+                "Invalid custom emoji asset chunk",
+                exception,
+            )
+        }
+    }
+
+    private fun requireEncodableChunk(chunk: CustomEmojiAssetChunk) {
+        val message = customEmojiAssetChunkValidationError(chunk) ?: return
+        throw WireEncodeException(WireEncodeViolation.UNENCODABLE_VALUE, message)
+    }
+}
+
+private object CustomEmotionSelectionCodec : BoundedWireCodec<CustomEmotionSelection>(
+    ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES,
+) {
+    override fun computeEncodedSize(value: CustomEmotionSelection): Int =
+        me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + 1 +
+            (value.asset?.let(::customEmojiAssetSize) ?: 0)
+
+    override fun encodeBody(writer: WireWriter, value: CustomEmotionSelection) {
+        writer.writeCustomEmojiId(value.customEmojiId)
+        writer.writeUnsignedByte(if (value.asset == null) 0 else 1)
+        value.asset?.let(writer::writeCustomEmojiAsset)
+    }
+
+    override fun decodeBody(reader: WireReader): CustomEmotionSelection {
+        val id = reader.readCustomEmojiId()
+        val asset = when (reader.readUnsignedByte()) {
+            0 -> null
+            1 -> reader.readCustomEmojiAsset(id)
+            else -> throw WireDecodeException(
+                WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+                "Invalid custom emoji asset presence flag",
+            )
+        }
+        return CustomEmotionSelection(id, asset)
+    }
+}
+
+private object CustomEmojiTransferCodec : BoundedWireCodec<CustomEmojiTransfer>(
+    ProtocolV1Limits.CUSTOM_ASSET_BODY_BYTES,
+) {
+    override fun computeEncodedSize(value: CustomEmojiTransfer): Int =
+        me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + customEmojiAssetSize(value.asset)
+
+    override fun encodeBody(writer: WireWriter, value: CustomEmojiTransfer) {
+        writer.writeCustomEmojiId(value.asset.id)
+        writer.writeCustomEmojiAsset(value.asset)
+    }
+
+    override fun decodeBody(reader: WireReader): CustomEmojiTransfer {
+        val id = reader.readCustomEmojiId()
+        return CustomEmojiTransfer(reader.readCustomEmojiAsset(id))
+    }
+}
+
+private object CustomEmotionPlayCodec : BoundedWireCodec<CustomEmotionPlay>(
+    ProtocolV1Limits.CUSTOM_PLAY_BODY_BYTES,
+) {
+    override fun computeEncodedSize(value: CustomEmotionPlay): Int =
+        varIntSize(value.entityId.value) + 16 + varLongSize(value.sequence.value) +
+            me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH
+
+    override fun encodeBody(writer: WireWriter, value: CustomEmotionPlay) {
+        writer.writeVarInt(value.entityId.value)
+        writer.writeUuid(value.sourceUuid)
+        writer.writeVarLong(value.sequence.value)
+        writer.writeCustomEmojiId(value.customEmojiId)
+    }
+
+    override fun decodeBody(reader: WireReader): CustomEmotionPlay {
+        val entityId = RuntimeEntityId.parse(reader.readCanonicalVarInt())
+            ?: throw WireDecodeException(WireDecodeViolation.INVALID_FIELD_VALUE, "Runtime entity ID must be positive")
+        val sourceUuid = reader.readUuid()
+        val sequence = EventSequence.parse(reader.readCanonicalVarLong())
+            ?: throw WireDecodeException(WireDecodeViolation.INVALID_FIELD_VALUE, "Event sequence must be positive")
+        return CustomEmotionPlay(entityId, sourceUuid, sequence, reader.readCustomEmojiId())
+    }
 }
 
 object ProtocolV1PortableProfile {

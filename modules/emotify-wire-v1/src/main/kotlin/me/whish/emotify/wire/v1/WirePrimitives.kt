@@ -3,6 +3,10 @@ package me.whish.emotify.wire.v1
 import java.util.UUID
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
+import me.whish.emotify.domain.CustomEmojiId
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiFrame
+import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
@@ -131,6 +135,258 @@ internal fun WireWriter.writeUuid(uuid: UUID) {
     writeLong(uuid.leastSignificantBits)
 }
 
+internal fun WireWriter.writeCustomEmojiId(id: CustomEmojiId) {
+    writeLong(id.mostSignificantBits)
+    writeLong(id.middleBits)
+    writeLong(id.leastSignificantBits)
+}
+
+internal fun WireReader.readCustomEmojiId(): CustomEmojiId = CustomEmojiId(
+    readLong(),
+    readLong(),
+    readLong(),
+)
+
+internal fun customEmojiPixelsSize(pixels: CustomEmojiPixels): Int {
+    requireLegacyCustomEmojiSize(pixels.size)
+    return 1 + customEmojiFramePixelsSize(pixels)
+}
+
+internal fun customEmojiAssetSize(asset: CustomEmojiAsset): Int {
+    requireLegacyCustomEmojiSize(asset.pixels.size)
+    return if (!asset.isAnimated) {
+        customEmojiPixelsSize(asset.pixels)
+    } else {
+        3 + asset.frames.sumOf { frame ->
+            varIntSize(frame.durationMillis) + customEmojiFramePixelsSize(frame.pixels)
+        }
+    }
+}
+
+internal fun WireWriter.writeCustomEmojiPixels(pixels: CustomEmojiPixels) {
+    requireLegacyCustomEmojiSize(pixels.size)
+    writeUnsignedByte(pixels.size)
+    writeCustomEmojiFramePixels(pixels)
+}
+
+internal fun WireWriter.writeCustomEmojiAsset(asset: CustomEmojiAsset) {
+    requireLegacyCustomEmojiSize(asset.pixels.size)
+    if (!asset.isAnimated) {
+        writeCustomEmojiPixels(asset.pixels)
+        return
+    }
+    writeUnsignedByte(ANIMATED_PIXELS)
+    writeUnsignedByte(asset.pixels.size)
+    writeUnsignedByte(asset.frames.size)
+    asset.frames.forEach { frame ->
+        writeVarInt(frame.durationMillis)
+        writeCustomEmojiFramePixels(frame.pixels)
+    }
+}
+
+private fun WireWriter.writeCustomEmojiFramePixels(pixels: CustomEmojiPixels) {
+    val palette = customEmojiPalette(pixels)
+    if (palette == null) {
+        writeUnsignedByte(RAW_PIXELS)
+        repeat(pixels.pixelCount) { index -> writeInt(pixels.colorAt(index)) }
+        return
+    }
+
+    writeUnsignedByte(PALETTE_PIXELS)
+    writeUnsignedByte(palette.colors.size)
+    palette.colors.forEach(::writeInt)
+    writeUnsignedByte(palette.bitsPerIndex)
+    var accumulator = 0
+    var accumulatedBits = 0
+    palette.indices.forEach { index ->
+        accumulator = accumulator or (index shl accumulatedBits)
+        accumulatedBits += palette.bitsPerIndex
+        while (accumulatedBits >= Byte.SIZE_BITS) {
+            writeUnsignedByte(accumulator and 0xFF)
+            accumulator = accumulator ushr Byte.SIZE_BITS
+            accumulatedBits -= Byte.SIZE_BITS
+        }
+    }
+    if (accumulatedBits > 0) {
+        writeUnsignedByte(accumulator)
+    }
+}
+
+internal fun WireReader.readCustomEmojiAsset(id: CustomEmojiId): CustomEmojiAsset {
+    val formatOrSize = readUnsignedByte()
+    val asset = if (formatOrSize == ANIMATED_PIXELS) {
+        val size = readCustomEmojiSize()
+        val frameCount = readUnsignedByte()
+        if (frameCount !in 2..CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
+            throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Invalid custom emoji frame count")
+        }
+        var cycleDurationMillis = 0
+        val frames = ArrayList<CustomEmojiFrame>(frameCount)
+        repeat(frameCount) {
+            val durationMillis = readCanonicalVarInt()
+            if (durationMillis !in CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS..CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS) {
+                throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Invalid custom emoji frame duration")
+            }
+            cycleDurationMillis += durationMillis
+            if (cycleDurationMillis > CustomEmojiAsset.MAXIMUM_CYCLE_DURATION_MILLIS) {
+                throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Custom emoji animation cycle is too long")
+            }
+            frames += CustomEmojiFrame(readCustomEmojiPixels(size), durationMillis)
+        }
+        CustomEmojiAsset.verify(id, frames)
+    } else {
+        CustomEmojiAsset.verify(id, readCustomEmojiPixels(formatOrSize))
+    }
+    return asset ?: throw WireDecodeException(
+        WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+        "Custom emoji content does not match its ID",
+    )
+}
+
+private fun WireReader.readCustomEmojiSize(): Int = readUnsignedByte().also { size ->
+    if (size != LEGACY_MINIMUM_CUSTOM_EMOJI_SIZE && size != LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+        throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Invalid custom emoji dimensions")
+    }
+}
+
+private fun requireLegacyCustomEmojiSize(size: Int) {
+    if (size != LEGACY_MINIMUM_CUSTOM_EMOJI_SIZE && size != LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+        throw WireEncodeException(
+            WireEncodeViolation.UNENCODABLE_VALUE,
+            "Legacy custom emoji dimensions must be 8x8 or 16x16: ${size}x$size",
+        )
+    }
+}
+
+private fun WireReader.readCustomEmojiPixels(size: Int): CustomEmojiPixels {
+    if (size != LEGACY_MINIMUM_CUSTOM_EMOJI_SIZE && size != LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+        throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Invalid custom emoji dimensions")
+    }
+    return when (readUnsignedByte()) {
+        RAW_PIXELS -> CustomEmojiPixels.of(size, IntArray(size * size) { readInt() })
+        PALETTE_PIXELS -> readPaletteCustomEmojiPixels(size)
+        else -> throw WireDecodeException(
+            WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+            "Unknown custom emoji pixel encoding",
+        )
+    }
+}
+
+private fun customEmojiFramePixelsSize(pixels: CustomEmojiPixels): Int =
+    customEmojiPalette(pixels)?.encodedSize ?: (1 + pixels.rawByteLength)
+
+private fun WireReader.readPaletteCustomEmojiPixels(size: Int): CustomEmojiPixels {
+    val pixelCount = size * size
+    val colorCount = readUnsignedByte()
+    if (colorCount !in 1..minOf(pixelCount, MAXIMUM_PALETTE_COLORS)) {
+        throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Invalid custom emoji palette size")
+    }
+    val colors = IntArray(colorCount) { readInt() }
+    val bitsPerIndex = readUnsignedByte()
+    if (bitsPerIndex != bitsForPalette(colorCount)) {
+        throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Non-canonical custom emoji palette width")
+    }
+    val pixels = IntArray(pixelCount)
+    var accumulator = 0
+    var accumulatedBits = 0
+    val mask = (1 shl bitsPerIndex) - 1
+    for (pixelIndex in pixels.indices) {
+        while (accumulatedBits < bitsPerIndex) {
+            accumulator = accumulator or (readUnsignedByte() shl accumulatedBits)
+            accumulatedBits += Byte.SIZE_BITS
+        }
+        val paletteIndex = accumulator and mask
+        if (paletteIndex >= colorCount) {
+            throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Custom emoji palette index is invalid")
+        }
+        pixels[pixelIndex] = colors[paletteIndex]
+        accumulator = accumulator ushr bitsPerIndex
+        accumulatedBits -= bitsPerIndex
+    }
+    if (accumulator != 0) {
+        throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, "Custom emoji padding is not zero")
+    }
+    return CustomEmojiPixels.of(size, pixels)
+}
+
+private fun customEmojiPalette(pixels: CustomEmojiPixels): CustomEmojiPalette? {
+    val colors = IntArray(minOf(pixels.pixelCount, MAXIMUM_PALETTE_COLORS))
+    val indices = IntArray(pixels.pixelCount)
+    val slots = IntArray(paletteSlotCount(pixels.pixelCount))
+    val slotMask = slots.lastIndex
+    var colorCount = 0
+    repeat(pixels.pixelCount) { pixelIndex ->
+        val color = pixels.colorAt(pixelIndex)
+        var slot = paletteHash(color) and slotMask
+        while (true) {
+            val encodedIndex = slots[slot]
+            if (encodedIndex == EMPTY_PALETTE_SLOT) {
+                if (colorCount == MAXIMUM_PALETTE_COLORS) {
+                    return null
+                }
+                colors[colorCount] = color
+                slots[slot] = colorCount + 1
+                indices[pixelIndex] = colorCount
+                colorCount += 1
+                break
+            }
+            val paletteIndex = encodedIndex - 1
+            if (colors[paletteIndex] == color) {
+                indices[pixelIndex] = paletteIndex
+                break
+            }
+            slot = (slot + 1) and slotMask
+        }
+    }
+    val bitsPerIndex = bitsForPalette(colorCount)
+    val encodedSize = 3 + colorCount * Int.SIZE_BYTES +
+        (pixels.pixelCount * bitsPerIndex + 7) / 8
+    if (encodedSize >= 1 + pixels.rawByteLength) {
+        return null
+    }
+    return CustomEmojiPalette(colors.copyOf(colorCount), indices, bitsPerIndex, encodedSize)
+}
+
+private fun paletteSlotCount(pixelCount: Int): Int {
+    val requiredSlots = minOf(pixelCount, MAXIMUM_PALETTE_COLORS) * 2
+    return Integer.highestOneBit(requiredSlots - 1) shl 1
+}
+
+private fun paletteHash(color: Int): Int {
+    var hash = color
+    hash = (hash xor (hash ushr 16)) * -2_048_144_789
+    hash = (hash xor (hash ushr 13)) * -1_028_477_387
+    return hash xor (hash ushr 16)
+}
+
+private fun bitsForPalette(colorCount: Int): Int = when {
+    colorCount <= 2 -> 1
+    colorCount <= 4 -> 2
+    colorCount <= 8 -> 3
+    colorCount <= 16 -> 4
+    colorCount <= 32 -> 5
+    colorCount <= 64 -> 6
+    colorCount <= 128 -> 7
+    else -> 8
+}
+
+private const val MAXIMUM_PALETTE_COLORS = 255
+private const val EMPTY_PALETTE_SLOT = 0
+
+private fun WireWriter.writeInt(value: Int) {
+    for (shift in 24 downTo 0 step 8) {
+        writeUnsignedByte(value ushr shift and 0xFF)
+    }
+}
+
+private fun WireReader.readInt(): Int {
+    var result = 0
+    repeat(Int.SIZE_BYTES) {
+        result = result shl Byte.SIZE_BITS or readUnsignedByte()
+    }
+    return result
+}
+
 internal fun WireReader.readUuid(): UUID = UUID(readLong(), readLong())
 
 internal data class DecodedCatalog(
@@ -162,13 +418,13 @@ internal fun WireReader.readCatalog(): DecodedCatalog {
     return DecodedCatalog(ids, containsDuplicates)
 }
 
-private fun WireWriter.writeLong(value: Long) {
+internal fun WireWriter.writeLong(value: Long) {
     for (shift in 56 downTo 0 step 8) {
         writeUnsignedByte((value ushr shift and 0xFF).toInt())
     }
 }
 
-private fun WireReader.readLong(): Long {
+internal fun WireReader.readLong(): Long {
     var result = 0L
     repeat(Long.SIZE_BYTES) {
         result = result shl Byte.SIZE_BITS or readUnsignedByte().toLong()
@@ -176,8 +432,20 @@ private fun WireReader.readLong(): Long {
     return result
 }
 
+private class CustomEmojiPalette(
+    val colors: IntArray,
+    val indices: IntArray,
+    val bitsPerIndex: Int,
+    val encodedSize: Int,
+)
+
 private const val MAX_VAR_INT_BYTES = 5
 private const val MAX_VAR_LONG_BYTES = 10
 private const val MIN_EMOTION_ID_BYTES = 3
 private const val MIN_ENCODED_EMOTION_ID_BYTES = 4
 private const val MAX_ASCII = 0x7F
+private const val RAW_PIXELS = 0
+private const val PALETTE_PIXELS = 1
+private const val ANIMATED_PIXELS = 0
+private const val LEGACY_MINIMUM_CUSTOM_EMOJI_SIZE = 8
+private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
