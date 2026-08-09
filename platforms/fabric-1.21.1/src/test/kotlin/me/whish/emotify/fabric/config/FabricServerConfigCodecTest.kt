@@ -56,17 +56,39 @@ class FabricServerConfigCodecTest : FunSpec({
         ) shouldBe FabricServerConfigDecodeResult.Future(2)
     }
 
-    test("legacy storage migration creates one exact backup and current snapshot") {
+    test("legacy storage migration raises the old cooldown and remains valid after restart") {
         val directory = Files.createTempDirectory("emotify-fabric-config-")
         try {
             val config = directory.resolve("emotify-server.properties")
-            val legacy = "enabled=false\ncooldownMillis=3000\n"
+            val legacy = """
+                enabled=true
+                customEmojis.enabled=true
+                customEmojis.maximumStaticResolution=128
+                customEmojis.maximumAnimatedResolution=64
+                cooldownMillis=2200
+                emotions.allow=
+                emotions.deny=
+                broadcast.radiusBlocks=64.0
+                broadcast.maximumTrackingCandidates=256
+                broadcast.globalBurstCapacity=512
+                broadcast.globalRefillPerSecond=256
+                broadcast.regionBurstCapacity=32
+                broadcast.regionRefillPerSecond=16
+                broadcast.maximumRegions=4096
+                ingress.maximumOutstandingSelections=512
+                ingress.globalBurstCapacity=1024
+                ingress.globalRefillPerSecond=512
+            """.trimIndent() + "\n"
             Files.writeString(config, legacy, StandardCharsets.UTF_8)
 
             val loaded = FabricServerConfigStorage.load(config)
+            val reloaded = FabricServerConfigStorage.load(config)
 
-            loaded.enabled shouldBe false
+            loaded.enabled shouldBe true
+            loaded.cooldownMillis shouldBe 3_000
+            reloaded shouldBe loaded
             Files.readString(config, StandardCharsets.UTF_8) shouldStartWith "configVersion=1\n"
+            Files.readString(config, StandardCharsets.UTF_8).contains("cooldownMillis=3000\n") shouldBe true
             Files.readString(
                 directory.resolve("emotify-server.properties.v0.bak"),
                 StandardCharsets.UTF_8,
@@ -97,6 +119,12 @@ class FabricServerConfigCodecTest : FunSpec({
     test("cooldown below the complete animation lifecycle fails closed") {
         shouldThrow<IllegalArgumentException> {
             FabricServerConfigCodec.decodeCompatible("cooldownMillis=2999\n")
+        }
+        shouldThrow<IllegalArgumentException> {
+            FabricServerConfigCodec.decode("configVersion=1\ncooldownMillis=2200\n")
+        }
+        shouldThrow<IllegalArgumentException> {
+            FabricServerConfigCodec.decode("cooldownMillis=2199\n")
         }
     }
 

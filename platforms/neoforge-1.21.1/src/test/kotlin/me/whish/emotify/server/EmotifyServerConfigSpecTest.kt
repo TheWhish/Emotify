@@ -45,12 +45,14 @@ class EmotifyServerConfigSpecTest : FunSpec({
         val config = CommentedConfig.inMemory()
         config.set<Int>("configVersion", 0)
         config.set<Boolean>("enabled", false)
+        config.set<Int>("cooldownMillis", 2_200)
 
         EmotifyServerConfig.spec.isCorrect(config) shouldBe false
         EmotifyServerConfig.spec.correct(config)
 
         config.get<Int>("configVersion") shouldBe 1
         config.get<Boolean>("enabled") shouldBe false
+        config.get<Int>("cooldownMillis") shouldBe 3_000
         EmotifyServerConfig.spec.isCorrect(config) shouldBe true
     }
 })

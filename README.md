@@ -15,7 +15,7 @@
 
 Emotify adds animated emotions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
-Version **0.5.0** adds nine drag-and-drop quick slots, number-key activation, safe configuration migration, player-to-player saving of custom emojis, and a refined picker across NeoForge, Fabric, Paper, and Purpur.
+Version **0.5.1** fixes legacy server-configuration migration after updating from earlier releases while preserving the quick slots, custom-emoji saving, and refined picker introduced in 0.5.0.
 
 ---
 
@@ -56,9 +56,9 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-neoforge-1.21.1-0.5.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric | `emotify-fabric-1.21.1-0.5.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur | `emotify-paper-1.21-0.5.0.jar` | `plugins`; has no additional server dependencies |
+| NeoForge | `emotify-neoforge-1.21.1-0.5.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric | `emotify-fabric-1.21.1-0.5.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur | `emotify-paper-1.21-0.5.1.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 
@@ -80,7 +80,7 @@ Custom emoji sharing is enabled by default and can be disabled independently fro
 | Fabric | `config/emotify-server.properties` |
 | Paper / Purpur | `plugins/Emotify/config.yml` |
 
-All server formats use configuration schema `1`. A valid versionless file is treated as legacy schema `0`, backed up, and migrated once without changing platform format. Fabric and Paper/Purpur create a fixed `.v0.bak`; NeoForge uses its bounded numbered `ModConfigSpec` backup. A future schema is never rewritten by an older build.
+All server formats use configuration schema `1`. A valid versionless file is treated as legacy schema `0`, backed up, and migrated once without changing platform format. Legacy cooldown values from `2200` to `2999` milliseconds are raised to the current safe minimum of `3000` during that migration. Fabric and Paper/Purpur create a fixed `.v0.bak`; NeoForge uses its bounded numbered `ModConfigSpec` backup. A future schema is never rewritten by an older build.
 
 NeoForge and Fabric apply their settings on server start. Paper and Purpur can apply them without restarting:
 

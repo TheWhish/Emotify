@@ -28,3 +28,14 @@ object ServerConfigurationSchema {
         }
     }
 }
+
+object LegacyServerConfigurationMigration {
+    const val MINIMUM_COOLDOWN_MILLIS = 2_200
+
+    fun cooldownMillis(value: Int): Int =
+        if (value in MINIMUM_COOLDOWN_MILLIS until ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS) {
+            ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS
+        } else {
+            value
+        }
+}

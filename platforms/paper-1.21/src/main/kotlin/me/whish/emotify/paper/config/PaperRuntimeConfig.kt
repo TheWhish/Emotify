@@ -7,7 +7,9 @@ import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.server.core.AudienceBudgetLimits
 import me.whish.emotify.server.core.GlobalSelectionIngressLimits
+import me.whish.emotify.server.core.LegacyServerConfigurationMigration
 import me.whish.emotify.server.core.ServerAudiencePolicy
+import me.whish.emotify.server.core.ServerConfigurationVersion
 
 data class PaperIngressConfiguration(
     val maximumQueuedMainThreadTasks: Int,
@@ -108,7 +110,11 @@ object PaperRuntimeConfigParser {
         "ingress.global-refill-per-second",
     )
 
-    fun parse(document: PaperConfigDocument, catalog: EmotionCatalog): PaperConfigParseResult {
+    fun parse(
+        document: PaperConfigDocument,
+        catalog: EmotionCatalog,
+        configurationVersion: ServerConfigurationVersion = ServerConfigurationVersion.Current,
+    ): PaperConfigParseResult {
         val violations = BoundedViolations()
         if (document.keys.size > MAXIMUM_DOCUMENT_KEYS) {
             violations += "Configuration contains more than $MAXIMUM_DOCUMENT_KEYS keys"
@@ -117,9 +123,14 @@ object PaperRuntimeConfigParser {
             violations += "Unknown configuration key: $path"
         }
 
-        val version = readInt(document, "config-version", CONFIG_VERSION, violations)
-        if (version != CONFIG_VERSION) {
-            violations += "config-version must be $CONFIG_VERSION: $version"
+        val expectedVersion = when (configurationVersion) {
+            ServerConfigurationVersion.Legacy -> 0
+            ServerConfigurationVersion.Current -> CONFIG_VERSION
+            is ServerConfigurationVersion.Future -> configurationVersion.value
+        }
+        val declaredVersion = readInt(document, "config-version", expectedVersion, violations)
+        if (declaredVersion != expectedVersion) {
+            violations += "config-version must be $expectedVersion: $declaredVersion"
         }
         val enabled = readEnabled(document, violations)
         val customEmojisEnabled = readBoolean(
@@ -143,12 +154,17 @@ object PaperRuntimeConfigParser {
         if (maximumAnimatedCustomEmojiSize > maximumStaticCustomEmojiSize) {
             violations += "$MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_PATH cannot exceed $MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_PATH"
         }
-        val cooldownMillis = readInt(
+        val configuredCooldownMillis = readInt(
             document,
             "cooldown-millis",
             EmotionAnimation.DURATION_MILLIS.toInt(),
             violations,
-        ).validatedRange(
+        )
+        val cooldownMillis = when (configurationVersion) {
+            ServerConfigurationVersion.Legacy -> LegacyServerConfigurationMigration.cooldownMillis(configuredCooldownMillis)
+            ServerConfigurationVersion.Current -> configuredCooldownMillis
+            is ServerConfigurationVersion.Future -> configuredCooldownMillis
+        }.validatedRange(
             "cooldown-millis",
             EmotionAnimation.DURATION_MILLIS.toInt(),
             ServerHello.MAX_COOLDOWN_MILLIS,

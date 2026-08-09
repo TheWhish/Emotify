@@ -9,6 +9,7 @@ import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.server.core.ServerConfigurationFileIO
 import me.whish.emotify.server.core.ServerConfigurationSchema
 import me.whish.emotify.server.core.ServerConfigurationVersion
+import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
@@ -63,12 +64,13 @@ class BukkitPaperConfigLoader(
             val parsed = PaperRuntimeConfigParser.parse(
                 PaperConfigDocument(flattened.values),
                 catalog,
+                version,
             )
         ) {
             is PaperConfigParseResult.Loaded -> {
                 if (version == ServerConfigurationVersion.Legacy) {
                     try {
-                        migrateLegacy(source)
+                        migrateLegacy(source, root, parsed.config)
                     } catch (exception: Exception) {
                         return PaperConfigLoadResult.Failed(exception)
                     }
@@ -94,9 +96,12 @@ class BukkitPaperConfigLoader(
         else -> throw ConfigInputViolation("config-version must be an integer")
     }
 
-    private fun migrateLegacy(source: String) {
+    private fun migrateLegacy(source: String, root: Any?, config: PaperRuntimeConfig) {
         val path = configFile.toPath()
-        val migrated = migratedSource(source)
+        val migrated = migratedSource(root, config)
+        require(migrated.toByteArray(StandardCharsets.UTF_8).size <= MAXIMUM_CONFIG_BYTES) {
+            "Migrated config.yml exceeds the $MAXIMUM_CONFIG_BYTES byte limit"
+        }
         ServerConfigurationFileIO.createBackupIfAbsent(
             path,
             path.resolveSibling("${path.fileName}.v0.bak"),
@@ -105,43 +110,19 @@ class BukkitPaperConfigLoader(
         ServerConfigurationFileIO.writeUtf8Atomically(path, migrated)
     }
 
-    private fun migratedSource(source: String): String {
-        val bodyStart = if (source.startsWith(UTF8_BOM)) 1 else 0
-        val newline = if (source.contains("\r\n")) "\r\n" else "\n"
-        val documentMarkerEnd = standaloneDocumentMarkerEnd(source, bodyStart)
-        val insertion = documentMarkerEnd ?: bodyStart
-        val leadingNewline = if (
-            documentMarkerEnd != null &&
-            insertion > bodyStart &&
-            source[insertion - 1] != '\n' &&
-            source[insertion - 1] != '\r'
-        ) {
-            newline
-        } else {
-            ""
-        }
-        val declaration = "$leadingNewline$CONFIG_VERSION_PATH: ${ServerConfigurationSchema.CURRENT_VERSION}$newline"
-        return source.substring(0, insertion) + declaration + source.substring(insertion)
-    }
-
-    private fun standaloneDocumentMarkerEnd(source: String, bodyStart: Int): Int? {
-        var cursor = bodyStart
-        while (cursor < source.length) {
-            val lineFeed = source.indexOf('\n', cursor)
-            val lineEnd = if (lineFeed >= 0) lineFeed else source.length
-            val contentEnd = if (lineEnd > cursor && source[lineEnd - 1] == '\r') lineEnd - 1 else lineEnd
-            val line = source.substring(cursor, contentEnd).trim()
-            val nextLine = if (lineFeed >= 0) lineFeed + 1 else lineEnd
-            when {
-                line.isEmpty() || line.startsWith('#') || line.startsWith('%') -> cursor = nextLine
-                line == "---" || line.startsWith("--- #") -> return nextLine
-                line.startsWith("--- ") -> throw ConfigInputViolation(
-                    "Legacy YAML document content must begin below the --- marker before migration",
-                )
-                else -> return null
+    private fun migratedSource(root: Any?, config: PaperRuntimeConfig): String {
+        val source = root as? Map<*, *> ?: emptyMap<Any?, Any?>()
+        val migrated = LinkedHashMap<Any?, Any?>(source.size + 1)
+        migrated[CONFIG_VERSION_PATH] = ServerConfigurationSchema.CURRENT_VERSION
+        source.forEach { (key, value) ->
+            if (key != CONFIG_VERSION_PATH && key != COOLDOWN_MILLIS_PATH) {
+                migrated[key] = value
             }
         }
-        return null
+        if (source.containsKey(COOLDOWN_MILLIS_PATH)) {
+            migrated[COOLDOWN_MILLIS_PATH] = config.cooldownMillis
+        }
+        return Yaml(DUMPER_OPTIONS).dump(migrated)
     }
 
     private fun readBoundedUtf8(): String {
@@ -262,7 +243,7 @@ class BukkitPaperConfigLoader(
 
     private companion object {
         const val CONFIG_VERSION_PATH = "config-version"
-        const val UTF8_BOM = '\uFEFF'
+        const val COOLDOWN_MILLIS_PATH = "cooldown-millis"
         const val MAXIMUM_CONFIG_BYTES = 65_536
         const val MAXIMUM_NESTING_DEPTH = 4
         const val MAXIMUM_DOCUMENT_ENTRIES = 64
@@ -270,5 +251,10 @@ class BukkitPaperConfigLoader(
         const val MAXIMUM_KEY_LENGTH = 64
         const val MAXIMUM_VIOLATIONS = 32
         const val MAXIMUM_FAILURE_MESSAGE_LENGTH = 256
+        val DUMPER_OPTIONS = DumperOptions().apply {
+            defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+            indent = 2
+            indicatorIndent = 0
+        }
     }
 }

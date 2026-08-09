@@ -29,19 +29,23 @@ class BukkitPaperConfigLoaderTest : FunSpec({
 
     fun load(source: String): PaperConfigLoadResult = load(source.toByteArray(Charsets.UTF_8))
 
-    test("valid legacy YAML is backed up exactly and migrated to schema one") {
+    test("valid legacy YAML raises the old cooldown and remains valid after restart") {
         val directory = Files.createTempDirectory("emotify-config-migration-")
         try {
             val config = directory.resolve("config.yml")
-            val legacy = "enabled: false\ncooldown-millis: 3000\n"
+            val legacy = "enabled: false\ncooldown-millis: 2200\n"
             Files.writeString(config, legacy, StandardCharsets.UTF_8)
 
             val result = BukkitPaperConfigLoader(config.toFile(), catalog).load()
                 .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
 
             result.config.enabled shouldBe false
+            result.config.cooldownMillis shouldBe 3_000
             Files.readString(config, StandardCharsets.UTF_8) shouldStartWith "config-version: 1\n"
+            Files.readString(config, StandardCharsets.UTF_8) shouldContain "cooldown-millis: 3000"
             Files.readString(directory.resolve("config.yml.v0.bak"), StandardCharsets.UTF_8) shouldBe legacy
+            BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
         } finally {
             directory.toFile().deleteRecursively()
         }
@@ -51,7 +55,7 @@ class BukkitPaperConfigLoaderTest : FunSpec({
         val directory = Files.createTempDirectory("emotify-config-document-")
         try {
             val config = directory.resolve("config.yml")
-            val legacy = "# retained\n---\nenabled: false\n"
+            val legacy = "# retained\n---\nconfig-version: 0\nenabled: false\n"
             Files.writeString(config, legacy, StandardCharsets.UTF_8)
 
             BukkitPaperConfigLoader(config.toFile(), catalog).load()
@@ -81,6 +85,13 @@ class BukkitPaperConfigLoaderTest : FunSpec({
         } finally {
             directory.toFile().deleteRecursively()
         }
+    }
+
+    test("current and corrupt legacy cooldowns below the lifecycle fail closed") {
+        load("config-version: 1\ncooldown-millis: 2200\n")
+            .shouldBeInstanceOf<PaperConfigLoadResult.Invalid>()
+        load("cooldown-millis: 2199\n")
+            .shouldBeInstanceOf<PaperConfigLoadResult.Invalid>()
     }
 
     test("future YAML remains opaque and byte-for-byte unchanged") {

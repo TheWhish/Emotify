@@ -7,6 +7,7 @@ import me.whish.emotify.fabric.EmotifyFabric
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.server.core.AudienceBudgetLimits
 import me.whish.emotify.server.core.GlobalSelectionIngressLimits
+import me.whish.emotify.server.core.LegacyServerConfigurationMigration
 import me.whish.emotify.server.core.ServerAudiencePolicy
 import me.whish.emotify.server.core.ServerConfigurationFileIO
 import me.whish.emotify.server.core.ServerConfigurationSchema
@@ -80,13 +81,14 @@ object FabricServerConfigCodec {
             is ServerConfigurationVersion.Future -> FabricServerConfigDecodeResult.Future(version.value)
             ServerConfigurationVersion.Current,
             ServerConfigurationVersion.Legacy,
-            -> FabricServerConfigDecodeResult.Ready(decodeCompatible(source, defaults), version)
+            -> FabricServerConfigDecodeResult.Ready(decodeCompatible(source, defaults, version), version)
         }
     }
 
     fun decodeCompatible(
         source: String,
         defaults: FabricServerConfigSnapshot = FabricServerConfigSnapshot(),
+        version: ServerConfigurationVersion = ServerConfigurationVersion.Current,
     ): FabricServerConfigSnapshot {
         var enabled = defaults.enabled
         var customEmojisEnabled = defaults.customEmojisEnabled
@@ -126,11 +128,7 @@ object FabricServerConfigCodec {
                 CUSTOM_EMOJIS_ENABLED_KEY -> customEmojisEnabled = value.toBooleanStrict()
                 MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_KEY -> maximumStaticCustomEmojiSize = value.toSupportedSize(128)
                 MAXIMUM_ANIMATED_CUSTOM_EMOJI_SIZE_KEY -> maximumAnimatedCustomEmojiSize = value.toSupportedSize(64)
-                COOLDOWN_MILLIS_KEY -> cooldownMillis = value.toBoundedInt(
-                    ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS,
-                    10_000,
-                    key,
-                )
+                COOLDOWN_MILLIS_KEY -> cooldownMillis = value.toCooldownMillis(version, key)
                 ALLOWED_EMOTIONS_KEY -> allowedEmotionIds = value.toEmotionIds(key)
                 DENIED_EMOTIONS_KEY -> deniedEmotionIds = value.toEmotionIds(key)
                 BROADCAST_RADIUS_KEY -> broadcastRadiusBlocks = value.toBoundedDouble(1.0, 64.0, key)
@@ -207,6 +205,19 @@ object FabricServerConfigCodec {
 
     private fun String.toBoundedInt(minimum: Int, maximum: Int, key: String): Int = toInt().also { value ->
         require(value in minimum..maximum) { "$key must be between $minimum and $maximum: $value" }
+    }
+
+    private fun String.toCooldownMillis(version: ServerConfigurationVersion, key: String): Int {
+        val parsed = toInt()
+        val compatible = when (version) {
+            ServerConfigurationVersion.Legacy -> LegacyServerConfigurationMigration.cooldownMillis(parsed)
+            ServerConfigurationVersion.Current -> parsed
+            is ServerConfigurationVersion.Future -> error("Future server configuration must remain opaque")
+        }
+        require(compatible in ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS..10_000) {
+            "$key must be between ${ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS} and 10000: $parsed"
+        }
+        return compatible
     }
 
     private fun String.toBoundedDouble(minimum: Double, maximum: Double, key: String): Double =
