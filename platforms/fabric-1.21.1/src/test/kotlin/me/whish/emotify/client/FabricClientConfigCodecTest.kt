@@ -11,6 +11,7 @@ import me.whish.emotify.client.settings.ClientConfigurationSnapshot
 import me.whish.emotify.client.settings.ClientSettingsSnapshot
 import me.whish.emotify.client.settings.IgnoredPlayerIdentity
 import me.whish.emotify.client.settings.IgnoredPlayerIdentityCodec
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.EmotionId
 
 @Suppress("unused")
@@ -24,6 +25,7 @@ class FabricClientConfigCodecTest : FunSpec({
     val defaults = ClientConfigurationSnapshot.create(ClientSettingsSnapshot.defaults(), listOf(first, second))
 
     test("config round trip preserves every setting and ordered favorites") {
+        val custom = CustomEmojiId(1L, 2L, 3L).emotionId
         val snapshot = ClientConfigurationSnapshot.create(
             ClientSettingsSnapshot.create(
                 false,
@@ -33,7 +35,7 @@ class FabricClientConfigCodecTest : FunSpec({
                 showCustomEmotions = false,
             ),
             listOf(first, second),
-            listOf(second, first),
+            listOf(second, custom, first),
         )
 
         val encoded = FabricClientConfigCodec.encode(snapshot)

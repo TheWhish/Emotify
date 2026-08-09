@@ -202,6 +202,22 @@ class ClientFavoritesPersistenceTest : FunSpec({
         writes.shouldContainExactly("base-settings-favorites")
     }
 
+    test("identity preserving update does not schedule redundant persistence") {
+        val executor = ManualExecutor()
+        val writes = mutableListOf<String>()
+        val store = SerializedSnapshotStore(
+            loader = { "stable" },
+            executor = executor,
+            sink = writes::add,
+            onFailure = { error -> throw error },
+        )
+
+        store.update { current -> current } shouldBe "stable"
+
+        executor.pendingTasks shouldBeExactly 0
+        writes shouldBe emptyList()
+    }
+
     test("read only updates change memory without scheduling persistence") {
         val executor = ManualExecutor()
         val writes = mutableListOf<String>()

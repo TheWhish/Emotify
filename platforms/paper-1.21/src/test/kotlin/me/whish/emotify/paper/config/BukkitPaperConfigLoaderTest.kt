@@ -87,6 +87,16 @@ class BukkitPaperConfigLoaderTest : FunSpec({
         }
     }
 
+    test("non regular configuration path is rejected as invalid input") {
+        val directory = Files.createTempDirectory("emotify-config-non-file-")
+        try {
+            BukkitPaperConfigLoader(directory.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Invalid>()
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
     test("current and corrupt legacy cooldowns below the lifecycle fail closed") {
         load("config-version: 1\ncooldown-millis: 2200\n")
             .shouldBeInstanceOf<PaperConfigLoadResult.Invalid>()

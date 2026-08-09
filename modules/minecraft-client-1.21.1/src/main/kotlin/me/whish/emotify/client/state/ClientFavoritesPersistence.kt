@@ -45,9 +45,12 @@ class SerializedSnapshotStore<T : Any>(
             current = loader()
             initialized = true
         }
-        transform(checkNotNull(current)).also { snapshot ->
-            current = snapshot
-            writer.submit(snapshot)
+        val previous = checkNotNull(current)
+        transform(previous).also { snapshot ->
+            if (snapshot !== previous) {
+                current = snapshot
+                writer.submit(snapshot)
+            }
         }
     }
 
@@ -56,7 +59,12 @@ class SerializedSnapshotStore<T : Any>(
             current = loader()
             initialized = true
         }
-        transform(checkNotNull(current)).also { snapshot -> current = snapshot }
+        val previous = checkNotNull(current)
+        transform(previous).also { snapshot ->
+            if (snapshot !== previous) {
+                current = snapshot
+            }
+        }
     }
 
     fun flush(timeout: Long, unit: TimeUnit): Boolean = writer.flush(timeout, unit)

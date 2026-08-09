@@ -79,6 +79,9 @@ object ClientConfigurationFileIO {
 
     private fun readBytes(path: Path, maximumBytes: Int): ByteArray {
         validateMaximumBytes(maximumBytes)
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            "Emotify client config is not a regular file: $path"
+        }
         val bytes = Files.newInputStream(path).use { input -> input.readNBytes(maximumBytes + 1) }
         require(bytes.size <= maximumBytes) { "Emotify client config exceeds $maximumBytes bytes" }
         return bytes

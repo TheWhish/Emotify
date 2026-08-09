@@ -180,6 +180,7 @@ class EmotionPickerScreen(
         }
         CustomEmojiRegistry.refreshIfChanged(client) {
             if (client.screen === this) {
+                quickSlots = loadQuickSlotsSnapshot()
                 applyPolicy(context)
             }
         }

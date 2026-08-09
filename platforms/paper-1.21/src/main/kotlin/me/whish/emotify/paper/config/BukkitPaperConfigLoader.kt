@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.server.core.ServerConfigurationFileIO
 import me.whish.emotify.server.core.ServerConfigurationSchema
@@ -127,6 +128,9 @@ class BukkitPaperConfigLoader(
 
     private fun readBoundedUtf8(): String {
         val path = configFile.toPath()
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw ConfigInputViolation("config.yml must be a regular file")
+        }
         val declaredSize = Files.size(path)
         if (declaredSize > MAXIMUM_CONFIG_BYTES) {
             throw ConfigInputViolation("config.yml exceeds the $MAXIMUM_CONFIG_BYTES byte limit")
@@ -192,7 +196,7 @@ class BukkitPaperConfigLoader(
                 return
             }
             val key = rawKey as? String
-            if (key == null || key.isBlank() || key.length > MAXIMUM_KEY_LENGTH) {
+            if (key.isNullOrBlank() || key.length > MAXIMUM_KEY_LENGTH) {
                 violations.add("Configuration keys must be non-blank strings up to $MAXIMUM_KEY_LENGTH characters")
                 continue
             }

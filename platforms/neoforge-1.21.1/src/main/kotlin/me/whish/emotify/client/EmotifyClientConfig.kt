@@ -177,6 +177,10 @@ object EmotifyClientConfig {
         updateSnapshot { current -> current.withQuickSlots(ids) }
     }
 
+    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>) {
+        updateSnapshot { current -> current.retainAvailableCustomQuickSlots(availableCustomEmotionIds) }
+    }
+
     fun flush() {
         if (
             !snapshots.flush(CONFIG_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS) &&
@@ -208,7 +212,7 @@ object EmotifyClientConfig {
                 showCustomEmotions.get(),
             ),
             favorites = favorites,
-            quickSlots = loadQuickSlotIds(favorites),
+            quickSlots = decodeNeoForgeQuickSlotIds(quickSlotIds.get()),
         )
     }
 
@@ -233,20 +237,6 @@ object EmotifyClientConfig {
         return normalizedFavorites(configured.mapNotNull(EmotionId::parse))
     }
 
-    private fun loadQuickSlotIds(favorites: List<EmotionId>): List<EmotionId?> {
-        val configured = quickSlotIds.get()
-        if (configured.size != ClientConfigurationSchema.QUICK_SLOT_COUNT) {
-            Emotify.LOGGER.warn("Ignoring Emotify quick slots with invalid size: {}", configured.size)
-            return defaultQuickSlots()
-        }
-        val favoriteSet = favorites.toSet()
-        val assigned = HashSet<EmotionId>(ClientConfigurationSchema.QUICK_SLOT_COUNT)
-        return configured.map { value ->
-            val emotionId = EmotionId.parse(value)
-            emotionId?.takeIf { candidate -> candidate in favoriteSet && assigned.add(candidate) }
-        }
-    }
-
     private fun persistSnapshot(snapshot: ClientConfigurationSnapshot) {
         check(writesAllowed && configRegistered) { "Emotify client configuration is read-only for this session" }
         configVersion.set(snapshot.schemaVersion)
@@ -264,9 +254,6 @@ object EmotifyClientConfig {
         ClientSettingsSnapshot.defaults(),
         BuiltInEmotionManifest.defaultFavoriteIds,
     )
-
-    private fun defaultQuickSlots(): List<EmotionId?> =
-        List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { null }
 
     private fun normalizedFavorites(ids: Collection<EmotionId>): List<EmotionId> = java.util.List.copyOf(
         ids.asSequence()
@@ -292,4 +279,15 @@ object EmotifyClientConfig {
     private const val CLIENT_CONFIG_FILE_NAME = "${Emotify.ID}-client.toml"
     private const val MAXIMUM_CONFIG_BYTES = 65_536
     private const val CONFIG_FLUSH_TIMEOUT_SECONDS = 2L
+}
+
+internal fun decodeNeoForgeQuickSlotIds(configured: List<String>): List<EmotionId?> {
+    if (configured.size != ClientConfigurationSchema.QUICK_SLOT_COUNT) {
+        Emotify.LOGGER.warn("Ignoring Emotify quick slots with invalid size: {}", configured.size)
+        return List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { null }
+    }
+    val assigned = HashSet<EmotionId>(ClientConfigurationSchema.QUICK_SLOT_COUNT)
+    return configured.map { value ->
+        EmotionId.parse(value)?.takeIf(assigned::add)
+    }
 }

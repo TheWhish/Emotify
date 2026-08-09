@@ -71,4 +71,10 @@ class ClientConfigurationFileIOTest : FunSpec({
             ClientConfigurationFileIO.readUtf8(malformed, 8)
         }
     }
+
+    test("bounded reads reject non regular config paths") {
+        shouldThrow<IllegalArgumentException> {
+            ClientConfigurationFileIO.readUtf8(directory, 64)
+        }
+    }
 })

@@ -3,9 +3,11 @@ package me.whish.emotify.client
 import com.electronwill.nightconfig.core.CommentedConfig
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import me.whish.emotify.client.settings.ClientConfigurationSchema
 import me.whish.emotify.client.settings.ClientConfigurationVersion
+import me.whish.emotify.domain.CustomEmojiId
 
 @Suppress("unused")
 class EmotifyClientConfigSpecTest : FunSpec({
@@ -57,5 +59,23 @@ class EmotifyClientConfigSpecTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             NeoForgeClientConfigVersionCodec.inspect("configVersion=invalid\n")
         }
+    }
+
+    test("quick slots retain custom emotions independently from favorites") {
+        val custom = CustomEmojiId(1L, 2L, 3L).emotionId
+
+        decodeNeoForgeQuickSlotIds(
+            listOf(custom.value) + List(ClientConfigurationSchema.QUICK_SLOT_COUNT - 1) { "" },
+        ).shouldContainExactly(
+            custom,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        )
     }
 })

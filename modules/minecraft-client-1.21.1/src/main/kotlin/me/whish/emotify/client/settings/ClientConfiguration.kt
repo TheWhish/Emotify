@@ -2,6 +2,7 @@ package me.whish.emotify.client.settings
 
 import java.util.Collections
 import me.whish.emotify.domain.EmotionCatalog
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.EmotionId
 
 sealed interface ClientConfigurationVersion {
@@ -46,15 +47,17 @@ data class ClientConfigurationSnapshot private constructor(
         get() = ClientConfigurationSchema.CURRENT_VERSION
 
     fun withSettings(settings: ClientSettingsSnapshot): ClientConfigurationSnapshot =
-        create(settings, favorites, quickSlots)
+        if (settings == this.settings) this else create(settings, favorites, quickSlots)
 
     fun withFavorites(favorites: Collection<EmotionId>): ClientConfigurationSnapshot {
         val normalizedFavorites = normalizeFavorites(favorites)
-        return create(settings, normalizedFavorites, quickSlots)
+        return if (normalizedFavorites == this.favorites) this else create(settings, normalizedFavorites, quickSlots)
     }
 
-    fun withQuickSlots(quickSlots: Collection<EmotionId?>): ClientConfigurationSnapshot =
-        create(settings, favorites, quickSlots)
+    fun withQuickSlots(quickSlots: Collection<EmotionId?>): ClientConfigurationSnapshot {
+        val updated = create(settings, favorites, quickSlots)
+        return if (updated.quickSlots == this.quickSlots) this else updated
+    }
 
     fun quickSlot(index: Int): EmotionId? {
         requireQuickSlotIndex(index)
@@ -84,6 +87,21 @@ data class ClientConfigurationSnapshot private constructor(
         val updatedSlots = ArrayList(quickSlots)
         updatedSlots[index] = null
         return create(settings, favorites, updatedSlots)
+    }
+
+    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>): ClientConfigurationSnapshot {
+        var updatedSlots: ArrayList<EmotionId?>? = null
+        quickSlots.forEachIndexed { index, emotionId ->
+            if (
+                emotionId != null &&
+                emotionId.value.startsWith(CUSTOM_EMOTION_ID_PREFIX) &&
+                emotionId !in availableCustomEmotionIds
+            ) {
+                val mutableSlots = updatedSlots ?: ArrayList(quickSlots).also { updatedSlots = it }
+                mutableSlots[index] = null
+            }
+        }
+        return updatedSlots?.let { slots -> create(settings, favorites, slots) } ?: this
     }
 
     companion object {
@@ -136,6 +154,8 @@ data class ClientConfigurationSnapshot private constructor(
                 "Quick slot index must be between 0 and ${ClientConfigurationSchema.QUICK_SLOT_COUNT - 1}: $index"
             }
         }
+
+        private const val CUSTOM_EMOTION_ID_PREFIX = "${CustomEmojiId.NAMESPACE}:"
     }
 }
 

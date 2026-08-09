@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.EmotionId
 
 @Suppress("unused")
@@ -92,6 +93,15 @@ class ClientConfigurationMigrationTest : FunSpec({
         slotsUpdate.quickSlots.take(2).shouldContainExactly(null, second)
     }
 
+    test("semantically unchanged snapshot updates preserve identity") {
+        val settings = ClientSettingsSnapshot.defaults()
+        val snapshot = ClientConfigurationSnapshot.create(settings, listOf(first, second), listOf(first, second))
+
+        (snapshot.withSettings(settings) === snapshot) shouldBe true
+        (snapshot.withFavorites(listOf(first, second, first)) === snapshot) shouldBe true
+        (snapshot.withQuickSlots(snapshot.quickSlots) === snapshot) shouldBe true
+    }
+
     test("assigning a quick slot atomically moves an existing emotion") {
         val snapshot = ClientConfigurationSnapshot.create(
             ClientSettingsSnapshot.defaults(),
@@ -131,6 +141,33 @@ class ClientConfigurationMigrationTest : FunSpec({
         cleared.quickSlotNumber(first) shouldBe null
         cleared.clearQuickSlot(0) shouldBe cleared
         snapshot.quickSlot(0) shouldBe first
+    }
+
+    test("missing local custom emotions are removed without touching built in slots") {
+        val availableCustom = CustomEmojiId(1L, 2L, 3L).emotionId
+        val missingCustom = CustomEmojiId(4L, 5L, 6L).emotionId
+        val malformedCustom = EmotionId.of("emotify_custom:not-a-content-hash")
+        val snapshot = ClientConfigurationSnapshot.create(
+            ClientSettingsSnapshot.defaults(),
+            listOf(first),
+            listOf(first, availableCustom, missingCustom, malformedCustom),
+        )
+
+        val reconciled = snapshot.retainAvailableCustomQuickSlots(setOf(availableCustom))
+
+        reconciled.quickSlots.shouldContainExactly(
+            first,
+            availableCustom,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        )
+        snapshot.quickSlot(2) shouldBe missingCustom
+        (reconciled.retainAvailableCustomQuickSlots(setOf(availableCustom)) === reconciled) shouldBe true
     }
 
     test("quick slot mutations validate bounds and favorite membership") {

@@ -71,6 +71,10 @@ object EmotifyClientConfig {
         updateSnapshot { current -> current.withQuickSlots(ids) }
     }
 
+    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>) {
+        updateSnapshot { current -> current.retainAvailableCustomQuickSlots(availableCustomEmotionIds) }
+    }
+
     fun flush() {
         if (
             !snapshots.flush(CONFIG_FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS) &&

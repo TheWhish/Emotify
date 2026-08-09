@@ -16,6 +16,7 @@ import me.whish.emotify.client.custom.CustomEmojiLibraryAdmission
 import me.whish.emotify.client.custom.CustomEmojiLibraryBudget
 import me.whish.emotify.client.custom.CustomEmojiReloadCompletion
 import me.whish.emotify.client.custom.CustomEmojiReloadCoordinator
+import me.whish.emotify.client.custom.canRemoveMissingCustomQuickSlots
 import me.whish.emotify.client.presentation.EmotionPresentation
 import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.client.presentation.EmotionTextureAnimation
@@ -41,6 +42,7 @@ object CustomEmojiRegistry {
     private val nextRefreshCheckNanos = AtomicLong()
     private val inspectionFailureLogNanos = AtomicLong()
     private val reloadFailureLogNanos = AtomicLong()
+    private val configurationFailureLogNanos = AtomicLong()
     private val cleanupFailureLogNanos = AtomicLong()
 
     @Volatile
@@ -99,6 +101,9 @@ object CustomEmojiRegistry {
                     }
                     finishReload(minecraft, success = false)
                     return@execute
+                }
+                if (completedLoad.reconciliationSafe) {
+                    reconcileQuickSlots()
                 }
                 reloadFailureLogNanos.set(0L)
                 finishReload(minecraft, success = true)
@@ -203,7 +208,13 @@ object CustomEmojiRegistry {
                 logger.warn("Custom emoji directory limit reached in {}; loading at most {} files", directory, CustomEmojiFileScanner.MAXIMUM_FILES)
             }
             val stable = CustomEmojiFileScanner.fingerprint(directory) == scan.fingerprint
-            return LoadedCustomEmojiLibrary(entries, scan.fingerprint, stable)
+            val reconciliationSafe = canRemoveMissingCustomQuickSlots(
+                decodeFailures,
+                scan.rejected.size,
+                capacityRejections,
+                scan.fingerprint.directoryLimitReached,
+            )
+            return LoadedCustomEmojiLibrary(entries, scan.fingerprint, stable, reconciliationSafe)
         } catch (failure: Throwable) {
             entries.forEach { entry -> entry.image.close() }
             throw failure
@@ -368,6 +379,17 @@ object CustomEmojiRegistry {
         cleanupPublishedSnapshot(minecraft, previous, publication.textureIds)
     }
 
+    private fun reconcileQuickSlots() {
+        try {
+            EmotifyClientConfig.retainAvailableCustomQuickSlots(snapshot.byEmotionId.keys)
+            configurationFailureLogNanos.set(0L)
+        } catch (failure: Exception) {
+            if (shouldLogFailure(configurationFailureLogNanos)) {
+                logger.error("Failed to reconcile custom emoji quick slots", failure)
+            }
+        }
+    }
+
     private fun rollbackPublication(
         minecraft: Minecraft,
         pendingImages: Set<NativeImage>,
@@ -529,6 +551,7 @@ private class LoadedCustomEmojiLibrary(
     val entries: List<LoadedCustomEmoji>,
     val fingerprint: CustomEmojiDirectoryFingerprint,
     val stable: Boolean,
+    val reconciliationSafe: Boolean,
 ) {
     fun close() {
         entries.forEach { entry -> entry.image.close() }

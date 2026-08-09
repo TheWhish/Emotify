@@ -6,6 +6,8 @@ import io.kotest.matchers.shouldBe
 import java.awt.image.BufferedImage
 import java.nio.file.Files
 import javax.imageio.ImageIO
+import me.whish.emotify.domain.CustomEmojiDescriptor
+import me.whish.emotify.domain.CustomEmojiId
 
 @Suppress("unused")
 class CustomEmojiFileScannerTest : FunSpec({
@@ -146,6 +148,24 @@ class CustomEmojiFileScannerTest : FunSpec({
             (empty != created) shouldBe true
             (created != modified) shouldBe true
             deleted shouldBe empty
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    test("file names are normalized into descriptor safe display names") {
+        val root = Files.createTempDirectory("emotify-custom-emoji-name")
+        val directory = root.resolve("emoji")
+
+        try {
+            Files.createDirectories(directory)
+            writePng(directory.resolve("${"猫".repeat(64)}.png"), 8, 8)
+
+            val displayName = CustomEmojiFileScanner.scan(directory).accepted.single().displayName
+            val descriptor = CustomEmojiDescriptor.create(displayName, CustomEmojiId(1L, 2L, 3L))
+
+            descriptor.displayName shouldBe displayName
+            (displayName.toByteArray(Charsets.UTF_8).size <= CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_UTF8_BYTES) shouldBe true
         } finally {
             root.toFile().deleteRecursively()
         }

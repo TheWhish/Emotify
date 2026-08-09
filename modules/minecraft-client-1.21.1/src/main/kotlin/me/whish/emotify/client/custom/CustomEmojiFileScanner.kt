@@ -2,12 +2,15 @@ package me.whish.emotify.client.custom
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
+import java.text.Normalizer
 import java.util.Locale
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiPixels
 
 enum class CustomEmojiFileFormat {
@@ -197,11 +200,37 @@ object CustomEmojiFileScanner {
         return Inspection.accepted(
             CustomEmojiFile(
                 path,
-                displayName.take(MAXIMUM_DISPLAY_NAME_LENGTH),
+                descriptorSafeDisplayName(displayName),
                 dimensions.first,
                 format,
             ),
         )
+    }
+
+    private fun descriptorSafeDisplayName(value: String): String {
+        val normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFC)
+        val result = StringBuilder(minOf(normalized.length, CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_LENGTH))
+        var utf8Bytes = 0
+        var offset = 0
+        while (offset < normalized.length) {
+            val codePoint = normalized.codePointAt(offset)
+            val characterCount = Character.charCount(codePoint)
+            offset += characterCount
+            if (Character.isISOControl(codePoint)) {
+                continue
+            }
+            if (result.length + characterCount > CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_LENGTH) {
+                break
+            }
+            val characters = String(Character.toChars(codePoint))
+            val characterBytes = characters.toByteArray(StandardCharsets.UTF_8).size
+            if (utf8Bytes + characterBytes > CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_UTF8_BYTES) {
+                break
+            }
+            result.append(characters)
+            utf8Bytes += characterBytes
+        }
+        return result.toString().trim().ifEmpty { CustomEmojiDescriptor.DEFAULT_DISPLAY_NAME }
     }
 
     private fun pngDimensions(bytes: ByteArray): Pair<Int, Int>? {
@@ -316,5 +345,4 @@ object CustomEmojiFileScanner {
         }
     }
 
-    private const val MAXIMUM_DISPLAY_NAME_LENGTH = 64
 }
