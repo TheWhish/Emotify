@@ -26,30 +26,37 @@ class GifTimelineNormalizerTest : FunSpec({
         normalized.forEach { frame -> frame.durationMillis.shouldBeInRange(67..2_000) }
     }
 
-    test("resampling preserves a long variable frame instead of flattening its timing") {
-        val normalized = GifTimelineNormalizer.normalize(intArrayOf(1_000) + IntArray(120) { 10 })
+    test("resampling preserves a long variable frame through the complete emotion lifecycle") {
+        val normalized = GifTimelineNormalizer.normalize(intArrayOf(1_000) + IntArray(200) { 10 })
 
         normalized.first().sourceIndex shouldBe 0
         normalized.first().durationMillis.shouldBeInRange(900..1_100)
-        normalized.last().sourceIndex shouldBe 120
-        normalized.sumOf(GifTimelineFrame::durationMillis) shouldBe 2_200
+        normalized.last().sourceIndex shouldBe 200
+        normalized.sumOf(GifTimelineFrame::durationMillis) shouldBe 3_000
         normalized.forEach { frame -> frame.durationMillis.shouldBeInRange(67..2_000) }
     }
 
-    test("thirty four frame animation keeps its tempo and clips only the part outside the emotion lifecycle") {
+    test("thirty four frame animation keeps its complete tempo within the emotion lifecycle") {
         val normalized = GifTimelineNormalizer.normalize(IntArray(34) { 70 })
 
         normalized.size shouldBe 30
         normalized.first().sourceIndex shouldBe 0
-        normalized.last().sourceIndex shouldBe 30
-        normalized.sumOf(GifTimelineFrame::durationMillis) shouldBe 2_170
+        normalized.last().sourceIndex shouldBe 33
+        normalized.sumOf(GifTimelineFrame::durationMillis) shouldBe 2_380
     }
 
     test("long low frame rate animation is clipped without accelerating its retained frames") {
         val normalized = GifTimelineNormalizer.normalize(IntArray(4) { 1_000 })
 
         normalized.map(GifTimelineFrame::sourceIndex) shouldContainExactly listOf(0, 1, 2)
-        normalized.map(GifTimelineFrame::durationMillis) shouldContainExactly listOf(1_000, 1_000, 200)
+        normalized.map(GifTimelineFrame::durationMillis) shouldContainExactly listOf(1_000, 1_000, 1_000)
+    }
+
+    test("sub-frame remainder at the lifecycle boundary extends the final retained frame") {
+        val normalized = GifTimelineNormalizer.normalize(IntArray(43) { 70 })
+
+        normalized.sumOf(GifTimelineFrame::durationMillis) shouldBe 3_000
+        normalized.forEach { frame -> frame.durationMillis.shouldBeInRange(67..2_000) }
     }
 
     test("consecutive visually identical frames are merged before resampling") {
@@ -98,8 +105,8 @@ class GifTimelineNormalizerTest : FunSpec({
 
             normalized.size.shouldBeInRange(2..30)
             normalized.first().sourceIndex shouldBe 0
-            normalized.zipWithNext().all { (left, right) -> left.sourceIndex < right.sourceIndex } shouldBe true
-            normalized.sumOf(GifTimelineFrame::durationMillis).shouldBeInRange(134..2_200)
+            normalized.zipWithNext().all { (left, right) -> left.sourceIndex <= right.sourceIndex } shouldBe true
+            normalized.sumOf(GifTimelineFrame::durationMillis).shouldBeInRange(134..3_000)
             normalized.forEach { frame -> frame.durationMillis.shouldBeInRange(67..2_000) }
         }
     }

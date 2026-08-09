@@ -51,6 +51,14 @@ class SerializedSnapshotStore<T : Any>(
         }
     }
 
+    fun updateInMemory(transform: (T) -> T): T = synchronized(stateLock) {
+        if (!initialized) {
+            current = loader()
+            initialized = true
+        }
+        transform(checkNotNull(current)).also { snapshot -> current = snapshot }
+    }
+
     fun flush(timeout: Long, unit: TimeUnit): Boolean = writer.flush(timeout, unit)
 
     companion object {

@@ -75,17 +75,19 @@ private object CustomEmotionSelectionCodec : BoundedWireCodec<CustomEmotionSelec
     ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES,
 ) {
     override fun computeEncodedSize(value: CustomEmotionSelection): Int =
-        me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + 1 +
+        me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + customEmojiDescriptorSize(value.descriptor) + 1 +
             (value.asset?.let(::customEmojiAssetSize) ?: 0)
 
     override fun encodeBody(writer: WireWriter, value: CustomEmotionSelection) {
         writer.writeCustomEmojiId(value.customEmojiId)
+        writer.writeCustomEmojiDescriptor(value.descriptor)
         writer.writeUnsignedByte(if (value.asset == null) 0 else 1)
         value.asset?.let(writer::writeCustomEmojiAsset)
     }
 
     override fun decodeBody(reader: WireReader): CustomEmotionSelection {
         val id = reader.readCustomEmojiId()
+        val descriptor = reader.readCustomEmojiDescriptor()
         val asset = when (reader.readUnsignedByte()) {
             0 -> null
             1 -> reader.readCustomEmojiAsset(id)
@@ -94,7 +96,7 @@ private object CustomEmotionSelectionCodec : BoundedWireCodec<CustomEmotionSelec
                 "Invalid custom emoji asset presence flag",
             )
         }
-        return CustomEmotionSelection(id, asset)
+        return CustomEmotionSelection(id, asset, descriptor)
     }
 }
 
@@ -120,13 +122,14 @@ private object CustomEmotionPlayCodec : BoundedWireCodec<CustomEmotionPlay>(
 ) {
     override fun computeEncodedSize(value: CustomEmotionPlay): Int =
         varIntSize(value.entityId.value) + 16 + varLongSize(value.sequence.value) +
-            me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH
+            me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + customEmojiDescriptorSize(value.descriptor)
 
     override fun encodeBody(writer: WireWriter, value: CustomEmotionPlay) {
         writer.writeVarInt(value.entityId.value)
         writer.writeUuid(value.sourceUuid)
         writer.writeVarLong(value.sequence.value)
         writer.writeCustomEmojiId(value.customEmojiId)
+        writer.writeCustomEmojiDescriptor(value.descriptor)
     }
 
     override fun decodeBody(reader: WireReader): CustomEmotionPlay {
@@ -135,7 +138,8 @@ private object CustomEmotionPlayCodec : BoundedWireCodec<CustomEmotionPlay>(
         val sourceUuid = reader.readUuid()
         val sequence = EventSequence.parse(reader.readCanonicalVarLong())
             ?: throw WireDecodeException(WireDecodeViolation.INVALID_FIELD_VALUE, "Event sequence must be positive")
-        return CustomEmotionPlay(entityId, sourceUuid, sequence, reader.readCustomEmojiId())
+        val customEmojiId = reader.readCustomEmojiId()
+        return CustomEmotionPlay(entityId, sourceUuid, sequence, customEmojiId, reader.readCustomEmojiDescriptor())
     }
 }
 

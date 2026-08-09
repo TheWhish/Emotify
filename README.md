@@ -4,7 +4,6 @@
 
 **A small visual language for the moments when chat is one message too slow.**
 
-[![Latest release 0.4.0](https://img.shields.io/badge/Latest_release-0.4.0-5865F2?style=flat-square)](#installation)
 [![Minecraft 1.21.1](https://img.shields.io/badge/Minecraft-1.21.1-62B47A?style=flat-square)](https://www.minecraft.net/)
 [![NeoForge](https://img.shields.io/badge/NeoForge-Client_%26_Server-EA6A47?style=flat-square)](https://neoforged.net/)
 [![Fabric](https://img.shields.io/badge/Fabric-Client_%26_Server-DBD0B4?style=flat-square)](https://fabricmc.net/)
@@ -16,7 +15,7 @@
 
 Emotify adds animated emotions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
-Version **0.4.0** adds multiplayer custom emojis, animated GIF support, expanded client settings, and configurable server policy across NeoForge, Fabric, Paper, and Purpur.
+Version **0.5.0** adds nine drag-and-drop quick slots, number-key activation, safe configuration migration, player-to-player saving of custom emojis, and a refined picker across NeoForge, Fabric, Paper, and Purpur.
 
 ---
 
@@ -26,9 +25,12 @@ Version **0.4.0** adds multiplayer custom emojis, animated GIF support, expanded
 - **Three signature presentations** — Elastic Pop, Ribbon Weave, and Lantern Release — selected evenly for varied but restrained animation.
 - **World-aware rendering** that follows player poses, stays behind blocks, and respects first-person and visibility rules.
 - **Movement-friendly picker** that does not take control away from the player while it is open.
+- **Nine quick slots** assigned by drag and drop, activated with the top-row or Numpad `1–9` keys while the picker is open, and saved independently from favorites.
 - **Reduced Motion** mode with a static fade-only presentation.
 - **Server-authoritative multiplayer** with cooldowns, permissions, visibility filtering, bounded payloads, and abuse protection.
 - **Custom emojis shared in multiplayer** from local PNG, JPG, JPEG, and animated GIF files, with lossless decoded-frame transfer and connection-local caching.
+- **Local saving of shared custom emojis** with Shift and right-click, readable filenames, duplicate-lineage protection, and no additional network transfer.
+- **Versioned client and server configuration** with bounded backups, legacy migration, and protection against overwriting future schemas.
 
 Emotify keeps its visual language close to Minecraft: readable pixel sprites, smooth motion, and no particle noise competing with gameplay.
 
@@ -54,17 +56,19 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-neoforge-1.21.1-0.4.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric | `emotify-fabric-1.21.1-0.4.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur | `emotify-paper-1.21-0.4.0.jar` | `plugins`; has no additional server dependencies |
+| NeoForge | `emotify-neoforge-1.21.1-0.5.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric | `emotify-fabric-1.21.1-0.5.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur | `emotify-paper-1.21-0.5.0.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 
 ### Client settings
 
-Favorites are managed directly in the picker. The shared client screen can hide all other players' emotions, hide only their custom emotions, manage an ignored-player list, enable Reduced Motion, and adjust the prepared emotion-sound volume. Your own emotions remain visible. Preferences and the favorite order are stored in `config/emotify-client.toml` on NeoForge and `config/emotify-client.properties` on Fabric. The two loaders use different file formats but expose the same client behavior.
+Favorites and the nine quick slots are managed directly in the picker. Drag an emoji card onto a slot, press its number while the picker is open to use it, or right-click a filled slot to clear it. The shared client screen can hide all other players' emotions, hide only their custom emotions, manage an ignored-player list, enable Reduced Motion, and adjust the saved-emoji feedback and future emotion-sound volume. Your own emotions remain visible. Preferences, favorite order, and quick slots are stored in `config/emotify-client.toml` on NeoForge and `config/emotify-client.properties` on Fabric. The two loaders use different file formats but expose the same client behavior.
 
-Custom emojis are loaded from direct PNG, JPG, JPEG, and GIF files in `<game directory>/emoji`. Static images support exact `8×8`, `16×16`, `32×32`, `64×64`, and `128×128` dimensions; GIF files support exact `8×8`, `16×16`, `32×32`, and `64×64` dimensions. GIF timing is normalized automatically: redundant frames are merged, high-frame-rate sources are sampled across their visible timeline, and content after the `2.2` second emotion lifecycle is clipped without accelerating the retained animation. The resulting asset remains bounded to 30 frames and 15 FPS without resizing the image or inventing frames for low-FPS sources. Source GIFs may contain up to 300 frames, and every image file is limited to `512 KiB`. The picker refreshes automatically after changes, and lossless transfer is prepared outside the render thread. Only content-addressed decoded pixels and frame durations can pass through a compatible Emotify server; filenames, paths, and original image files never leave the client.
+Custom emojis are loaded from direct PNG, JPG, JPEG, and GIF files in `<game directory>/emoji`. Static images support exact `8×8`, `16×16`, `32×32`, `64×64`, and `128×128` dimensions; GIF files support exact `8×8`, `16×16`, `32×32`, and `64×64` dimensions. GIF timing is normalized automatically: redundant frames are merged, high-frame-rate sources are sampled across their visible timeline, and content after the `3` second emotion lifecycle is clipped without accelerating the retained animation. The resulting asset remains bounded to 30 frames and 15 FPS without resizing the image or inventing frames for low-FPS sources. Source GIFs may contain up to 300 frames, and every image file is limited to `512 KiB`. The picker refreshes automatically after changes, and lossless transfer is prepared outside the render thread. Compatible Emotify peers receive content-addressed decoded pixels, frame durations, a bounded display name, and a stable origin ID; paths and original image files never leave the client.
+
+Hold Shift and right-click the stable `0.9×0.95` block area above a player while their custom emotion is active to save it into your local `emoji` folder. The raised upper edge covers stacked multi-sprite animations, while the narrower width and raised lower edge leave a clear gap above the player model. The hit test uses the current vanilla block-interaction range and block occlusion, and does not require aiming at an animated sprite. It runs only on the click and sends no additional packet: the recipient reuses the already cached decoded asset. The transmitted display name becomes a safe readable filename; collisions use `Name (2)` without overwriting files. Static assets are written losslessly as PNG and animated assets as normalized looping GIFs. Both retain a stable origin marker, so re-encoding cannot turn a copied emotion into a new copyable lineage. Saving runs outside the render thread through a temporary file and atomic move. Only a vanilla pickup sound confirms success, following the client sound-volume slider.
 
 ## 🛡️ Server administration
 
@@ -76,13 +80,15 @@ Custom emoji sharing is enabled by default and can be disabled independently fro
 | Fabric | `config/emotify-server.properties` |
 | Paper / Purpur | `plugins/Emotify/config.yml` |
 
+All server formats use configuration schema `1`. A valid versionless file is treated as legacy schema `0`, backed up, and migrated once without changing platform format. Fabric and Paper/Purpur create a fixed `.v0.bak`; NeoForge uses its bounded numbered `ModConfigSpec` backup. A future schema is never rewritten by an older build.
+
 NeoForge and Fabric apply their settings on server start. Paper and Purpur can apply them without restarting:
 
 ```text
 /emotify reload
 ```
 
-Fabric and Paper/Purpur reject invalid configuration without replacing active settings. NeoForge uses its standard `ModConfigSpec` behavior and may restore an invalid value to its safe default. A successful Paper/Purpur reload preserves connected sessions, active cooldowns, and abuse-protection state.
+Fabric rejects invalid configuration at startup. NeoForge uses its standard `ModConfigSpec` behavior and may restore an invalid current-schema value to its safe default. If the file belongs to a future schema, NeoForge and Fabric disable Emotify for that server session while leaving the file untouched. Paper/Purpur rejects an invalid or future-schema reload without replacing the active policy; at initial startup an unsupported future schema prevents the plugin from enabling. A successful Paper/Purpur reload preserves connected sessions, active cooldowns, and abuse-protection state.
 
 ### Permissions
 
@@ -102,7 +108,7 @@ The plugin uses the standard Bukkit permission API and does not require a direct
 | `custom-emojis.enabled` | `true` | Allows players to publish custom emojis |
 | `custom-emojis.maximum-static-resolution` | `128` | Maximum accepted static custom-emoji resolution |
 | `custom-emojis.maximum-animated-resolution` | `64` | Maximum accepted animated custom-emoji resolution |
-| `cooldown-millis` | `2200` | Delay between emotions |
+| `cooldown-millis` | `3000` | Delay between emotions |
 | `emotions.allow` | `[]` | Optional allow-list; empty enables the full catalog |
 | `emotions.deny` | `[]` | Emojis excluded from the catalog |
 | `broadcast.radius-blocks` | `64.0` | Maximum visibility radius |

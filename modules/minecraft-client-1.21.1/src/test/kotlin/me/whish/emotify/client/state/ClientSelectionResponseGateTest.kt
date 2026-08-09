@@ -27,6 +27,23 @@ class ClientSelectionResponseGateTest : FunSpec({
         gate.tryReserve(sad) shouldBe true
     }
 
+    test("accepted hidden self play releases pending state before presentation") {
+        val gate = ClientSelectionResponseGate(FakeMonotonicTimeSource())
+        gate.tryReserve(happy)
+
+        gate.tryConsumeAcceptedPlay(happy, localSource = true, ClientEmotionPlayDisposition.HIDDEN) shouldBe true
+        gate.tryReserve(sad) shouldBe true
+    }
+
+    test("remote or rejected play cannot acknowledge a local request") {
+        val gate = ClientSelectionResponseGate(FakeMonotonicTimeSource())
+        gate.tryReserve(happy)
+
+        gate.tryConsumeAcceptedPlay(happy, localSource = false, ClientEmotionPlayDisposition.VISIBLE) shouldBe false
+        gate.tryConsumeAcceptedPlay(happy, localSource = true, ClientEmotionPlayDisposition.REJECTED) shouldBe false
+        gate.tryReserve(sad) shouldBe false
+    }
+
     test("late success for a different emotion cannot consume the current request") {
         val time = FakeMonotonicTimeSource()
         val gate = ClientSelectionResponseGate(time, pendingTimeoutNanos = 500.milliseconds.inWholeNanoseconds)

@@ -14,6 +14,8 @@ internal object EmotionPickerTheme {
     val buttonHovered = 0xFFE4E4E4.toInt()
     val buttonSelected = 0xFFF1D58A.toInt()
     val buttonSelectedHovered = 0xFFF8E4AD.toInt()
+    val emptySlot = 0xFFAFAFAF.toInt()
+    val emptySlotHovered = 0xFFB8B8B8.toInt()
     val buttonOutline = 0xFF303030.toInt()
     val buttonHighlight = 0xFFF2F2F2.toInt()
     val buttonShadow = 0xFF686868.toInt()
@@ -79,6 +81,15 @@ internal object EmotionPickerTheme {
         return resultAlpha shl 24 or (color and 0x00FFFFFF)
     }
 
+    fun blendColor(start: Int, end: Int, progress: Double): Int {
+        require(progress.isFinite()) { "Color blend progress must be finite: $progress" }
+        val weight = (progress.coerceIn(0.0, 1.0) * 255.0 + 0.5).toInt()
+        return blendChannel(start, end, weight, 24) shl 24 or
+            (blendChannel(start, end, weight, 16) shl 16) or
+            (blendChannel(start, end, weight, 8) shl 8) or
+            blendChannel(start, end, weight, 0)
+    }
+
     fun renderButton(
         guiGraphics: GuiGraphics,
         x: Int,
@@ -94,6 +105,30 @@ internal object EmotionPickerTheme {
         } else {
             renderRaisedBox(guiGraphics, x, y, width, height, fill, buttonHighlight, buttonShadow, border, 1)
         }
+    }
+
+    fun renderEmptySlot(
+        guiGraphics: GuiGraphics,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        hovered: Boolean,
+        targetEmphasis: Double,
+    ) {
+        val baseFill = if (hovered) emptySlotHovered else emptySlot
+        renderRaisedBox(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            blendColor(baseFill, buttonSelected, targetEmphasis),
+            buttonShadow,
+            buttonHighlight,
+            blendColor(buttonOutline, selectedOutline, targetEmphasis),
+            1,
+        )
     }
 
     fun renderList(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
@@ -163,6 +198,12 @@ internal object EmotionPickerTheme {
         guiGraphics.fill(x + 1, y + radius + 1, x + 2, y + height - radius - 1, highlight)
         guiGraphics.fill(x + radius + 1, y + height - 2, x + width - radius - 1, y + height - 1, shadow)
         guiGraphics.fill(x + width - 2, y + radius + 1, x + width - 1, y + height - radius - 1, shadow)
+    }
+
+    private fun blendChannel(start: Int, end: Int, weight: Int, shift: Int): Int {
+        val startChannel = start ushr shift and 0xFF
+        val endChannel = end ushr shift and 0xFF
+        return (startChannel * (255 - weight) + endChannel * weight + 127) / 255
     }
 
     private fun renderRoundedFill(

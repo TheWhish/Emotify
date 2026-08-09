@@ -2,11 +2,13 @@ package me.whish.emotify.protocol
 
 import java.util.UUID
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiId
 
 data class CustomEmotionSelection(
     val customEmojiId: CustomEmojiId,
     val asset: CustomEmojiAsset?,
+    val descriptor: CustomEmojiDescriptor = CustomEmojiDescriptor.default(customEmojiId),
 ) {
     init {
         require(asset == null || asset.id == customEmojiId) {
@@ -91,6 +93,7 @@ data class CustomEmotionPlay(
     val sourceUuid: UUID,
     val sequence: EventSequence,
     val customEmojiId: CustomEmojiId,
+    val descriptor: CustomEmojiDescriptor = CustomEmojiDescriptor.default(customEmojiId),
 ) {
     fun asEmotionPlay(): EmotionPlay = EmotionPlay(
         entityId,

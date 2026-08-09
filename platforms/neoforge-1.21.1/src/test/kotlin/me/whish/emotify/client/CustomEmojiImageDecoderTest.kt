@@ -82,9 +82,9 @@ class CustomEmojiImageDecoderTest : FunSpec({
 
         try {
             decoded.frameCount shouldBe 30
-            (0 until decoded.frameCount).sumOf(decoded::durationMillisAt) shouldBe 2_170
+            (0 until decoded.frameCount).sumOf(decoded::durationMillisAt) shouldBe 2_380
             decoded.frames.first().getPixelRGBA(0, 0) shouldBe 0xFF0000FF.toInt()
-            decoded.frames.last().getPixelRGBA(0, 0) shouldBe 0xFF0000FF.toInt()
+            decoded.frames.last().getPixelRGBA(0, 0) shouldBe 0xFF00FF00.toInt()
         } finally {
             decoded.close()
         }
@@ -104,7 +104,7 @@ class CustomEmojiImageDecoderTest : FunSpec({
 
         try {
             decoded.durationMillisAt(0) shouldBe 2_000
-            decoded.durationMillisAt(1) shouldBe 200
+            decoded.durationMillisAt(1) shouldBe 1_000
         } finally {
             decoded.close()
         }

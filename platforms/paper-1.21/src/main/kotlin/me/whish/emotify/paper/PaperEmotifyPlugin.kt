@@ -504,6 +504,9 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             is PaperConfigLoadResult.Invalid -> error(
                 "Emotify configuration is invalid: ${result.violations.joinToString("; ")}",
             )
+            is PaperConfigLoadResult.FutureVersion -> error(
+                "Emotify configuration schema ${result.version} is newer than supported schema 1; the file remains unchanged",
+            )
             is PaperConfigLoadResult.Failed -> throw IllegalStateException(
                 "Failed to load Emotify configuration",
                 result.failure,

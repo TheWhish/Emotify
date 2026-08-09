@@ -1,6 +1,7 @@
 package me.whish.emotify.client.state
 
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiTransferRateLimits
 import me.whish.emotify.domain.MonotonicTimeSource
@@ -21,11 +22,15 @@ class ClientCustomEmojiUploadTracker {
         globalRejection = null
     }
 
-    fun prepare(connectionId: Long, asset: CustomEmojiAsset): CustomEmotionSelection? {
+    fun prepare(
+        connectionId: Long,
+        asset: CustomEmojiAsset,
+        descriptor: CustomEmojiDescriptor,
+    ): CustomEmotionSelection? {
         if (connectionId != activeConnectionId) {
             return null
         }
-        return CustomEmotionSelection(asset.id, asset.takeUnless { asset.id in uploaded })
+        return CustomEmotionSelection(asset.id, asset.takeUnless { asset.id in uploaded }, descriptor)
     }
 
     fun requiresUpload(connectionId: Long, customEmojiId: CustomEmojiId): Boolean? =

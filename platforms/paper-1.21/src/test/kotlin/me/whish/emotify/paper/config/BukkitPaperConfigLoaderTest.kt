@@ -4,7 +4,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
@@ -27,12 +29,100 @@ class BukkitPaperConfigLoaderTest : FunSpec({
 
     fun load(source: String): PaperConfigLoadResult = load(source.toByteArray(Charsets.UTF_8))
 
+    test("valid legacy YAML is backed up exactly and migrated to schema one") {
+        val directory = Files.createTempDirectory("emotify-config-migration-")
+        try {
+            val config = directory.resolve("config.yml")
+            val legacy = "enabled: false\ncooldown-millis: 3000\n"
+            Files.writeString(config, legacy, StandardCharsets.UTF_8)
+
+            val result = BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
+
+            result.config.enabled shouldBe false
+            Files.readString(config, StandardCharsets.UTF_8) shouldStartWith "config-version: 1\n"
+            Files.readString(directory.resolve("config.yml.v0.bak"), StandardCharsets.UTF_8) shouldBe legacy
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("legacy YAML document marker remains valid after migration") {
+        val directory = Files.createTempDirectory("emotify-config-document-")
+        try {
+            val config = directory.resolve("config.yml")
+            val legacy = "# retained\n---\nenabled: false\n"
+            Files.writeString(config, legacy, StandardCharsets.UTF_8)
+
+            BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
+            val secondLoad = BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
+
+            secondLoad.config.enabled shouldBe false
+            Files.readString(directory.resolve("config.yml.v0.bak"), StandardCharsets.UTF_8) shouldBe legacy
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("current YAML is loaded without rewrite or backup") {
+        val directory = Files.createTempDirectory("emotify-config-current-")
+        try {
+            val config = directory.resolve("config.yml")
+            val source = "config-version: 1\nenabled: true\n"
+            Files.writeString(config, source, StandardCharsets.UTF_8)
+
+            BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Loaded>()
+
+            Files.readString(config, StandardCharsets.UTF_8) shouldBe source
+            Files.exists(directory.resolve("config.yml.v0.bak")) shouldBe false
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("future YAML remains opaque and byte-for-byte unchanged") {
+        val directory = Files.createTempDirectory("emotify-config-future-")
+        try {
+            val config = directory.resolve("config.yml")
+            val source = "config-version: 2\nfuture-section:\n  value: opaque\nenabled: incompatible\n"
+            Files.writeString(config, source, StandardCharsets.UTF_8)
+
+            BukkitPaperConfigLoader(config.toFile(), catalog).load() shouldBe
+                PaperConfigLoadResult.FutureVersion(2)
+
+            Files.readString(config, StandardCharsets.UTF_8) shouldBe source
+            Files.exists(directory.resolve("config.yml.v0.bak")) shouldBe false
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("mismatched legacy backup fails without replacing the source") {
+        val directory = Files.createTempDirectory("emotify-config-conflict-")
+        try {
+            val config = directory.resolve("config.yml")
+            val source = "enabled: false\n"
+            Files.writeString(config, source, StandardCharsets.UTF_8)
+            Files.writeString(directory.resolve("config.yml.v0.bak"), "enabled: true\n", StandardCharsets.UTF_8)
+
+            BukkitPaperConfigLoader(config.toFile(), catalog).load()
+                .shouldBeInstanceOf<PaperConfigLoadResult.Failed>()
+
+            Files.readString(config, StandardCharsets.UTF_8) shouldBe source
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
     test("strict YAML loads the shipped configuration shape") {
         val result = load(
             """
             config-version: 1
             enabled: true
-            cooldown-millis: 2200
+            cooldown-millis: 3000
             emotions:
               allow: []
               deny: []

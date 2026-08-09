@@ -61,7 +61,7 @@ object RemoteCustomEmojiRegistry {
             }
             throw failure
         }
-        val remote = RemoteCustomEmoji(presentation, texture)
+        val remote = RemoteCustomEmoji(asset, presentation, texture)
         try {
             lookup.add(asset.id, remote.presentation.textureId, remote, remote.texture)
         } catch (failure: Throwable) {
@@ -79,6 +79,8 @@ object RemoteCustomEmojiRegistry {
     }
 
     fun find(emotionId: EmotionId): EmotionPresentation? = lookup.find(emotionId)?.presentation
+
+    fun asset(emotionId: EmotionId): CustomEmojiAsset? = lookup.find(emotionId)?.asset
 
     fun contains(emotionId: EmotionId): Boolean = find(emotionId) != null
 
@@ -150,6 +152,7 @@ object RemoteCustomEmojiRegistry {
     }
 
     private data class RemoteCustomEmoji(
+        val asset: CustomEmojiAsset,
         val presentation: EmotionPresentation,
         val texture: ResourceLocation,
     )

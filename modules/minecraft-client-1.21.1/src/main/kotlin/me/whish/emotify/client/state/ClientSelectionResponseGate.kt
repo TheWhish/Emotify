@@ -54,6 +54,15 @@ class ClientSelectionResponseGate(
         return tryConsumePending()
     }
 
+    fun tryConsumeAcceptedPlay(
+        emotionId: EmotionId,
+        localSource: Boolean,
+        disposition: ClientEmotionPlayDisposition,
+    ): Boolean =
+        localSource &&
+            disposition != ClientEmotionPlayDisposition.REJECTED &&
+            tryConsumeSuccess(emotionId)
+
     fun reset() {
         clearPending()
         hasObservedTime = false

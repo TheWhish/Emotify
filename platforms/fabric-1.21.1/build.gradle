@@ -694,7 +694,7 @@ def verifyFabricReleaseJar = tasks.register('verifyFabricReleaseJar') {
                 mixinMetadata.required != true ||
                 mixinMetadata.package != 'me.whish.emotify.fabric.mixin.client' ||
                 mixinMetadata.compatibilityLevel != 'JAVA_21' ||
-                mixinMetadata.client != ['EditBoxMixin', 'GameRendererMixin', 'PlayerRendererMixin'] ||
+                mixinMetadata.client != ['EditBoxMixin', 'GameRendererMixin', 'MinecraftMixin', 'PlayerRendererMixin'] ||
                 mixinMetadata.injectors != [defaultRequire: 1]
             ) {
                 throw new GradleException("Unexpected Fabric client mixin contract: ${mixinMetadata}")

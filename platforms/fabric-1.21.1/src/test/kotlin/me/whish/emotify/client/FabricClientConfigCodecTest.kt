@@ -3,8 +3,11 @@ package me.whish.emotify.fabric.config
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.shouldBe
 import java.util.UUID
+import me.whish.emotify.client.settings.ClientConfigurationSchema
+import me.whish.emotify.client.settings.ClientConfigurationSnapshot
 import me.whish.emotify.client.settings.ClientSettingsSnapshot
 import me.whish.emotify.client.settings.IgnoredPlayerIdentity
 import me.whish.emotify.client.settings.IgnoredPlayerIdentityCodec
@@ -18,10 +21,10 @@ class FabricClientConfigCodecTest : FunSpec({
         UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
         "OfflinePlayer",
     )
-    val defaults = FabricClientConfigSnapshot(ClientSettingsSnapshot.defaults(), listOf(first, second))
+    val defaults = ClientConfigurationSnapshot.create(ClientSettingsSnapshot.defaults(), listOf(first, second))
 
     test("config round trip preserves every setting and ordered favorites") {
-        val snapshot = FabricClientConfigSnapshot(
+        val snapshot = ClientConfigurationSnapshot.create(
             ClientSettingsSnapshot.create(
                 false,
                 true,
@@ -30,35 +33,49 @@ class FabricClientConfigCodecTest : FunSpec({
                 showCustomEmotions = false,
             ),
             listOf(first, second),
+            listOf(second, first),
         )
 
-        FabricClientConfigCodec.decode(
-            FabricClientConfigCodec.encode(snapshot),
+        val encoded = FabricClientConfigCodec.encode(snapshot)
+        val decoded = FabricClientConfigCodec.decode(
+            encoded,
             defaults,
-        ) shouldBe snapshot
+        )
+
+        encoded.shouldStartWith("configVersion=${ClientConfigurationSchema.CURRENT_VERSION}\n")
+        decoded shouldBe FabricClientConfigDecodeResult.Ready(snapshot, migrationRequired = false)
     }
 
     test("legacy config retains defaults for newly introduced settings") {
         val decoded = FabricClientConfigCodec.decode(
             "reducedMotion=true\nfavorites=${second.value}\n",
             defaults,
-        )
+        ) as FabricClientConfigDecodeResult.Ready
 
-        decoded.settings.showOtherPlayers shouldBe true
-        decoded.settings.showCustomEmotions shouldBe true
-        decoded.settings.reducedMotion shouldBe true
-        decoded.settings.soundVolumePercent shouldBe 100
-        decoded.settings.ignoredPlayers shouldBe emptyList()
-        decoded.favorites.shouldContainExactly(second)
+        decoded.migrationRequired shouldBe true
+        decoded.snapshot.settings.showOtherPlayers shouldBe true
+        decoded.snapshot.settings.showCustomEmotions shouldBe true
+        decoded.snapshot.settings.reducedMotion shouldBe true
+        decoded.snapshot.settings.soundVolumePercent shouldBe 100
+        decoded.snapshot.settings.ignoredPlayers shouldBe emptyList()
+        decoded.snapshot.favorites.shouldContainExactly(second)
+        decoded.snapshot.quickSlots.shouldContainExactly(List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { null })
     }
 
     test("duplicate favorites are normalized without reordering") {
         val decoded = FabricClientConfigCodec.decode(
             "favorites=${first.value},${second.value},${first.value}\n",
             defaults,
-        )
+        ) as FabricClientConfigDecodeResult.Ready
 
-        decoded.favorites shouldContainExactly listOf(first, second)
+        decoded.snapshot.favorites shouldContainExactly listOf(first, second)
+    }
+
+    test("future schema remains opaque and is never interpreted as the current document") {
+        FabricClientConfigCodec.decode(
+            "configVersion=2\nfutureOption=true\n",
+            defaults,
+        ) shouldBe FabricClientConfigDecodeResult.Future(2)
     }
 
     test("malformed values and duplicate keys are rejected") {
@@ -72,7 +89,7 @@ class FabricClientConfigCodecTest : FunSpec({
             FabricClientConfigCodec.decode("favorites=${first.value}\nfavorites=${second.value}\n", defaults)
         }
         shouldThrow<IllegalArgumentException> {
-            FabricClientConfigCodec.decode("futureOption=true\n", defaults)
+            FabricClientConfigCodec.decode("configVersion=1\nfutureOption=true\n", defaults)
         }
         shouldThrow<IllegalArgumentException> {
             FabricClientConfigCodec.decode("soundVolumePercent=101\n", defaults)
@@ -95,6 +112,13 @@ class FabricClientConfigCodecTest : FunSpec({
         }.joinToString(",")
         shouldThrow<IllegalArgumentException> {
             FabricClientConfigCodec.decode("ignoredPlayers=$oversizedList\n", defaults)
+        }
+        shouldThrow<IllegalArgumentException> {
+            FabricClientConfigCodec.decode(
+                "configVersion=1\nfavorites=${first.value},${second.value}\n" +
+                    "quickSlots=${first.value},${first.value},,,,,,,\n",
+                defaults,
+            )
         }
     }
 })

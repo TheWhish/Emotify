@@ -55,6 +55,35 @@ class EmotionAnimationTest : FunSpec({
         signatures.toSet().size shouldBe EmotionAnimationVariant.entries.size
     }
 
+    test("three second lifecycle extends only the steady hold and preserves fade envelopes") {
+        EmotionAnimation.DURATION_MILLIS shouldBe 3_000.0
+
+        variantSeeds.forEach { seed ->
+            val hold = EmotionAnimationFrameBuffer()
+            EmotionAnimation.sampleInto(2_000.0, AnimationMotion.FULL, seed, hold)
+            repeat(hold.spriteCount) { spriteIndex ->
+                hold.alphaAt(spriteIndex) shouldBe 1.0
+            }
+        }
+
+        listOf(
+            Triple(0L, 0, 2_690.0),
+            Triple(2L, 0, 2_670.0),
+            Triple(2L, 1, 2_690.0),
+            Triple(2L, 2, 2_710.0),
+            Triple(4L, 0, 2_625.0),
+            Triple(4L, 1, 2_640.0),
+        ).forEach { (seed, spriteIndex, elapsed) ->
+            val midpoint = EmotionAnimationFrameBuffer()
+            EmotionAnimation.sampleInto(elapsed, AnimationMotion.FULL, seed, midpoint)
+            midpoint.alphaAt(spriteIndex) shouldBe 0.5
+        }
+
+        val reducedMidpoint = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(2_750.0, AnimationMotion.REDUCED, 0L, reducedMidpoint)
+        reducedMidpoint.alphaAt(0) shouldBe 0.5
+    }
+
     test("elastic pop performs a spring jump squash stretch settle and upward finish") {
         val entry = EmotionAnimationFrameBuffer()
         val stretched = EmotionAnimationFrameBuffer()
@@ -68,8 +97,8 @@ class EmotionAnimationTest : FunSpec({
         EmotionAnimation.sampleInto(470.0, AnimationMotion.FULL, 0L, peak)
         EmotionAnimation.sampleInto(610.0, AnimationMotion.FULL, 0L, squashed)
         EmotionAnimation.sampleInto(950.0, AnimationMotion.FULL, 0L, settled)
-        EmotionAnimation.sampleInto(1_550.0, AnimationMotion.FULL, 0L, exitStart)
-        EmotionAnimation.sampleInto(2_100.0, AnimationMotion.FULL, 0L, exitEnd)
+        EmotionAnimation.sampleInto(2_350.0, AnimationMotion.FULL, 0L, exitStart)
+        EmotionAnimation.sampleInto(2_900.0, AnimationMotion.FULL, 0L, exitEnd)
 
         entry.spriteCount shouldBe 1
         (peak.verticalOffsetAt(0) > entry.verticalOffsetAt(0) + 0.22) shouldBe true
@@ -154,6 +183,30 @@ class EmotionAnimationTest : FunSpec({
         }
     }
 
+    test("ribbon weave retains a subtle living sway with slightly reduced excursion") {
+        val restingOffsets = doubleArrayOf(-0.16, 0.13, -0.055)
+        val minimumExcursions = doubleArrayOf(0.0320, 0.0292, 0.0255)
+        val maximumExcursions = doubleArrayOf(0.0330, 0.0300, 0.0265)
+        val excursions = DoubleArray(EmotionAnimation.MAX_SPRITE_COUNT)
+        val frame = EmotionAnimationFrameBuffer()
+
+        var elapsed = 700
+        while (elapsed <= 2_300) {
+            EmotionAnimation.sampleInto(elapsed.toDouble(), AnimationMotion.FULL, 2L, frame)
+            repeat(frame.spriteCount) { spriteIndex ->
+                excursions[spriteIndex] = maxOf(
+                    excursions[spriteIndex],
+                    abs(frame.horizontalOffsetAt(spriteIndex) - restingOffsets[spriteIndex]),
+                )
+            }
+            elapsed += 5
+        }
+
+        excursions.indices.forEach { spriteIndex ->
+            (excursions[spriteIndex] in minimumExcursions[spriteIndex]..maximumExcursions[spriteIndex]) shouldBe true
+        }
+    }
+
     test("ribbon weave rises past each resting point then settles softly") {
         val motionStarts = listOf(0, 180, 360)
         motionStarts.forEachIndexed { spriteIndex, motionStart ->
@@ -172,7 +225,7 @@ class EmotionAnimationTest : FunSpec({
         val separation = EmotionAnimationFrameBuffer()
         EmotionAnimation.sampleInto(450.0, AnimationMotion.FULL, 4L, earlyHandoff)
         EmotionAnimation.sampleInto(1_000.0, AnimationMotion.FULL, 4L, handoff)
-        EmotionAnimation.sampleInto(2_100.0, AnimationMotion.FULL, 4L, separation)
+        EmotionAnimation.sampleInto(2_900.0, AnimationMotion.FULL, 4L, separation)
 
         earlyHandoff.spriteCount shouldBe 2
         (earlyHandoff.alphaAt(0) >= MOTION_ALPHA_THRESHOLD) shouldBe true
@@ -484,7 +537,7 @@ class EmotionAnimationTest : FunSpec({
     }
 
     test("render time conversion stays tick independent and rejects a backwards clock") {
-        EmotionAnimation.elapsedMillis(1_000_000_000L, 3_200_000_000L) shouldBe 2_200.0
+        EmotionAnimation.elapsedMillis(1_000_000_000L, 4_000_000_000L) shouldBe 3_000.0
 
         shouldThrow<IllegalArgumentException> {
             EmotionAnimation.elapsedMillis(2L, 1L)

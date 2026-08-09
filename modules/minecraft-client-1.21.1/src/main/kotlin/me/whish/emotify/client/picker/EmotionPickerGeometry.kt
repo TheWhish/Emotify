@@ -9,6 +9,26 @@ data class EmotionPickerTabBounds(
     val width: Int,
 )
 
+data class EmotionPickerQuickSlotBounds(
+    val x: Int,
+    val y: Int,
+    val width: Int,
+    val height: Int,
+) {
+    val right: Int
+        get() = x + width
+
+    val previewSize: Int
+        get() = minOf(
+            EmotionPickerLayoutMetrics.QUICK_SLOT_ICON_SIZE,
+            (width - EmotionPickerVisualMetrics.FRAME_THICKNESS * 2).coerceAtLeast(1),
+            (height - EmotionPickerVisualMetrics.FRAME_THICKNESS * 2).coerceAtLeast(1),
+        )
+
+    fun contains(mouseX: Double, mouseY: Double): Boolean =
+        EmotionPickerHitArea.contains(x, y, width, height, mouseX, mouseY)
+}
+
 object EmotionPickerVisualMetrics {
     const val GAP = 4
     const val FRAME_THICKNESS = 2
@@ -180,17 +200,23 @@ object EmotionPickerGridMetrics {
 }
 
 object EmotionPickerLayoutMetrics {
-    const val PANEL_WIDTH = 246
+    const val PANEL_WIDTH = 250
+    const val QUICK_SLOT_COUNT = 9
+    const val QUICK_SLOT_MAXIMUM_SIZE = 22
+    const val QUICK_SLOT_ICON_SIZE = 14
+    const val QUICK_SLOT_GAP = EmotionPickerVisualMetrics.GAP
+    const val PRIMARY_CONTENT_WIDTH =
+        QUICK_SLOT_COUNT * QUICK_SLOT_MAXIMUM_SIZE + (QUICK_SLOT_COUNT - 1) * QUICK_SLOT_GAP
     const val PANEL_EDGE_PADDING = EmotionPickerVisualMetrics.GAP + EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val TITLE_AREA_TOP = EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val TITLE_AREA_HEIGHT = 15
     const val TITLE_TO_TABS_GAP = 0
-    const val TAB_HEIGHT = 20
+    const val TAB_HEIGHT = QUICK_SLOT_MAXIMUM_SIZE
     const val CONTROL_GAP = 4
+    const val QUICK_SLOT_BAND_HEIGHT = QUICK_SLOT_MAXIMUM_SIZE + QUICK_SLOT_GAP * 2
     const val SEARCH_FIELD_HEIGHT = 18
-    const val CONTENT_BOTTOM_PADDING = PANEL_EDGE_PADDING
     const val TAB_Y_OFFSET = TITLE_AREA_TOP + TITLE_AREA_HEIGHT + TITLE_TO_TABS_GAP
-    const val NORMAL_LIST_Y_OFFSET = TAB_Y_OFFSET + TAB_HEIGHT + CONTROL_GAP
+    const val NORMAL_LIST_Y_OFFSET = TAB_Y_OFFSET + TAB_HEIGHT + QUICK_SLOT_BAND_HEIGHT
     const val SEARCH_FIELD_Y_OFFSET = NORMAL_LIST_Y_OFFSET
     const val SEARCH_LIST_Y_OFFSET = SEARCH_FIELD_Y_OFFSET + SEARCH_FIELD_HEIGHT + CONTROL_GAP
 }
@@ -212,6 +238,9 @@ data class EmotionPickerGeometry(
     val titleAreaHeight: Int,
     val tabY: Int,
     val tabBounds: List<EmotionPickerTabBounds>,
+    val quickSlotY: Int,
+    val quickSlotHeight: Int,
+    val quickSlotBounds: List<EmotionPickerQuickSlotBounds>,
     val listX: Int,
     val listWidth: Int,
     val normalListY: Int,
@@ -228,6 +257,9 @@ data class EmotionPickerGeometry(
     fun listY(searching: Boolean): Int = if (searching) searchListY else normalListY
 
     fun listHeight(searching: Boolean): Int = if (searching) searchListHeight else normalListHeight
+
+    fun quickSlotAt(mouseX: Double, mouseY: Double): Int =
+        quickSlotBounds.indexOfFirst { bounds -> bounds.contains(mouseX, mouseY) }
 
     val gridX: Int
         get() = listX + (listWidth - rowWidth) / 2
@@ -259,12 +291,16 @@ data class EmotionPickerGeometry(
             val panelHeight = (screenHeight - SCREEN_MARGIN * 2).coerceIn(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT)
             val panelX = (screenWidth - panelWidth) / 2
             val panelY = (screenHeight - panelHeight) / 2
-            val contentX = panelX + EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
-            val contentWidth = panelWidth - EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING * 2
+            val availableContentWidth = panelWidth - EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING * 2
+            val contentWidth = calculateContentWidth(availableContentWidth)
+            val contentX = panelX + (panelWidth - contentWidth) / 2
             val tabBounds = calculateTabs(contentX, contentWidth, sections)
+            val quickSlotBounds = calculateQuickSlots(contentX, contentWidth, panelY)
+            val quickSlotY = quickSlotBounds.first().y
             val normalListY = panelY + EmotionPickerLayoutMetrics.NORMAL_LIST_Y_OFFSET
             val searchListY = panelY + EmotionPickerLayoutMetrics.SEARCH_LIST_Y_OFFSET
-            val listBottom = panelY + panelHeight - EmotionPickerLayoutMetrics.CONTENT_BOTTOM_PADDING
+            val contentHorizontalInset = contentX - panelX
+            val listBottom = panelY + panelHeight - contentHorizontalInset
             val normalListHeight = (listBottom - normalListY).coerceAtLeast(EmotionPickerGridLayout.ROW_STRIDE)
             val searchListHeight = (listBottom - searchListY).coerceAtLeast(EmotionPickerGridLayout.ROW_STRIDE)
             val rowWidth = (contentWidth - EmotionPickerListMetrics.SIDE_PADDING * 2)
@@ -280,6 +316,9 @@ data class EmotionPickerGeometry(
                 EmotionPickerLayoutMetrics.TITLE_AREA_HEIGHT,
                 panelY + EmotionPickerLayoutMetrics.TAB_Y_OFFSET,
                 tabBounds,
+                quickSlotY,
+                quickSlotBounds.first().height,
+                quickSlotBounds,
                 contentX,
                 contentWidth,
                 normalListY,
@@ -321,6 +360,48 @@ data class EmotionPickerGeometry(
             )
         }
 
+        private fun calculateQuickSlots(
+            contentX: Int,
+            contentWidth: Int,
+            panelY: Int,
+        ): List<EmotionPickerQuickSlotBounds> {
+            val gapsWidth = (EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT - 1) *
+                EmotionPickerLayoutMetrics.QUICK_SLOT_GAP
+            val slotSize = (contentWidth - gapsWidth) / EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT
+            check(slotSize in 1..EmotionPickerLayoutMetrics.QUICK_SLOT_MAXIMUM_SIZE) {
+                "Quick-slot size is outside the supported range: $slotSize"
+            }
+            var slotX = contentX
+            val quickSlotBandY = panelY + EmotionPickerLayoutMetrics.TAB_Y_OFFSET +
+                EmotionPickerLayoutMetrics.TAB_HEIGHT
+            val quickSlotY = quickSlotBandY +
+                (EmotionPickerLayoutMetrics.QUICK_SLOT_BAND_HEIGHT - slotSize) / 2
+            return java.util.List.copyOf(
+                List(EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT) {
+                    EmotionPickerQuickSlotBounds(
+                        slotX,
+                        quickSlotY,
+                        slotSize,
+                        slotSize,
+                    ).also {
+                        slotX += slotSize + EmotionPickerLayoutMetrics.QUICK_SLOT_GAP
+                    }
+                },
+            )
+        }
+
+        private fun calculateContentWidth(availableWidth: Int): Int {
+            val maximumWidth = minOf(availableWidth, EmotionPickerLayoutMetrics.PRIMARY_CONTENT_WIDTH)
+            val gapsWidth = (EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT - 1) *
+                EmotionPickerLayoutMetrics.QUICK_SLOT_GAP
+            require(maximumWidth >= gapsWidth + EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT) {
+                "Content width cannot fit the quick-slot row: $maximumWidth"
+            }
+            val slotSize = ((maximumWidth - gapsWidth) / EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT)
+                .coerceAtMost(EmotionPickerLayoutMetrics.QUICK_SLOT_MAXIMUM_SIZE)
+            return slotSize * EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT + gapsWidth
+        }
+
         private fun distributeWidth(availableWidth: Int, itemCount: Int): List<Int> {
             require(itemCount > 0) { "Item count must be positive" }
             val baseWidth = (availableWidth / itemCount).coerceAtLeast(1)
@@ -329,11 +410,11 @@ data class EmotionPickerGeometry(
         }
 
         private const val SCREEN_MARGIN = 10
-        private const val SIDE_ACTION_VIEWPORT_MARGIN = 2
+        private const val SIDE_ACTION_VIEWPORT_MARGIN = 1
         private const val MIN_PANEL_WIDTH = 128
         private const val MIN_PANEL_HEIGHT = 150
         private const val MAX_PANEL_HEIGHT = 226
-        private const val ICON_TAB_WIDTH = 20
-        private const val TAB_GAP = EmotionPickerVisualMetrics.GAP
+        private const val ICON_TAB_WIDTH = EmotionPickerLayoutMetrics.QUICK_SLOT_MAXIMUM_SIZE
+        private const val TAB_GAP = EmotionPickerLayoutMetrics.QUICK_SLOT_GAP
     }
 }

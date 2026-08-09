@@ -84,7 +84,7 @@ class ClientServerHelloIngressGuardTest : FunSpec({
 private fun validEnvelope(): ServerHelloEnvelope = ServerHelloEnvelope.Valid(
     ServerHello(
         ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE),
-        2_200,
+        3_000,
         EmotionCatalog.of(emptyList()),
     ),
 )

@@ -14,7 +14,7 @@ data class ProtocolVersion(
     companion object {
         private val U8_RANGE = 0..255
 
-        val CURRENT = ProtocolVersion(major = 1, minor = 4)
+        val CURRENT = ProtocolVersion(major = 1, minor = 6)
     }
 }
 
@@ -33,12 +33,27 @@ object EmotifyProtocolFeatures {
     val CUSTOM_EMOJI_SHARING = ProtocolFeature(bit = 1L, minimumMinor = 2)
     val ANIMATED_CUSTOM_EMOJI_SHARING = ProtocolFeature(bit = 1L shl 1, minimumMinor = 3)
     val LOSSLESS_CUSTOM_EMOJI_ASSETS = ProtocolFeature(bit = 1L shl 2, minimumMinor = 4)
+    val THREE_SECOND_ANIMATED_CUSTOM_EMOJI_CYCLE = ProtocolFeature(bit = 1L shl 3, minimumMinor = 5)
+    val CUSTOM_EMOJI_DESCRIPTORS = ProtocolFeature(bit = 1L shl 4, minimumMinor = 6)
     val registry = ProtocolFeatureRegistry.of(
         CUSTOM_EMOJI_SHARING,
         ANIMATED_CUSTOM_EMOJI_SHARING,
         LOSSLESS_CUSTOM_EMOJI_ASSETS,
+        THREE_SECOND_ANIMATED_CUSTOM_EMOJI_CYCLE,
+        CUSTOM_EMOJI_DESCRIPTORS,
     )
     val supported = registry.supportedAt(ProtocolVersion.CURRENT.minor)
+
+    fun supportsAnimatedCustomEmojiSharing(features: FeatureFlags): Boolean =
+        supportsCustomEmojiSharing(features) &&
+            features.contains(ANIMATED_CUSTOM_EMOJI_SHARING) &&
+            features.contains(THREE_SECOND_ANIMATED_CUSTOM_EMOJI_CYCLE)
+
+    fun supportsCustomEmojiSharing(features: FeatureFlags): Boolean =
+        features.contains(CUSTOM_EMOJI_SHARING) && features.contains(CUSTOM_EMOJI_DESCRIPTORS)
+
+    fun supportsLosslessCustomEmojiSharing(features: FeatureFlags): Boolean =
+        supportsCustomEmojiSharing(features) && features.contains(LOSSLESS_CUSTOM_EMOJI_ASSETS)
 }
 
 data class ProtocolCapabilities(

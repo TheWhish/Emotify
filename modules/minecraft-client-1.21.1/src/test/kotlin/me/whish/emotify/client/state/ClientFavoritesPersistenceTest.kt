@@ -202,6 +202,23 @@ class ClientFavoritesPersistenceTest : FunSpec({
         writes.shouldContainExactly("base-settings-favorites")
     }
 
+    test("read only updates change memory without scheduling persistence") {
+        val executor = ManualExecutor()
+        val writes = mutableListOf<String>()
+        val store = SerializedSnapshotStore(
+            loader = { "future-schema-defaults" },
+            executor = executor,
+            sink = writes::add,
+            onFailure = { error -> throw error },
+        )
+
+        store.updateInMemory { current -> "$current-session-change" }
+
+        store.load() shouldBe "future-schema-defaults-session-change"
+        executor.pendingTasks shouldBeExactly 0
+        writes shouldBe emptyList()
+    }
+
     test("failure log gate admits immediately and rate limits repeated failures") {
         val gate = FailureLogGate(100)
 

@@ -22,128 +22,103 @@ object GifTimelineNormalizer {
             return listOf(GifTimelineFrame(0, 0))
         }
 
-        val spans = clipToEmotionLifecycle(mergeEquivalentFrames(sourceDurationsMillis, equivalent))
+        val spans = collectLifecycleSpans(sourceDurationsMillis, equivalent)
         if (spans.size == 1) {
             return listOf(GifTimelineFrame(spans.single().sourceIndex, 0))
         }
 
         val sourceDuration = spans.sumOf(SourceSpan::durationMillis)
-        val targetDuration = sourceDuration.coerceAtLeast(MINIMUM_ANIMATED_DURATION_MILLIS.toLong()).toInt()
+        val targetDuration = sourceDuration.coerceAtLeast(MINIMUM_ANIMATED_DURATION_MILLIS)
         val maximumTargetFrames = minOf(
             CustomEmojiAsset.MAXIMUM_FRAME_COUNT,
             targetDuration / CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS,
         ).coerceAtLeast(MINIMUM_ANIMATED_FRAME_COUNT)
-        if (spans.size > maximumTargetFrames) {
+        val requiredFrameCount = spans.sumOf { span ->
+            ceilingDivision(span.durationMillis, CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS)
+        }
+        if (requiredFrameCount > maximumTargetFrames) {
             return resampleTimeline(spans, maximumTargetFrames, sourceDuration, targetDuration)
         }
-        val durations = allocateDurations(
-            LongArray(spans.size) { index -> spans[index].durationMillis },
-            targetDuration,
-        )
-        return java.util.List.copyOf(
-            spans.indices.map { index ->
-                GifTimelineFrame(spans[index].sourceIndex, durations[index])
-            },
-        )
+        val durations = allocateDurations(spans, targetDuration)
+        val retained = ArrayList<GifTimelineFrame>(requiredFrameCount)
+        spans.indices.forEach { index ->
+            retained += GifTimelineFrame(spans[index].sourceIndex, durations[index])
+        }
+        return splitOversizedFrames(retained)
     }
 
-    private fun mergeEquivalentFrames(
+    private fun collectLifecycleSpans(
         sourceDurationsMillis: IntArray,
         equivalent: (Int, Int) -> Boolean,
     ): List<SourceSpan> {
         val spans = ArrayList<SourceSpan>(sourceDurationsMillis.size)
-        sourceDurationsMillis.forEachIndexed { sourceIndex, rawDuration ->
-            val duration = rawDuration.coerceIn(
+        var remaining = CustomEmojiAsset.MAXIMUM_CYCLE_DURATION_MILLIS
+        for (sourceIndex in sourceDurationsMillis.indices) {
+            val duration = sourceDurationsMillis[sourceIndex].coerceIn(
                 MINIMUM_SOURCE_FRAME_DURATION_MILLIS,
                 MAXIMUM_SOURCE_FRAME_DURATION_MILLIS,
-            ).toLong()
+            )
+            val retainedDuration = minOf(duration, remaining)
+            if (retainedDuration < CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS && duration > retainedDuration) {
+                val previous = spans.lastOrNull()
+                if (previous != null) {
+                    spans[spans.lastIndex] = previous.copy(durationMillis = previous.durationMillis + retainedDuration)
+                    break
+                }
+            }
             val previous = spans.lastOrNull()
             if (previous != null && equivalent(previous.sourceIndex, sourceIndex)) {
-                spans[spans.lastIndex] = previous.copy(durationMillis = previous.durationMillis + duration)
+                spans[spans.lastIndex] = previous.copy(durationMillis = previous.durationMillis + retainedDuration)
             } else {
-                spans += SourceSpan(sourceIndex, duration)
+                spans += SourceSpan(sourceIndex, retainedDuration)
+            }
+            remaining -= retainedDuration
+            if (remaining == 0) {
+                break
             }
         }
         return spans
     }
 
-    private fun clipToEmotionLifecycle(spans: List<SourceSpan>): List<SourceSpan> {
-        val clipped = ArrayList<SourceSpan>(spans.size)
-        var remaining = CustomEmojiAsset.MAXIMUM_CYCLE_DURATION_MILLIS.toLong()
-        for (span in spans) {
-            if (remaining == 0L) {
-                break
-            }
-            val retainedDuration = minOf(span.durationMillis, remaining)
-            if (
-                retainedDuration < CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS &&
-                span.durationMillis > retainedDuration &&
-                clipped.isNotEmpty()
-            ) {
-                break
-            }
-            clipped += span.copy(durationMillis = retainedDuration)
-            remaining -= retainedDuration
-        }
-        return clipped
-    }
-
     private fun resampleTimeline(
         spans: List<SourceSpan>,
         targetCount: Int,
-        sourceDuration: Long,
+        sourceDuration: Int,
         targetDuration: Int,
     ): List<GifTimelineFrame> {
-        val cumulativeEnds = LongArray(spans.size)
-        var cumulative = 0L
-        spans.forEachIndexed { index, span ->
-            cumulative += span.durationMillis
-            cumulativeEnds[index] = cumulative
-        }
-        val sampledDurations = allocateDurations(LongArray(targetCount) { 1L }, targetDuration)
         val sampled = ArrayList<GifTimelineFrame>(targetCount)
+        var spanIndex = 0
+        var spanEnd = spans.first().durationMillis
         repeat(targetCount) { targetIndex ->
             val timelinePosition = targetIndex.toLong() * (sourceDuration - 1L) / (targetCount - 1L)
-            val spanIndex = cumulativeEnds.binarySearch(timelinePosition + 1L).let { result ->
-                if (result >= 0) result else -result - 1
+            while (timelinePosition >= spanEnd && spanIndex < spans.lastIndex) {
+                spanIndex++
+                spanEnd += spans[spanIndex].durationMillis
             }
-            sampled += GifTimelineFrame(spans[spanIndex].sourceIndex, sampledDurations[targetIndex])
-        }
-        val merged = ArrayList<GifTimelineFrame>(sampled.size)
-        sampled.forEach { frame ->
-            val previous = merged.lastOrNull()
-            if (previous != null && previous.sourceIndex == frame.sourceIndex) {
-                merged[merged.lastIndex] = previous.copy(durationMillis = previous.durationMillis + frame.durationMillis)
+            val duration = uniformPartitionSize(targetIndex, targetCount, targetDuration)
+            val previous = sampled.lastOrNull()
+            if (previous != null && previous.sourceIndex == spans[spanIndex].sourceIndex) {
+                sampled[sampled.lastIndex] = previous.copy(durationMillis = previous.durationMillis + duration)
             } else {
-                merged += frame
+                sampled += GifTimelineFrame(spans[spanIndex].sourceIndex, duration)
             }
         }
-        val normalized = ArrayList<GifTimelineFrame>(merged.size)
-        merged.forEach { frame ->
-            val partCount = (frame.durationMillis + CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS - 1) /
-                CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS
-            val partDurations = allocateDurations(LongArray(partCount) { 1L }, frame.durationMillis)
-            partDurations.forEach { duration -> normalized += GifTimelineFrame(frame.sourceIndex, duration) }
-        }
-        return java.util.List.copyOf(normalized)
+        return splitOversizedFrames(sampled)
     }
 
-    private fun allocateDurations(weights: LongArray, targetDuration: Int): IntArray {
-        val totalWeight = weights.sum()
-        val durations = IntArray(weights.size)
-        var cumulativeWeight = 0L
+    private fun allocateDurations(spans: List<SourceSpan>, targetDuration: Int): IntArray {
+        val totalWeight = spans.sumOf(SourceSpan::durationMillis)
+        val durations = IntArray(spans.size)
+        var cumulativeWeight = 0
         var assigned = 0
-        weights.forEachIndexed { index, weight ->
-            cumulativeWeight += weight
-            val cumulativeDuration = (cumulativeWeight * targetDuration / totalWeight).toInt()
+        spans.forEachIndexed { index, span ->
+            cumulativeWeight += span.durationMillis
+            val cumulativeDuration = (cumulativeWeight.toLong() * targetDuration / totalWeight).toInt()
             durations[index] = cumulativeDuration - assigned
             assigned = cumulativeDuration
         }
         durations.indices.forEach { index ->
-            durations[index] = durations[index].coerceIn(
-                CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS,
-                CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS,
-            )
+            durations[index] = durations[index].coerceAtLeast(CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS)
         }
         rebalanceDurations(durations, targetDuration)
         return durations
@@ -151,19 +126,7 @@ object GifTimelineNormalizer {
 
     private fun rebalanceDurations(durations: IntArray, targetDuration: Int) {
         var difference = targetDuration - durations.sum()
-        if (difference > 0) {
-            durations.indices.forEach { index ->
-                if (difference == 0) {
-                    return
-                }
-                val addition = minOf(
-                    difference,
-                    CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS - durations[index],
-                )
-                durations[index] += addition
-                difference -= addition
-            }
-        } else if (difference < 0) {
+        if (difference < 0) {
             for (index in durations.indices.reversed()) {
                 if (difference == 0) {
                     return
@@ -179,9 +142,34 @@ object GifTimelineNormalizer {
         check(difference == 0) { "GIF frame durations could not be normalized to $targetDuration ms" }
     }
 
+    private fun splitOversizedFrames(frames: List<GifTimelineFrame>): List<GifTimelineFrame> {
+        if (frames.none { frame -> frame.durationMillis > CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS }) {
+            return java.util.List.copyOf(frames)
+        }
+        val normalized = ArrayList<GifTimelineFrame>(CustomEmojiAsset.MAXIMUM_FRAME_COUNT)
+        frames.forEach { frame ->
+            val partCount = ceilingDivision(frame.durationMillis, CustomEmojiAsset.MAXIMUM_FRAME_DURATION_MILLIS)
+            repeat(partCount) { partIndex ->
+                normalized += GifTimelineFrame(
+                    frame.sourceIndex,
+                    uniformPartitionSize(partIndex, partCount, frame.durationMillis),
+                )
+            }
+        }
+        check(normalized.size <= CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
+            "GIF normalization exceeded ${CustomEmojiAsset.MAXIMUM_FRAME_COUNT} frames"
+        }
+        return java.util.List.copyOf(normalized)
+    }
+
+    private fun uniformPartitionSize(index: Int, count: Int, total: Int): Int =
+        (((index + 1L) * total / count) - (index.toLong() * total / count)).toInt()
+
+    private fun ceilingDivision(value: Int, divisor: Int): Int = (value + divisor - 1) / divisor
+
     private data class SourceSpan(
         val sourceIndex: Int,
-        val durationMillis: Long,
+        val durationMillis: Int,
     )
 
     private const val MINIMUM_ANIMATED_FRAME_COUNT = 2

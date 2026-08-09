@@ -1,10 +1,15 @@
 package me.whish.emotify.wire.v1
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiFrame
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.FeatureFlags
@@ -146,6 +151,62 @@ internal fun WireReader.readCustomEmojiId(): CustomEmojiId = CustomEmojiId(
     readLong(),
     readLong(),
 )
+
+internal fun customEmojiDescriptorSize(descriptor: CustomEmojiDescriptor): Int {
+    val nameBytes = descriptor.displayName.toByteArray(StandardCharsets.UTF_8)
+    return CustomEmojiId.BYTE_LENGTH + varIntSize(nameBytes.size) + nameBytes.size
+}
+
+internal fun WireWriter.writeCustomEmojiDescriptor(descriptor: CustomEmojiDescriptor) {
+    val nameBytes = descriptor.displayName.toByteArray(StandardCharsets.UTF_8)
+    writeCustomEmojiId(descriptor.originId)
+    writeVarInt(nameBytes.size)
+    writeBytes(nameBytes)
+}
+
+internal fun WireReader.readCustomEmojiDescriptor(): CustomEmojiDescriptor {
+    val originId = readCustomEmojiId()
+    val nameLength = readCanonicalVarInt()
+    if (nameLength !in 1..CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_UTF8_BYTES) {
+        throw WireDecodeException(
+            WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+            "Custom emoji display name length is outside safe limits",
+        )
+    }
+    if (remainingBytes < nameLength) {
+        throw WireDecodeException(WireDecodeViolation.TRUNCATED_BODY, "Custom emoji display name is truncated")
+    }
+    val nameBytes = readBytes(nameLength)
+    val displayName = try {
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(nameBytes))
+            .toString()
+    } catch (exception: CharacterCodingException) {
+        throw WireDecodeException(
+            WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+            "Custom emoji display name is not valid UTF-8",
+            exception,
+        )
+    }
+    val descriptor = try {
+        CustomEmojiDescriptor.create(displayName, originId)
+    } catch (exception: IllegalArgumentException) {
+        throw WireDecodeException(
+            WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+            "Custom emoji descriptor is invalid",
+            exception,
+        )
+    }
+    if (descriptor.displayName != displayName) {
+        throw WireDecodeException(
+            WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+            "Custom emoji display name is not canonical",
+        )
+    }
+    return descriptor
+}
 
 internal fun customEmojiPixelsSize(pixels: CustomEmojiPixels): Int {
     requireLegacyCustomEmojiSize(pixels.size)

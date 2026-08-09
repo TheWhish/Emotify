@@ -11,8 +11,9 @@ class EmotifyServerConfigSpecTest : FunSpec({
 
         EmotifyServerConfig.spec.correct(config)
 
+        config.get<Int>("configVersion") shouldBe 1
         config.get<Boolean>("enabled") shouldBe true
-        config.get<Int>("cooldownMillis") shouldBe 2_200
+        config.get<Int>("cooldownMillis") shouldBe 3_000
         config.get<Boolean>("customEmojis.enabled") shouldBe true
         config.get<Int>("customEmojis.maximumStaticResolution") shouldBe 128
         config.get<Int>("customEmojis.maximumAnimatedResolution") shouldBe 64
@@ -28,5 +29,28 @@ class EmotifyServerConfigSpecTest : FunSpec({
         config.get<Int>("ingress.maximumOutstandingSelections") shouldBe 512
         config.get<Int>("ingress.globalBurstCapacity") shouldBe 1_024
         config.get<Int>("ingress.globalRefillPerSecond") shouldBe 512
+    }
+
+    test("future NeoForge server schema remains opaque to automatic correction") {
+        val config = CommentedConfig.inMemory()
+        config.set<Int>("configVersion", 2)
+        config.set<String>("enabled", "future-value")
+
+        EmotifyServerConfig.spec.isCorrect(config) shouldBe true
+
+        config.get<String>("enabled") shouldBe "future-value"
+    }
+
+    test("explicit legacy NeoForge schema is corrected once while valid values survive") {
+        val config = CommentedConfig.inMemory()
+        config.set<Int>("configVersion", 0)
+        config.set<Boolean>("enabled", false)
+
+        EmotifyServerConfig.spec.isCorrect(config) shouldBe false
+        EmotifyServerConfig.spec.correct(config)
+
+        config.get<Int>("configVersion") shouldBe 1
+        config.get<Boolean>("enabled") shouldBe false
+        EmotifyServerConfig.spec.isCorrect(config) shouldBe true
     }
 })

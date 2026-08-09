@@ -163,6 +163,7 @@ def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
                 'me/whish/emotify/client/state/ClientHandshakeSession.class',
                 'me/whish/emotify/client/picker/EmotionPickerModel.class',
                 'me/whish/emotify/client/input/PickerMovementInputState.class',
+                'me/whish/emotify/client/interaction/EmotionBillboardHitDetector.class',
                 'me/whish/emotify/client/presentation/EmotionBillboardLayout.class',
                 'me/whish/emotify/client/presentation/EmotionPresentationCatalog.class',
                 'me/whish/emotify/client/state/ClientEmotionPlayCoordinator.class',
@@ -190,6 +191,7 @@ def verifyClientLibraryJar = tasks.register('verifyClientLibraryJar') {
                 'me/whish/emotify/client/custom/',
                 'me/whish/emotify/client/picker/',
                 'me/whish/emotify/client/input/',
+                'me/whish/emotify/client/interaction/',
                 'me/whish/emotify/client/presentation/',
                 'me/whish/emotify/client/settings/',
                 'me/whish/emotify/client/sound/'

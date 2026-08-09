@@ -19,10 +19,10 @@ object ProtocolV1Limits {
     const val SELECT_BODY_BYTES = 65
     const val PLAY_BODY_BYTES = 95
     const val SELECTION_REJECTED_BODY_BYTES = 3
-    const val CUSTOM_SELECT_BODY_BYTES = 30_811
-    const val CUSTOM_ASSET_BODY_BYTES = 30_810
+    const val CUSTOM_SELECT_BODY_BYTES = 30_978
+    const val CUSTOM_ASSET_BODY_BYTES = 30_823
     const val CUSTOM_ASSET_CHUNK_BODY_BYTES = 30_810
-    const val CUSTOM_PLAY_BODY_BYTES = 55
+    const val CUSTOM_PLAY_BODY_BYTES = 209
 }
 
 enum class WireDecodeViolation {

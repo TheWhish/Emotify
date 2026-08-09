@@ -21,7 +21,9 @@ import net.minecraft.client.Minecraft
 @Mod(value = Emotify.ID, dist = [Dist.CLIENT])
 class EmotifyClient(modEventBus: IEventBus, modContainer: ModContainer) {
     init {
-        modContainer.registerConfig(ModConfig.Type.CLIENT, EmotifyClientConfig.spec, "${Emotify.ID}-client.toml")
+        if (EmotifyClientConfig.prepareForRegistration()) {
+            modContainer.registerConfig(ModConfig.Type.CLIENT, EmotifyClientConfig.spec, "${Emotify.ID}-client.toml")
+        }
         modContainer.registerExtensionPoint(
             IConfigScreenFactory::class.java,
             IConfigScreenFactory { _, parent -> EmotifySettingsScreen(parent) },
@@ -36,6 +38,7 @@ class EmotifyClient(modEventBus: IEventBus, modContainer: ModContainer) {
             CustomEmotionPlayReceiver(ClientHandshakeController::receive),
         )
         ClientHandshakeController.register()
+        CustomEmojiCopyInput.register()
         EmotionBillboardRenderer.register()
         EmotionPickerController.register(modEventBus)
         EmotionPickerResourceReload.register(modEventBus)

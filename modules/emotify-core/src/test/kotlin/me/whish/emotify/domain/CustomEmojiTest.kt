@@ -116,6 +116,28 @@ class CustomEmojiTest : FunSpec({
         }
     }
 
+    test("animated asset accepts the complete three second lifecycle and rejects longer cycles") {
+        val first = CustomEmojiPixels.of(IntArray(64))
+        val second = CustomEmojiPixels.of(IntArray(64) { 1 })
+
+        val complete = CustomEmojiAsset.create(
+            listOf(
+                CustomEmojiFrame(first, 1_500),
+                CustomEmojiFrame(second, 1_500),
+            ),
+        )
+
+        complete.cycleDurationMillis shouldBe 3_000
+        shouldThrow<IllegalArgumentException> {
+            CustomEmojiAsset.create(
+                listOf(
+                    CustomEmojiFrame(first, 1_500),
+                    CustomEmojiFrame(second, 1_501),
+                ),
+            )
+        }
+    }
+
     test("sixty four pixel animation preserves thirty exact frames") {
         val frames = List(CustomEmojiAsset.MAXIMUM_FRAME_COUNT) { frameIndex ->
             CustomEmojiFrame(

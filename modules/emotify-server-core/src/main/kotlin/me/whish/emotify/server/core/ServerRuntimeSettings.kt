@@ -84,7 +84,7 @@ class ServerRuntimeSettings(
     }
 
     companion object {
-        const val MINIMUM_COOLDOWN_MILLIS = 2_200
+        val MINIMUM_COOLDOWN_MILLIS = EmotionAnimation.DURATION_MILLIS.toInt()
         const val MAXIMUM_EMOTION_FILTER_ENTRIES = 64
         const val MAXIMUM_BROADCAST_GLOBAL_CAPACITY = 512
         const val MAXIMUM_BROADCAST_GLOBAL_REFILL_PER_SECOND = 256
@@ -97,5 +97,6 @@ class ServerRuntimeSettings(
 
         val DEFAULT_AUDIENCE_BUDGET_LIMITS = AudienceBudgetLimits(512, 256, 32, 16, 4_096)
         val DEFAULT_SELECTION_INGRESS_LIMITS = GlobalSelectionIngressLimits(512, 1_024, 512)
+        val DISABLED = ServerRuntimeSettings(enabled = false, customEmojisEnabled = false)
     }
 }

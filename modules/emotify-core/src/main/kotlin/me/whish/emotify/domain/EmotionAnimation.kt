@@ -81,7 +81,7 @@ class EmotionAnimationFrameBuffer {
 
 object EmotionAnimation {
     const val MAX_SPRITE_COUNT = 3
-    const val DURATION_MILLIS = 2_200.0
+    const val DURATION_MILLIS = 3_000.0
     const val MAX_HORIZONTAL_OFFSET_BLOCKS = 0.35
     const val MIN_VERTICAL_OFFSET_BLOCKS = -0.18
     const val MAX_VERTICAL_OFFSET_BLOCKS = 1.10
@@ -162,17 +162,17 @@ object EmotionAnimation {
         val verticalScale = 1.0 + ELASTIC_VERTICAL_STRETCH * deformation - anticipation * 0.8
         val horizontal =
             ELASTIC_ENTRY_CURVE * exp(-ELASTIC_CURVE_DECAY * seconds) * sin(5.8 * seconds) +
-                ELASTIC_LIVING_SWAY * living * sin(2.1 * seconds + 0.4)
+                ELASTIC_LIVING_SWAY * LIVING_OSCILLATION_SCALE * living * sin(2.1 * seconds + 0.4)
         val vertical = ELASTIC_START_Y + ELASTIC_ENTRY_DISTANCE * spring +
             ELASTIC_LIVING_RISE * smootherStep((elapsed - 720.0) / 650.0) +
-            ELASTIC_LIVING_BOB * living * sin(2.8 * seconds + 0.3) +
+            ELASTIC_LIVING_BOB * LIVING_OSCILLATION_SCALE * living * sin(2.8 * seconds + 0.3) +
             ELASTIC_EXIT_DISTANCE * exit
         target.set(
             spriteIndex = 0,
             horizontalOffset = direction * horizontal,
             verticalOffset = vertical,
-            diameter = springDiameter(0.285, elapsed, 0.0, 1_580.0),
-            alpha = fadeAlpha(elapsed, 0.0, 320.0, 1_580.0),
+            diameter = springDiameter(0.285, elapsed, 0.0, 1_580.0 + HOLD_EXTENSION_MILLIS),
+            alpha = fadeAlpha(elapsed, 0.0, 320.0, 1_580.0 + HOLD_EXTENSION_MILLIS),
             horizontalScale = horizontalScale,
             verticalScale = verticalScale,
         )
@@ -197,7 +197,7 @@ object EmotionAnimation {
             diameter = 0.27,
             enterStart = 0.0,
             enterEnd = 300.0,
-            exitStart = 1_540.0,
+            exitStart = 1_540.0 + HOLD_EXTENSION_MILLIS,
         )
         sampleRibbonSprite(
             target = target,
@@ -212,7 +212,7 @@ object EmotionAnimation {
             diameter = 0.21,
             enterStart = 180.0,
             enterEnd = 480.0,
-            exitStart = 1_580.0,
+            exitStart = 1_580.0 + HOLD_EXTENSION_MILLIS,
         )
         sampleRibbonSprite(
             target = target,
@@ -227,7 +227,7 @@ object EmotionAnimation {
             diameter = 0.16,
             enterStart = 360.0,
             enterEnd = 660.0,
-            exitStart = 1_620.0,
+            exitStart = 1_620.0 + HOLD_EXTENSION_MILLIS,
         )
     }
 
@@ -249,9 +249,11 @@ object EmotionAnimation {
         val localSeconds = positiveSeconds(elapsed - motionStart)
         val spring = springResponse(localSeconds, RIBBON_DAMPING_RATIO, RIBBON_SPRING_FREQUENCY)
         val living = livingWeight(elapsed, motionStart + 620.0, exitStart)
-        val horizontal = restingX + weaveAmplitude * sin(RIBBON_FREQUENCY * localSeconds + phase)
+        val horizontal = restingX +
+            weaveAmplitude * LIVING_OSCILLATION_SCALE * sin(RIBBON_FREQUENCY * localSeconds + phase)
         val vertical = restingY - RIBBON_ENTRY_DISTANCE + RIBBON_ENTRY_DISTANCE * spring +
-            RIBBON_BOB_AMPLITUDE * living * sin(RIBBON_BOB_FREQUENCY * localSeconds + phase) +
+            RIBBON_BOB_AMPLITUDE * LIVING_OSCILLATION_SCALE * living *
+            sin(RIBBON_BOB_FREQUENCY * localSeconds + phase) +
             RIBBON_EXIT_DISTANCE * acceleratedExit((elapsed - exitStart) / (DURATION_MILLIS - exitStart))
         target.set(
             spriteIndex = spriteIndex,
@@ -279,21 +281,21 @@ object EmotionAnimation {
     ) {
         val seconds = positiveSeconds(elapsed)
         val spring = springResponse(seconds, 0.72, 8.5)
-        val living = livingWeight(elapsed, 500.0, 1_450.0)
-        val release = smootherStep((elapsed - 950.0) / 850.0)
+        val living = livingWeight(elapsed, 500.0, 1_450.0 + HOLD_EXTENSION_MILLIS)
+        val release = smootherStep((elapsed - LANTERN_ANCHOR_RELEASE_START) / LANTERN_ANCHOR_RELEASE_DURATION)
         val horizontal = -0.04 +
             0.025 * exp(-2.6 * seconds) * sin(5.6 * seconds) +
-            0.014 * living * sin(2.2 * seconds + 0.2)
+            0.014 * LIVING_OSCILLATION_SCALE * living * sin(2.2 * seconds + 0.2)
         val vertical = -0.10 + 0.34 * spring +
-            0.012 * living * sin(2.7 * seconds + 0.5) -
+            0.012 * LIVING_OSCILLATION_SCALE * living * sin(2.7 * seconds + 0.5) -
             0.11 * release
         val pulse = 1.0 + 0.035 * smoothPulse(elapsed, 720.0, 1_120.0)
         target.set(
             spriteIndex = 0,
             horizontalOffset = direction * horizontal,
             verticalOffset = vertical,
-            diameter = springDiameter(0.275, elapsed, 0.0, 1_450.0) * pulse,
-            alpha = fadeAlpha(elapsed, 0.0, 320.0, 1_450.0),
+            diameter = springDiameter(0.275, elapsed, 0.0, 1_450.0 + HOLD_EXTENSION_MILLIS) * pulse,
+            alpha = fadeAlpha(elapsed, 0.0, 320.0, 1_450.0 + HOLD_EXTENSION_MILLIS),
         )
     }
 
@@ -307,10 +309,10 @@ object EmotionAnimation {
         val living = livingWeight(elapsed, 1_120.0, LANTERN_LIGHT_EXIT_START)
         val horizontal = 0.09 +
             0.025 * exp(-2.5 * localSeconds) * sin(6.0 * localSeconds) +
-            0.010 * living * sin(2.5 * localSeconds + 1.4)
+            0.010 * LIVING_OSCILLATION_SCALE * living * sin(2.5 * localSeconds + 1.4)
         val vertical = 0.393 + 0.19 * spring +
             0.015 * smootherStep((elapsed - 760.0) / 500.0) +
-            0.010 * living * sin(3.0 * localSeconds + 0.8) +
+            0.010 * LIVING_OSCILLATION_SCALE * living * sin(3.0 * localSeconds + 0.8) +
             0.32 * acceleratedExit(
                 (elapsed - LANTERN_LIGHT_EXIT_START) /
                     (DURATION_MILLIS - LANTERN_LIGHT_EXIT_START),
@@ -330,7 +332,7 @@ object EmotionAnimation {
         direction: Double,
         target: EmotionAnimationFrameBuffer,
     ) {
-        val alpha = fadeAlpha(elapsed, 0.0, 360.0, 1_700.0)
+        val alpha = fadeAlpha(elapsed, 0.0, 360.0, 1_700.0 + HOLD_EXTENSION_MILLIS)
         if (variant == EmotionAnimationVariant.ELASTIC_POP) {
             target.prepare(1)
             target.set(0, 0.0, 0.24, 0.285, alpha)
@@ -468,7 +470,9 @@ object EmotionAnimation {
     private const val ELASTIC_LIVING_SWAY = 0.018
     private const val ELASTIC_LIVING_RISE = 0.020
     private const val ELASTIC_LIVING_BOB = 0.012
-    private const val ELASTIC_EXIT_START = 1_550.0
+    private const val HOLD_EXTENSION_MILLIS = 800.0
+    private const val LIVING_OSCILLATION_SCALE = 0.92
+    private const val ELASTIC_EXIT_START = 1_550.0 + HOLD_EXTENSION_MILLIS
     private const val ELASTIC_EXIT_DISTANCE = 0.43
     private const val ELASTIC_DEFORMATION_VELOCITY = 1.2
     private const val ELASTIC_HORIZONTAL_STRETCH = 0.08
@@ -482,7 +486,9 @@ object EmotionAnimation {
     private const val RIBBON_BOB_FREQUENCY = 1.9
     private const val RIBBON_EXIT_DISTANCE = 0.30
     private const val LANTERN_LIGHT_MOTION_START = 30.0
-    private const val LANTERN_LIGHT_EXIT_START = 1_480.0
+    private const val LANTERN_ANCHOR_RELEASE_START = 950.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_ANCHOR_RELEASE_DURATION = 850.0
+    private const val LANTERN_LIGHT_EXIT_START = 1_480.0 + HOLD_EXTENSION_MILLIS
     private const val LIVING_BLEND_MILLIS = 260.0
     private const val MILLISECONDS_PER_SECOND = 1_000.0
     private const val NANOSECONDS_PER_MILLISECOND = 1_000_000.0

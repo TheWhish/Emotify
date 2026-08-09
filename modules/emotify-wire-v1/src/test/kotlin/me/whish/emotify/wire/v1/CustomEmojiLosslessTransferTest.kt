@@ -55,6 +55,21 @@ class CustomEmojiLosslessTransferTest : FunSpec({
         encoded.size shouldBeLessThan asset.rawByteLength
     }
 
+    test("three second animation round trips at the lifecycle boundary") {
+        val first = CustomEmojiPixels.of(IntArray(64))
+        val second = CustomEmojiPixels.of(IntArray(64) { 1 })
+        val asset = CustomEmojiAsset.create(
+            listOf(
+                CustomEmojiFrame(first, 1_500),
+                CustomEmojiFrame(second, 1_500),
+            ),
+        )
+
+        val encoded = CustomEmojiLosslessCodec.encode(asset)
+
+        CustomEmojiLosslessCodec.decode(asset.id, encoded) shouldBe asset
+    }
+
     test("incompressible pixels remain bounded and lossless") {
         var state = 0x13579BDF
         val pixels = CustomEmojiPixels.of(128, IntArray(128 * 128) {

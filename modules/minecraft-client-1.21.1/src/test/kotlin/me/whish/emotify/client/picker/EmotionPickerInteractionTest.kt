@@ -2,6 +2,7 @@ package me.whish.emotify.client.picker
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import kotlin.math.abs
 import me.whish.emotify.client.input.PickerMovementAction
 import me.whish.emotify.client.input.PickerMovementInputState
 
@@ -100,5 +101,106 @@ class EmotionPickerInteractionTest : FunSpec({
             movementAllowed = true,
             matchesMovement = false,
         ) shouldBe false
+    }
+
+    test("emotion drag starts only after a four pixel pointer movement") {
+        EmotionPickerDragGesture.shouldStart(20.0, 30.0, 23.99, 30.0) shouldBe false
+        EmotionPickerDragGesture.shouldStart(20.0, 30.0, 24.0, 30.0) shouldBe true
+        EmotionPickerDragGesture.shouldStart(20.0, 30.0, 20.0, 26.0) shouldBe true
+        EmotionPickerDragGesture.shouldStart(20.0, 30.0, 22.83, 32.83) shouldBe true
+    }
+
+    test("picker title is the language independent Emotify brand") {
+        EmotionPickerBrand.TITLE shouldBe "Emotify"
+    }
+
+    test("drag preview follows a bounded inertial curve and settles exactly") {
+        EmotionPickerDragPreview.MAXIMUM_LAG shouldBe 16.0
+        val motion = EmotionPickerDragPreview.Motion(0.0, 0.0)
+        var targetX = 0.0
+        var targetY = 0.0
+        repeat(12) {
+            targetX += 2.0
+            EmotionPickerDragPreview.advance(motion, targetX, targetY, 1.0 / 60.0)
+            (motion.distanceTo(targetX, targetY) <= EmotionPickerDragPreview.MAXIMUM_LAG) shouldBe true
+        }
+        val xBeforeTurn = motion.x
+        targetY += 2.0
+        EmotionPickerDragPreview.advance(motion, targetX, targetY, 1.0 / 60.0)
+
+        (motion.x > xBeforeTurn) shouldBe true
+        (motion.x < targetX) shouldBe true
+        (motion.y in 0.0..<targetY) shouldBe true
+        repeat(180) {
+            EmotionPickerDragPreview.advance(motion, targetX, targetY, 1.0 / 60.0)
+        }
+        abs(motion.x - targetX) shouldBe 0.0
+        abs(motion.y - targetY) shouldBe 0.0
+        motion.velocityX shouldBe 0.0
+        motion.velocityY shouldBe 0.0
+    }
+
+    test("drag preview lifts smoothly and tilts with bounded horizontal inertia") {
+        EmotionPickerDragPreview.liftScale(-1L) shouldBe 0.86
+        (EmotionPickerDragPreview.liftScale(80_000_000L) > 1.0) shouldBe true
+        EmotionPickerDragPreview.liftScale(160_000_000L) shouldBe 1.0
+        EmotionPickerDragPreview.liftScale(1_000_000_000L) shouldBe 1.0
+        EmotionPickerDragPreview.tiltDegrees(
+            EmotionPickerDragPreview.Motion(0.0, 0.0, velocityX = 1_000.0),
+        ) shouldBe 3.5
+        EmotionPickerDragPreview.tiltDegrees(
+            EmotionPickerDragPreview.Motion(0.0, 0.0, velocityX = -1_000.0),
+        ) shouldBe -3.5
+    }
+
+    test("drag preview removes outward radial velocity at the lag boundary") {
+        val motion = EmotionPickerDragPreview.Motion(0.0, 0.0, velocityX = -300.0, velocityY = 80.0)
+
+        EmotionPickerDragPreview.advance(motion, 100.0, 0.0, 1.0 / 120.0)
+
+        (abs(motion.distanceTo(100.0, 0.0) - EmotionPickerDragPreview.MAXIMUM_LAG) < 0.001) shouldBe true
+        (motion.velocityX >= 0.0) shouldBe true
+        (motion.velocityY > 0.0) shouldBe true
+    }
+
+    test("empty quick slot consumes clicks without activating while filled slot remains interactive") {
+        EmotionPickerQuickSlotMouseRouting.click(assigned = false, hovered = true, button = 0) shouldBe
+            EmotionPickerQuickSlotMouseDecision.CONSUME_EMPTY
+        EmotionPickerQuickSlotMouseRouting.click(assigned = false, hovered = true, button = 1) shouldBe
+            EmotionPickerQuickSlotMouseDecision.CONSUME_EMPTY
+        EmotionPickerQuickSlotMouseRouting.click(assigned = true, hovered = true, button = 0) shouldBe
+            EmotionPickerQuickSlotMouseDecision.ACTIVATE
+        EmotionPickerQuickSlotMouseRouting.click(assigned = true, hovered = true, button = 1) shouldBe
+            EmotionPickerQuickSlotMouseDecision.CLEAR
+        EmotionPickerQuickSlotMouseRouting.click(assigned = true, hovered = false, button = 0) shouldBe
+            EmotionPickerQuickSlotMouseDecision.DISPATCH
+    }
+
+    test("drop target emphasis approaches and releases without abrupt state changes") {
+        val entering = EmotionPickerQuickSlotAnimation.nextTargetEmphasis(0.0, true, 1.0 / 60.0)
+        val settled = generateSequence(entering) { current ->
+            EmotionPickerQuickSlotAnimation.nextTargetEmphasis(current, true, 1.0 / 60.0)
+        }.drop(30).first()
+        val leaving = EmotionPickerQuickSlotAnimation.nextTargetEmphasis(settled, false, 1.0 / 60.0)
+
+        (entering in 0.0..1.0) shouldBe true
+        (entering > 0.0) shouldBe true
+        (settled > 0.99) shouldBe true
+        (leaving in 0.0..<settled) shouldBe true
+    }
+
+    test("successful drop uses a subpixel settle curve and finishes exactly at rest") {
+        EmotionPickerQuickSlotAnimation.landingOffset(0L) shouldBe -3.0
+        (abs(EmotionPickerQuickSlotAnimation.landingOffset(80_000_000L)) < 0.001) shouldBe true
+        (abs(EmotionPickerQuickSlotAnimation.landingOffset(160_000_000L) - 0.75) < 0.001) shouldBe true
+        EmotionPickerQuickSlotAnimation.landingOffset(320_000_000L) shouldBe 0.0
+        (abs(EmotionPickerQuickSlotAnimation.landingScale(0L) - 0.82) < 0.001) shouldBe true
+        (abs(EmotionPickerQuickSlotAnimation.landingScale(160_000_000L) - 1.045) < 0.001) shouldBe true
+        EmotionPickerQuickSlotAnimation.landingScale(320_000_000L) shouldBe 1.0
+        EmotionPickerQuickSlotAnimation.landingEmphasis(0L) shouldBe 1.0
+        EmotionPickerQuickSlotAnimation.landingEmphasis(160_000_000L) shouldBe 0.25
+        EmotionPickerQuickSlotAnimation.landingEmphasis(320_000_000L) shouldBe 0.0
+        EmotionPickerQuickSlotAnimation.isLanding(319_999_999L) shouldBe true
+        EmotionPickerQuickSlotAnimation.isLanding(320_000_000L) shouldBe false
     }
 })

@@ -213,7 +213,10 @@ class EmotionAssetsTest : FunSpec({
             "screen.emotify.ignored_players.page",
             "screen.emotify.ignored_players.previous_page",
             "screen.emotify.ignored_players.next_page",
-            "screen.emotify.emotion_picker",
+            "screen.emotify.quick_slot",
+            "screen.emotify.quick_slot.empty_tooltip",
+            "screen.emotify.quick_slot.filled_tooltip",
+            "screen.emotify.quick_slot.unavailable_tooltip",
             "screen.emotify.open_emoji_folder",
             "screen.emotify.scroll_hint",
             "screen.emotify.favorite_hint",
@@ -234,6 +237,8 @@ class EmotionAssetsTest : FunSpec({
             "message.emotify.emoji_folder_failed",
             "message.emotify.selection_cooldown",
             "message.emotify.selection_unavailable",
+            "message.emotify.quick_slot_empty",
+            "message.emotify.quick_slot_unavailable",
             "message.emotify.custom_emojis_unsupported",
             "message.emotify.custom_emoji_missing",
             "message.emotify.player_state",
@@ -252,7 +257,7 @@ class EmotionAssetsTest : FunSpec({
         val english = resourceJson("/assets/emotify/lang/en_us.json")
         val russian = resourceJson("/assets/emotify/lang/ru_ru.json")
 
-        expectedKeys.size shouldBe 221
+        expectedKeys.size shouldBe 226
         english.keySet() shouldContainExactlyInAnyOrder expectedKeys
         russian.keySet() shouldContainExactlyInAnyOrder expectedKeys
         english.entrySet().all { entry -> entry.value.asString.isNotBlank() } shouldBe true

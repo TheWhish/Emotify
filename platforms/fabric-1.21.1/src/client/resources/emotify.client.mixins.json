@@ -5,6 +5,7 @@
   "client": [
     "EditBoxMixin",
     "GameRendererMixin",
+    "MinecraftMixin",
     "PlayerRendererMixin"
   ],
   "injectors": {

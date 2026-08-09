@@ -22,7 +22,9 @@ import me.whish.emotify.client.presentation.EmotionTextureAnimation
 import me.whish.emotify.client.presentation.EmotionTextureFrame
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiFrame
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
@@ -53,6 +55,10 @@ object CustomEmojiRegistry {
     fun contains(emotionId: EmotionId): Boolean = emotionId in snapshot.byEmotionId
 
     fun asset(emotionId: EmotionId): CustomEmojiAsset? = snapshot.assetByEmotionId[emotionId]
+
+    fun descriptor(emotionId: EmotionId): CustomEmojiDescriptor? = snapshot.descriptorByEmotionId[emotionId]
+
+    fun containsOrigin(originId: CustomEmojiId): Boolean = originId in snapshot.origins
 
     fun transferChunks(emotionId: EmotionId): List<CustomEmojiAssetChunk>? = snapshot.chunksByEmotionId[emotionId]
 
@@ -226,6 +232,8 @@ object CustomEmojiRegistry {
                 CustomEmojiFrame(image.toCustomEmojiPixels(), decoded.durationMillisAt(index))
             }
             val asset = CustomEmojiAsset.create(frames)
+            val descriptor = CustomEmojiEmbeddedDescriptor.read(file.format, bytes)
+                ?: CustomEmojiDescriptor.create(file.displayName, asset.id)
             val transferChunks = if (asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
                 java.util.List.copyOf(CustomEmojiAssetChunker.split(asset))
             } else {
@@ -262,10 +270,10 @@ object CustomEmojiRegistry {
                     "",
                     0,
                     regions.first(),
-                    file.displayName,
+                    descriptor.displayName,
                     textureAnimation,
                 )
-                return LoadedCustomEmoji(presentation, texture, atlas, asset, transferChunks)
+                return LoadedCustomEmoji(presentation, texture, atlas, asset, descriptor, transferChunks)
             } catch (failure: Throwable) {
                 atlas.close()
                 throw failure
@@ -469,6 +477,8 @@ private data class CustomEmojiSnapshot(
     val byEmotionId: Map<EmotionId, EmotionPresentation>,
     val textureById: Map<String, ResourceLocation>,
     val assetByEmotionId: Map<EmotionId, CustomEmojiAsset>,
+    val descriptorByEmotionId: Map<EmotionId, CustomEmojiDescriptor>,
+    val origins: Set<CustomEmojiId>,
     val chunksByEmotionId: Map<EmotionId, List<CustomEmojiAssetChunk>>,
     val fingerprint: CustomEmojiDirectoryFingerprint,
 ) {
@@ -478,6 +488,8 @@ private data class CustomEmojiSnapshot(
             emptyMap(),
             emptyMap(),
             emptyMap(),
+            emptyMap(),
+            emptySet(),
             emptyMap(),
             CustomEmojiDirectoryFingerprint.EMPTY,
         )
@@ -492,6 +504,8 @@ private data class CustomEmojiSnapshot(
                 java.util.Map.copyOf(presentations.associateBy(EmotionPresentation::emotionId)),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.textureId to entry.texture }),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.asset }),
+                java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.descriptor }),
+                java.util.Set.copyOf(entries.map { entry -> entry.descriptor.originId }),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.transferChunks }),
                 fingerprint,
             )
@@ -504,6 +518,7 @@ private data class LoadedCustomEmoji(
     val texture: ResourceLocation,
     val image: NativeImage,
     val asset: CustomEmojiAsset,
+    val descriptor: CustomEmojiDescriptor,
     val transferChunks: List<CustomEmojiAssetChunk>,
 ) {
     val retainedByteLength: Long = asset.rawByteLength.toLong() * 2L +

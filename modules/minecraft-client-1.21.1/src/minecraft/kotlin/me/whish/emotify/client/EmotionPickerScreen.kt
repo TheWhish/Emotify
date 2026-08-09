@@ -1,6 +1,11 @@
 package me.whish.emotify.client
 
+import com.mojang.blaze3d.platform.InputConstants
+import com.mojang.math.Axis
+import me.whish.emotify.client.picker.EmotionPickerBrand
 import me.whish.emotify.client.picker.EmotionPickerContext
+import me.whish.emotify.client.picker.EmotionPickerDragGesture
+import me.whish.emotify.client.picker.EmotionPickerDragPreview
 import me.whish.emotify.client.picker.EmotionPickerGeometry
 import me.whish.emotify.client.picker.EmotionPickerKeyboardRouting
 import me.whish.emotify.client.picker.EmotionPickerLayoutMetrics
@@ -15,23 +20,34 @@ import me.whish.emotify.client.picker.EmotionPickerSectionKind
 import me.whish.emotify.client.picker.EmotionPickerState
 import me.whish.emotify.client.picker.messageTranslationKey
 import me.whish.emotify.client.presentation.EmotionPresentation
+import me.whish.emotify.client.presentation.EmotionPresentationCatalog
+import me.whish.emotify.client.input.QuickSlotInputGate
+import me.whish.emotify.client.input.QuickSlotInputRouting
+import me.whish.emotify.client.input.QuickSlotKeyResolver
+import me.whish.emotify.client.input.QuickSlotPressDecision
+import me.whish.emotify.client.settings.ClientConfigurationSnapshot
+import me.whish.emotify.client.settings.ClientConfigurationSchema
 import me.whish.emotify.client.state.ClientSelectionSendResult
 import me.whish.emotify.client.state.FavoriteEmotionStore
 import me.whish.emotify.client.state.FavoriteToggleResult
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.domain.SystemMonotonicTimeSource
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
+import org.lwjgl.glfw.GLFW
 
 class EmotionPickerScreen(
     initialContext: EmotionPickerContext,
     private val timeSource: MonotonicTimeSource = SystemMonotonicTimeSource,
 ) : Screen(
-    Component.translatable("screen.emotify.emotion_picker"),
+    Component.literal(EmotionPickerBrand.TITLE),
 ) {
     private var context = initialContext
     private val favorites = FavoriteEmotionStore.from(EmotifyClientConfig.loadFavorites())
+    private var quickSlots = loadQuickSlotsSnapshot()
+    private val quickSlotInputGate = QuickSlotInputGate()
     private var model = createModel(initialContext)
     private var state = requireNotNull(model.initialState()) { "Emotion picker requires at least one section" }
     private var displayedEmotions = model.emotions(state)
@@ -39,10 +55,18 @@ class EmotionPickerScreen(
     private lateinit var geometry: EmotionPickerGeometry
     private lateinit var grid: EmotionGridList
     private lateinit var searchBox: EmotionSearchBox
+    private val quickSlotButtons = ArrayList<EmotionQuickSlotButton>()
+    private var dragSession: EmotionDragSession? = null
+    private var dragTargetSlot = NO_QUICK_SLOT
+    private var reducedMotion = false
     private var retainedWidgetState: PickerWidgetState? = null
 
     override fun init() {
         val client = requireNotNull(minecraft) { "Minecraft client is unavailable" }
+        cancelDrag()
+        quickSlots = loadQuickSlotsSnapshot()
+        reducedMotion = EmotifyClientConfig.settings().reducedMotion
+        quickSlotButtons.clear()
         geometry = EmotionPickerGeometry.calculate(width, height, model.sections)
         model.sections.forEachIndexed { index, section ->
             val bounds = geometry.tabBounds[index]
@@ -77,6 +101,21 @@ class EmotionPickerScreen(
                 ::openSettings,
             ),
         )
+        geometry.quickSlotBounds.forEachIndexed { index, bounds ->
+            quickSlotButtons += addRenderableWidget(
+                EmotionQuickSlotButton(
+                    index,
+                    bounds,
+                    { quickSlots.quickSlot(index) != null },
+                    { quickSlotPresentation(index) },
+                    { dragTargetSlot == index },
+                    timeSource::nowNanos,
+                    { reducedMotion },
+                    ::selectQuickSlot,
+                    ::clearQuickSlot,
+                ),
+            )
+        }
         searchBox = EmotionSearchBox(
             font,
             geometry.searchFieldX,
@@ -102,6 +141,8 @@ class EmotionPickerScreen(
             ::selectEmotion,
             { presentation -> favorites.isFavorite(presentation.emotionId) },
             ::toggleFavorite,
+            ::beginEmotionPointerPress,
+            ::isDragging,
         )
         grid.setX(geometry.listX)
         grid.replaceEmotions(displayedEmotions)
@@ -118,7 +159,11 @@ class EmotionPickerScreen(
     }
 
     override fun tick() {
-        val player = minecraft?.player
+        val client = minecraft ?: run {
+            onClose()
+            return
+        }
+        val player = client.player
         val currentContext = ClientHandshakeController.pickerContext()
         if (
             player == null ||
@@ -129,14 +174,13 @@ class EmotionPickerScreen(
             onClose()
             return
         }
+        synchronizeQuickSlotInput(client)
         if (currentContext.allowedEmotions != context.allowedEmotions) {
             applyPolicy(currentContext)
         }
-        minecraft?.let { client ->
-            CustomEmojiRegistry.refreshIfChanged(client) {
-                if (client.screen === this) {
-                    applyPolicy(context)
-                }
+        CustomEmojiRegistry.refreshIfChanged(client) {
+            if (client.screen === this) {
+                applyPolicy(context)
             }
         }
         val nowNanos = timeSource.nowNanos()
@@ -200,7 +244,9 @@ class EmotionPickerScreen(
                 false,
             )
         }
-        notice?.let { current -> renderNotice(guiGraphics, current, timeSource.nowNanos()) }
+        val nowNanos = timeSource.nowNanos()
+        notice?.let { current -> renderNotice(guiGraphics, current, nowNanos) }
+        renderDragPreview(guiGraphics, mouseX, mouseY, nowNanos)
     }
 
     override fun isPauseScreen(): Boolean = false
@@ -254,6 +300,9 @@ class EmotionPickerScreen(
     }
 
     override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        if (button == 0 && finishEmotionPointerPress(mouseX, mouseY)) {
+            return true
+        }
         if (
             EmotionPickerMouseRouting.consumeRelease(
                 allowsMovementInput(),
@@ -263,6 +312,34 @@ class EmotionPickerScreen(
             return true
         }
         return super.mouseReleased(mouseX, mouseY, button)
+    }
+
+    override fun mouseDragged(
+        mouseX: Double,
+        mouseY: Double,
+        button: Int,
+        dragX: Double,
+        dragY: Double,
+    ): Boolean {
+        val current = dragSession
+        if (button == 0 && current != null) {
+            current.pointerX = mouseX
+            current.pointerY = mouseY
+            if (!current.dragging && EmotionPickerDragGesture.shouldStart(
+                    current.originX,
+                    current.originY,
+                    mouseX,
+                    mouseY,
+                )
+            ) {
+                current.startDragging(timeSource.nowNanos())
+            }
+            if (current.dragging) {
+                dragTargetSlot = geometry.quickSlotAt(mouseX, mouseY)
+            }
+            return true
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY)
     }
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
@@ -276,6 +353,18 @@ class EmotionPickerScreen(
                 return true
             }
         }
+        val quickSlotInputIndex = QuickSlotKeyResolver.resolve(keyCode, GLFW.GLFW_KEY_1, GLFW.GLFW_KEY_KP_1)
+        if (quickSlotInputIndex != QuickSlotKeyResolver.NO_SLOT) {
+            val edgePress = quickSlotInputGate.press(quickSlotInputIndex)
+            val quickSlotIndex = QuickSlotKeyResolver.slotIndex(quickSlotInputIndex)
+            when (QuickSlotInputRouting.press(isSearchInputFocused(), edgePress)) {
+                QuickSlotPressDecision.ACTIVATE_WITH_CLICK_FEEDBACK -> activateQuickSlotFromKeyboard(quickSlotIndex)
+                QuickSlotPressDecision.CONSUME_REPEAT -> Unit
+                QuickSlotPressDecision.DISPATCH_TO_TEXT_INPUT ->
+                    return super.keyPressed(keyCode, scanCode, modifiers)
+            }
+            return true
+        }
         if (EmotionPickerKeyboardRouting.consumePress(allowsMovementInput(), movementPressed)) {
             return true
         }
@@ -284,6 +373,13 @@ class EmotionPickerScreen(
 
     override fun keyReleased(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
         val movementReleased = EmotionPickerMovement.keyReleased(minecraft, keyCode, scanCode)
+        val quickSlotInputIndex = QuickSlotKeyResolver.resolve(keyCode, GLFW.GLFW_KEY_1, GLFW.GLFW_KEY_KP_1)
+        if (quickSlotInputIndex != QuickSlotKeyResolver.NO_SLOT) {
+            quickSlotInputGate.release(quickSlotInputIndex)
+            if (!isSearchInputFocused()) {
+                return true
+            }
+        }
         if (allowsMovementInput() && movementReleased) {
             return true
         }
@@ -291,6 +387,8 @@ class EmotionPickerScreen(
     }
 
     override fun removed() {
+        cancelDrag()
+        quickSlotInputGate.clear()
         minecraft?.let { client ->
             EmotionPickerMovement.release(
                 client,
@@ -364,6 +462,48 @@ class EmotionPickerScreen(
         showNotice(Component.translatable(checkNotNull(result.messageTranslationKey())))
     }
 
+    private fun selectQuickSlot(slotIndex: Int) {
+        val emotionId = quickSlots.quickSlot(slotIndex)
+        if (emotionId == null) {
+            showNotice(Component.translatable("message.emotify.quick_slot_empty", slotIndex + 1))
+            return
+        }
+        val presentation = EmotionPresentationCatalog.find(emotionId) ?: CustomEmojiRegistry.find(emotionId)
+        if (presentation == null) {
+            showNotice(Component.translatable("message.emotify.quick_slot_unavailable", slotIndex + 1))
+            return
+        }
+        selectEmotion(presentation)
+    }
+
+    private fun activateQuickSlotFromKeyboard(slotIndex: Int) {
+        val button = quickSlotButtons.getOrNull(slotIndex)
+        val soundManager = minecraft?.soundManager
+        if (button == null || soundManager == null) {
+            selectQuickSlot(slotIndex)
+            return
+        }
+        button.activateFromKeyboard(soundManager)
+    }
+
+    private fun clearQuickSlot(slotIndex: Int) {
+        val updated = quickSlots.clearQuickSlot(slotIndex)
+        if (updated === quickSlots) {
+            return
+        }
+        quickSlots = updated
+        EmotifyClientConfig.saveQuickSlots(updated.quickSlots)
+    }
+
+    private fun assignQuickSlot(slotIndex: Int, presentation: EmotionPresentation) {
+        val updated = quickSlots.assignQuickSlot(slotIndex, presentation.emotionId)
+        if (updated !== quickSlots) {
+            quickSlots = updated
+            EmotifyClientConfig.saveQuickSlots(updated.quickSlots)
+        }
+        quickSlotButtons.getOrNull(slotIndex)?.startLanding(timeSource.nowNanos())
+    }
+
     internal fun showNotice(message: Component) {
         notice = EmotionPickerNotice.show(notice, message.string, timeSource.nowNanos())
     }
@@ -373,6 +513,7 @@ class EmotionPickerScreen(
     }
 
     private fun applyPolicy(updatedContext: EmotionPickerContext) {
+        cancelDrag()
         val updatedModel = createModel(updatedContext)
         val initialState = updatedModel.initialState()
         if (initialState == null) {
@@ -432,6 +573,139 @@ class EmotionPickerScreen(
 
     private fun isSearchInputFocused(): Boolean =
         isSearching() && ::searchBox.isInitialized && searchBox.isFocused
+
+    private fun beginEmotionPointerPress(
+        presentation: EmotionPresentation,
+        mouseX: Double,
+        mouseY: Double,
+        sourceX: Double,
+        sourceY: Double,
+    ) {
+        val nowNanos = timeSource.nowNanos()
+        dragSession = EmotionDragSession(
+            presentation,
+            mouseX,
+            mouseY,
+            mouseX,
+            mouseY,
+            EmotionPickerDragPreview.Motion(sourceX, sourceY),
+            nowNanos,
+        )
+        dragTargetSlot = NO_QUICK_SLOT
+    }
+
+    private fun finishEmotionPointerPress(mouseX: Double, mouseY: Double): Boolean {
+        val current = dragSession ?: return false
+        dragSession = null
+        dragTargetSlot = NO_QUICK_SLOT
+        if (current.dragging) {
+            val slotIndex = geometry.quickSlotAt(mouseX, mouseY)
+            if (slotIndex != NO_QUICK_SLOT) {
+                assignQuickSlot(slotIndex, current.presentation)
+            }
+        } else {
+            selectEmotion(current.presentation)
+        }
+        return true
+    }
+
+    private fun renderDragPreview(
+        guiGraphics: GuiGraphics,
+        mouseX: Int,
+        mouseY: Int,
+        nowNanos: Long,
+    ) {
+        val current = dragSession ?: return
+        current.pointerX = mouseX.toDouble()
+        current.pointerY = mouseY.toDouble()
+        if (!current.dragging) {
+            return
+        }
+        dragTargetSlot = geometry.quickSlotAt(current.pointerX, current.pointerY)
+        if (reducedMotion) {
+            current.motion.x = current.pointerX
+            current.motion.y = current.pointerY
+            current.motion.velocityX = 0.0
+            current.motion.velocityY = 0.0
+        } else {
+            val elapsedSeconds = ((nowNanos - current.lastFrameNanos).coerceAtLeast(0L) / NANOS_PER_SECOND)
+                .coerceAtMost(MAXIMUM_DRAG_FRAME_SECONDS)
+            EmotionPickerDragPreview.advance(
+                current.motion,
+                current.pointerX,
+                current.pointerY,
+                elapsedSeconds,
+            )
+        }
+        current.lastFrameNanos = nowNanos
+        val previewSize = geometry.quickSlotHeight
+        val iconSize = geometry.quickSlotBounds.first().previewSize
+        val dragElapsedNanos = (nowNanos - current.dragStartedNanos).coerceAtLeast(0L)
+        val scale = if (reducedMotion) 1.0 else EmotionPickerDragPreview.liftScale(dragElapsedNanos)
+        val tiltDegrees = if (reducedMotion) 0.0 else EmotionPickerDragPreview.tiltDegrees(current.motion)
+        val pose = guiGraphics.pose()
+        pose.pushPose()
+        try {
+            pose.translate(current.motion.x, current.motion.y, 0.0)
+            pose.mulPose(Axis.ZP.rotationDegrees(tiltDegrees.toFloat()))
+            pose.scale(scale.toFloat(), scale.toFloat(), 1.0F)
+            pose.translate(-previewSize / 2.0, -previewSize / 2.0, 0.0)
+            EmotionPickerTheme.renderButton(
+                guiGraphics,
+                0,
+                0,
+                previewSize,
+                previewSize,
+                EmotionPickerTheme.buttonSelectedHovered,
+                EmotionPickerTheme.selectedOutline,
+                pressed = true,
+            )
+            val region = current.presentation.regionAt(nowNanos / 1_000_000L)
+            guiGraphics.blit(
+                EmotionTextureResources.resolve(current.presentation.textureId),
+                (previewSize - iconSize) / 2,
+                (previewSize - iconSize) / 2,
+                iconSize,
+                iconSize,
+                region.x.toFloat(),
+                region.y.toFloat(),
+                region.width,
+                region.height,
+                region.textureWidth,
+                region.textureHeight,
+            )
+        } finally {
+            pose.popPose()
+        }
+    }
+
+    private fun synchronizeQuickSlotInput(client: Minecraft) {
+        val window = client.window.window
+        var physicallyPressedMask = 0
+        repeat(ClientConfigurationSchema.QUICK_SLOT_COUNT) { index ->
+            if (InputConstants.isKeyDown(window, GLFW.GLFW_KEY_1 + index)) {
+                physicallyPressedMask = physicallyPressedMask or (1 shl index)
+            }
+            if (InputConstants.isKeyDown(window, GLFW.GLFW_KEY_KP_1 + index)) {
+                physicallyPressedMask = physicallyPressedMask or
+                    (1 shl (index + ClientConfigurationSchema.QUICK_SLOT_COUNT))
+            }
+        }
+        quickSlotInputGate.releaseMissing(physicallyPressedMask)
+    }
+
+    private fun cancelDrag() {
+        dragSession = null
+        dragTargetSlot = NO_QUICK_SLOT
+    }
+
+    private fun isDragging(presentation: EmotionPresentation): Boolean =
+        dragSession?.takeIf(EmotionDragSession::dragging)?.presentation?.emotionId == presentation.emotionId
+
+    private fun quickSlotPresentation(slotIndex: Int): EmotionPresentation? {
+        val emotionId = quickSlots.quickSlot(slotIndex) ?: return null
+        return EmotionPresentationCatalog.find(emotionId) ?: CustomEmojiRegistry.find(emotionId)
+    }
 
     private fun renderNotice(guiGraphics: GuiGraphics, current: EmotionPickerNotice, nowNanos: Long) {
         val opacity = current.opacityAt(nowNanos)
@@ -501,6 +775,12 @@ class EmotionPickerScreen(
             presentation.literalName ?: Component.translatable(presentation.translationKey).string
         }
 
+    private fun loadQuickSlotsSnapshot(): ClientConfigurationSnapshot = ClientConfigurationSnapshot.create(
+        EmotifyClientConfig.settings(),
+        EmotifyClientConfig.loadFavorites(),
+        EmotifyClientConfig.loadQuickSlots(),
+    )
+
     private fun EmotionPickerSection.tabIcon(): EmotionTabIcon = when (kind) {
         EmotionPickerSectionKind.FAVORITES -> EmotionTabIcon.FAVORITES
         EmotionPickerSectionKind.GROUP -> EmotionTabIcon.NONE
@@ -514,10 +794,31 @@ class EmotionPickerScreen(
         private val NO_CUSTOM_EMOJIS_MESSAGE = Component.translatable("screen.emotify.no_custom_emojis")
         private const val MAXIMUM_SEARCH_LENGTH = 64
         private const val TRUNCATION_MARK = ".."
+        private const val NO_QUICK_SLOT = -1
+        private const val MAXIMUM_DRAG_FRAME_SECONDS = 0.05
+        private const val NANOS_PER_SECOND = 1_000_000_000.0
     }
 
     private data class PickerWidgetState(
         val scrollAmount: Double,
         val searchFocused: Boolean,
     )
+
+    private class EmotionDragSession(
+        val presentation: EmotionPresentation,
+        val originX: Double,
+        val originY: Double,
+        var pointerX: Double,
+        var pointerY: Double,
+        val motion: EmotionPickerDragPreview.Motion,
+        var lastFrameNanos: Long,
+        var dragging: Boolean = false,
+        var dragStartedNanos: Long = Long.MIN_VALUE,
+    ) {
+        fun startDragging(startedNanos: Long) {
+            dragging = true
+            dragStartedNanos = startedNanos
+            lastFrameNanos = startedNanos
+        }
+    }
 }

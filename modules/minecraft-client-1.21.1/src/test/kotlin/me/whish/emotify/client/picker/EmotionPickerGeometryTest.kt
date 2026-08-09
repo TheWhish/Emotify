@@ -14,17 +14,19 @@ class EmotionPickerGeometryTest : FunSpec({
     test("maximum panel pins square virtual tabs around equal group tabs") {
         val geometry = EmotionPickerGeometry.calculate(300, 300, sections)
 
-        geometry.panelWidth shouldBe 246
-        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 60, 59, 59, 20)
-        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(33, 57, 121, 184, 247)
+        geometry.panelWidth shouldBe 250
+        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(22, 57, 57, 56, 22)
+        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(35, 61, 122, 183, 243)
         geometry.tabBounds.last().x + geometry.tabBounds.last().width shouldBe
             geometry.contentX + geometry.listWidth
-        geometry.listX - geometry.panelX shouldBe EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
+        geometry.listX - geometry.panelX shouldBe 10
         geometry.panelX + geometry.panelWidth - (geometry.listX + geometry.listWidth) shouldBe
-            EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
+            10
         geometry.panelY + geometry.panelHeight - (geometry.normalListY + geometry.normalListHeight) shouldBe
-            EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
-        geometry.normalListY - (geometry.tabY + EmotionPickerLayoutMetrics.TAB_HEIGHT) shouldBe
+            geometry.listX - geometry.panelX
+        geometry.quickSlotY - (geometry.tabY + EmotionPickerLayoutMetrics.TAB_HEIGHT) shouldBe
+            EmotionPickerVisualMetrics.GAP
+        geometry.normalListY - (geometry.quickSlotY + geometry.quickSlotHeight) shouldBe
             EmotionPickerVisualMetrics.GAP
         geometry.tabBounds.zipWithNext().forEach { (left, right) ->
             right.x - (left.x + left.width) shouldBe EmotionPickerVisualMetrics.GAP
@@ -35,12 +37,49 @@ class EmotionPickerGeometryTest : FunSpec({
         titleY - (geometry.panelY + EmotionPickerVisualMetrics.FRAME_THICKNESS) shouldBe
             geometry.tabY - (titleY + 9)
         geometry.tabY - geometry.panelY shouldBe 17
-        geometry.normalListY - geometry.panelY shouldBe 41
-        geometry.normalListY - geometry.tabY shouldBe 24
+        EmotionPickerLayoutMetrics.TAB_HEIGHT shouldBe 22
+        geometry.quickSlotY - geometry.panelY shouldBe 43
+        geometry.quickSlotHeight shouldBe 22
+        geometry.normalListY - geometry.panelY shouldBe 69
+        geometry.normalListY - geometry.tabY shouldBe 52
+        geometry.quickSlotBounds.map(EmotionPickerQuickSlotBounds::x) shouldContainExactly
+            listOf(35, 61, 87, 113, 139, 165, 191, 217, 243)
+        geometry.quickSlotBounds.map(EmotionPickerQuickSlotBounds::width) shouldContainExactly
+            List(9) { 22 }
+        geometry.quickSlotBounds.zipWithNext { left, right -> right.x - left.right } shouldContainExactly
+            List(8) { EmotionPickerVisualMetrics.GAP }
+        geometry.quickSlotBounds.first().x shouldBe geometry.contentX
+        geometry.quickSlotBounds.last().right shouldBe geometry.contentX + geometry.listWidth
+        geometry.quickSlotBounds.all { bounds ->
+            bounds.y == geometry.quickSlotY && bounds.height == bounds.width
+        } shouldBe true
+        geometry.quickSlotBounds.first().previewSize shouldBe 14
+        geometry.tabBounds.first() shouldBe EmotionPickerTabBounds(
+            geometry.quickSlotBounds.first().x,
+            geometry.quickSlotBounds.first().width,
+        )
+        geometry.tabBounds.last() shouldBe EmotionPickerTabBounds(
+            geometry.quickSlotBounds.last().x,
+            geometry.quickSlotBounds.last().width,
+        )
+        geometry.tabBounds[1].x shouldBe geometry.quickSlotBounds[1].x
+        EmotionPickerLayoutMetrics.QUICK_SLOT_MAXIMUM_SIZE shouldBe 22
+        EmotionPickerLayoutMetrics.QUICK_SLOT_ICON_SIZE shouldBe 14
+        (EmotionPickerLayoutMetrics.QUICK_SLOT_MAXIMUM_SIZE - EmotionPickerLayoutMetrics.QUICK_SLOT_ICON_SIZE) / 2 shouldBe
+            EmotionPickerVisualMetrics.GAP
+        abs(
+            (geometry.quickSlotBounds.first().x - geometry.panelX) -
+                (geometry.panelX + geometry.panelWidth - geometry.quickSlotBounds.last().right),
+        ) shouldBeLessThanOrEqual 1
+        geometry.quickSlotAt(35.0, geometry.quickSlotY.toDouble()) shouldBe 0
+        geometry.quickSlotAt(56.999, (geometry.quickSlotY + 21).toDouble()) shouldBe 0
+        geometry.quickSlotAt(60.999, (geometry.quickSlotY + 21).toDouble()) shouldBe -1
+        geometry.quickSlotAt(61.0, geometry.quickSlotY.toDouble()) shouldBe 1
+        geometry.quickSlotAt(60.0, (geometry.quickSlotY + 22).toDouble()) shouldBe -1
         geometry.searchListY - (geometry.searchFieldY + geometry.searchFieldHeight) shouldBe 4
-        geometry.rowWidth shouldBe 222
-        geometry.cellWidths shouldContainExactly listOf(68, 68, 67)
-        geometry.gridWidth shouldBe 211
+        geometry.rowWidth shouldBe 218
+        geometry.cellWidths shouldContainExactly listOf(67, 66, 66)
+        geometry.gridWidth shouldBe 207
         geometry.gridX shouldBe geometry.listX + EmotionPickerListMetrics.SIDE_PADDING
         geometry.gridX + geometry.gridWidth shouldBe
             geometry.listX + geometry.listWidth -
@@ -64,20 +103,20 @@ class EmotionPickerGeometryTest : FunSpec({
             EmotionPickerListMetrics.SCROLLBAR_GAP +
             EmotionPickerListMetrics.SCROLLBAR_WIDTH +
             EmotionPickerListMetrics.SCROLLBAR_RIGHT_PADDING
-        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = true) shouldBe 211
-        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = false) shouldBe 222
+        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = true) shouldBe 207
+        EmotionPickerGridMetrics.gridWidth(geometry.listWidth, scrollbarVisible = false) shouldBe 218
         EmotionPickerGridMetrics.cellWidths(
             geometry.listWidth,
             scrollbarVisible = true,
-        ) shouldContainExactly listOf(68, 68, 67)
+        ) shouldContainExactly listOf(67, 66, 66)
         EmotionPickerGridMetrics.cellWidths(
             geometry.listWidth,
             scrollbarVisible = false,
-        ) shouldContainExactly listOf(72, 71, 71)
-        geometry.panelX shouldBe 27
+        ) shouldContainExactly listOf(70, 70, 70)
+        geometry.panelX shouldBe 25
         geometry.panelX + geometry.panelWidth / 2 shouldBe 150
-        geometry.sideActionX shouldBe 277
-        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 297
+        geometry.sideActionX shouldBe 279
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 299
         geometry.sideActionY(0) shouldBe geometry.tabY
         geometry.sideActionY(1) shouldBe geometry.tabY + EmotionPickerSideActionLayout.STRIDE
         geometry.panelX shouldBe (300 - geometry.panelWidth) / 2
@@ -86,26 +125,51 @@ class EmotionPickerGeometryTest : FunSpec({
     test("minimum panel preserves usable group widths and reserves search input space") {
         val geometry = EmotionPickerGeometry.calculate(200, 180, sections)
 
-        geometry.panelWidth shouldBe 148
-        geometry.panelX shouldBe 26
-        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(20, 27, 27, 26, 20)
-        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(32, 56, 87, 118, 148)
+        geometry.panelWidth shouldBe 150
+        geometry.panelX shouldBe 25
+        geometry.tabBounds.map(EmotionPickerTabBounds::width) shouldContainExactly listOf(22, 24, 24, 23, 22)
+        geometry.tabBounds.map(EmotionPickerTabBounds::x) shouldContainExactly listOf(34, 60, 88, 116, 143)
         geometry.searchListY - geometry.normalListY shouldBe 22
         geometry.normalListHeight - geometry.searchListHeight shouldBe 22
-        geometry.rowWidth shouldBe 124
-        geometry.cellWidths shouldContainExactly listOf(35, 35, 35)
-        geometry.sideActionX shouldBe 178
-        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 198
+        geometry.rowWidth shouldBe 119
+        geometry.cellWidths shouldContainExactly listOf(34, 33, 33)
+        geometry.sideActionX shouldBe 179
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 199
         geometry.panelX shouldBe (200 - geometry.panelWidth) / 2
+        geometry.quickSlotBounds.map(EmotionPickerQuickSlotBounds::width) shouldContainExactly
+            List(9) { 11 }
+        geometry.quickSlotBounds.all { bounds -> bounds.width == bounds.height } shouldBe true
+        geometry.quickSlotBounds.first().previewSize shouldBe 7
+        geometry.quickSlotBounds.first().x shouldBe geometry.contentX
+        geometry.quickSlotBounds.last().right shouldBe geometry.contentX + geometry.listWidth
+        geometry.quickSlotBounds.zipWithNext { left, right -> right.x - left.right }.distinct() shouldContainExactly
+            listOf(EmotionPickerVisualMetrics.GAP)
     }
 
     test("centered picker keeps its side action inside a narrow viewport") {
         val geometry = EmotionPickerGeometry.calculate(180, 180, sections)
 
-        geometry.panelWidth shouldBe 128
-        geometry.panelX shouldBe 26
-        geometry.sideActionX shouldBe 158
-        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 178
+        geometry.panelWidth shouldBe 130
+        geometry.panelX shouldBe 25
+        geometry.sideActionX shouldBe 159
+        geometry.sideActionX + EmotionPickerSideActionLayout.SIZE shouldBe 179
+    }
+
+    test("responsive content preserves one integer quick-slot lattice") {
+        (180..420).forEach { screenWidth ->
+            val geometry = EmotionPickerGeometry.calculate(screenWidth, 180, sections)
+            val slotSize = geometry.quickSlotBounds.first().width
+
+            geometry.listWidth shouldBe
+                EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT * slotSize +
+                (EmotionPickerLayoutMetrics.QUICK_SLOT_COUNT - 1) * EmotionPickerLayoutMetrics.QUICK_SLOT_GAP
+            geometry.quickSlotBounds.zipWithNext { left, right -> right.x - left.right }.distinct() shouldContainExactly
+                listOf(EmotionPickerLayoutMetrics.QUICK_SLOT_GAP)
+            geometry.quickSlotBounds.first().x shouldBe geometry.contentX
+            geometry.quickSlotBounds.last().right shouldBe geometry.contentX + geometry.listWidth
+            geometry.panelY + geometry.panelHeight - (geometry.normalListY + geometry.normalListHeight) shouldBe
+                geometry.contentX - geometry.panelX
+        }
     }
 
     test("edge fade softly blends the complete list viewport") {

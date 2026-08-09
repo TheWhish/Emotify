@@ -7,6 +7,10 @@ import me.whish.emotify.client.picker.EmotionPickerGridLayout
 import me.whish.emotify.client.picker.EmotionPickerGridMetrics
 import me.whish.emotify.client.picker.EmotionPickerHitArea
 import me.whish.emotify.client.picker.EmotionPickerListMetrics
+import me.whish.emotify.client.picker.EmotionPickerQuickSlotAnimation
+import me.whish.emotify.client.picker.EmotionPickerQuickSlotBounds
+import me.whish.emotify.client.picker.EmotionPickerQuickSlotMouseDecision
+import me.whish.emotify.client.picker.EmotionPickerQuickSlotMouseRouting
 import me.whish.emotify.client.picker.EmotionPickerScrollMath
 import me.whish.emotify.client.picker.EmotionPickerSideActionLayout
 import me.whish.emotify.client.presentation.EmotionPresentation
@@ -20,6 +24,7 @@ import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.components.events.GuiEventListener
 import net.minecraft.client.gui.narration.NarratableEntry
 import net.minecraft.client.gui.narration.NarrationElementOutput
+import net.minecraft.client.sounds.SoundManager
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.ResourceLocation
 
@@ -118,6 +123,8 @@ internal class EmotionGridList(
     private val onSelected: (EmotionPresentation) -> Unit,
     private val isFavorite: (EmotionPresentation) -> Boolean,
     private val onFavoriteToggled: (EmotionPresentation) -> Unit,
+    private val onPointerPressed: (EmotionPresentation, Double, Double, Double, Double) -> Unit,
+    private val isDragging: (EmotionPresentation) -> Boolean,
 ) : ContainerObjectSelectionList<EmotionGridRow>(
     minecraft,
     width,
@@ -149,7 +156,15 @@ internal class EmotionGridList(
         setDragging(false)
         replaceEntries(
             emotions.chunked(EmotionPickerGridLayout.COLUMNS).map { row ->
-                EmotionGridRow(row, cellWidthsProvider, onSelected, isFavorite, onFavoriteToggled)
+                EmotionGridRow(
+                    row,
+                    cellWidthsProvider,
+                    onSelected,
+                    isFavorite,
+                    onFavoriteToggled,
+                    onPointerPressed,
+                    isDragging,
+                )
             },
         )
         snapToScroll(if (resetScroll) 0.0 else retainedScroll)
@@ -450,11 +465,18 @@ internal class EmotionGridRow(
     onSelected: (EmotionPresentation) -> Unit,
     isFavorite: (EmotionPresentation) -> Boolean,
     onFavoriteToggled: (EmotionPresentation) -> Unit,
+    onPointerPressed: (EmotionPresentation, Double, Double, Double, Double) -> Unit,
+    isDragging: (EmotionPresentation) -> Boolean,
 ) : ContainerObjectSelectionList.Entry<EmotionGridRow>() {
     private val cells: List<EmotionGridCell> = java.util.List.copyOf(
         presentations.map { presentation ->
             EmotionGridCell(
-                EmotionIconButton(presentation, onSelected),
+                EmotionIconButton(
+                    presentation,
+                    onSelected,
+                    onPointerPressed,
+                    { isDragging(presentation) },
+                ),
                 FavoriteButton(
                     presentation,
                     { isFavorite(presentation) },
@@ -516,6 +538,8 @@ private data class EmotionGridCell(
 private class EmotionIconButton(
     private val presentation: EmotionPresentation,
     private val onSelected: (EmotionPresentation) -> Unit,
+    private val onPointerPressed: (EmotionPresentation, Double, Double, Double, Double) -> Unit,
+    private val isDragging: () -> Boolean,
 ) : AbstractButton(
     0,
     0,
@@ -538,6 +562,16 @@ private class EmotionIconButton(
         onSelected(presentation)
     }
 
+    override fun onClick(mouseX: Double, mouseY: Double) {
+        onPointerPressed(
+            presentation,
+            mouseX,
+            mouseY,
+            x + width / 2.0,
+            y + ICON_Y_OFFSET + ICON_SIZE / 2.0,
+        )
+    }
+
     override fun isMouseOver(mouseX: Double, mouseY: Double): Boolean =
         super.isMouseOver(mouseX, mouseY) && !isOverFavorite(mouseX.toInt(), mouseY.toInt())
 
@@ -545,13 +579,20 @@ private class EmotionIconButton(
         val overFavorite = isOverFavorite(mouseX, mouseY)
         tooltip = if (overFavorite) null else titleTooltip
         val hovered = isHoveredOrFocused && !overFavorite
+        val dragging = isDragging()
         EmotionPickerTheme.renderButton(
             guiGraphics,
             x,
             y,
             width,
             height,
-            if (hovered) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button,
+            when {
+                dragging -> EmotionPickerTheme.buttonSelected
+                hovered -> EmotionPickerTheme.buttonHovered
+                else -> EmotionPickerTheme.button
+            },
+            if (dragging) EmotionPickerTheme.selectedOutline else EmotionPickerTheme.buttonOutline,
+            dragging,
         )
         val region = presentation.regionAt(System.nanoTime() / 1_000_000L)
         guiGraphics.blit(
@@ -617,6 +658,240 @@ private class EmotionIconButton(
         private const val FAVORITE_RIGHT_INSET = 2
         private const val FAVORITE_TOP_INSET = 2
         private const val TRUNCATION_MARK = ".."
+    }
+}
+
+internal class EmotionQuickSlotButton(
+    private val slotIndex: Int,
+    bounds: EmotionPickerQuickSlotBounds,
+    private val assigned: () -> Boolean,
+    private val presentation: () -> EmotionPresentation?,
+    private val dropTarget: () -> Boolean,
+    private val nowNanos: () -> Long,
+    private val reducedMotion: () -> Boolean,
+    private val onActivated: (Int) -> Unit,
+    private val onCleared: (Int) -> Unit,
+) : AbstractButton(
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    Component.translatable("screen.emotify.quick_slot", slotIndex + 1),
+) {
+    private val previewSize = bounds.previewSize
+    private val slotLabel = (slotIndex + 1).toString()
+    private var landingStartedNanos = Long.MIN_VALUE
+    private var targetEmphasis = 0.0
+    private var lastTargetFrameNanos = Long.MIN_VALUE
+    private var tooltipAssigned: Boolean? = null
+    private var tooltipPresentation: EmotionPresentation? = null
+
+    override fun onPress() {
+        if (assigned()) {
+            onActivated(slotIndex)
+        }
+    }
+
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        return when (
+            EmotionPickerQuickSlotMouseRouting.click(
+                assigned(),
+                active && visible && isMouseOver(mouseX, mouseY),
+                button,
+            )
+        ) {
+            EmotionPickerQuickSlotMouseDecision.DISPATCH -> false
+            EmotionPickerQuickSlotMouseDecision.CONSUME_EMPTY -> true
+            EmotionPickerQuickSlotMouseDecision.ACTIVATE -> super.mouseClicked(mouseX, mouseY, button)
+            EmotionPickerQuickSlotMouseDecision.CLEAR -> {
+                onCleared(slotIndex)
+                true
+            }
+        }
+    }
+
+    fun startLanding(startedNanos: Long) {
+        landingStartedNanos = startedNanos
+    }
+
+    fun activateFromKeyboard(soundManager: SoundManager) {
+        if (assigned()) {
+            playDownSound(soundManager)
+        }
+        onActivated(slotIndex)
+    }
+
+    override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        val now = nowNanos()
+        val assignedNow = assigned()
+        val presentationNow = presentation()
+        updateTooltip(assignedNow, presentationNow)
+        val targeted = dropTarget()
+        updateTargetEmphasis(targeted, now)
+        if (!assignedNow) {
+            EmotionPickerTheme.renderEmptySlot(
+                guiGraphics,
+                x,
+                y,
+                width,
+                height,
+                isHoveredOrFocused,
+                targetEmphasis,
+            )
+            renderEmptyLabel(guiGraphics)
+            return
+        }
+        val landingElapsed = if (landingStartedNanos == Long.MIN_VALUE) {
+            EmotionPickerQuickSlotAnimation.DURATION_NANOS
+        } else {
+            (now - landingStartedNanos).coerceAtLeast(0L)
+        }
+        val landing = EmotionPickerQuickSlotAnimation.isLanding(landingElapsed)
+        if (!landing) {
+            landingStartedNanos = Long.MIN_VALUE
+        }
+        val landingEmphasis = if (landing) {
+            EmotionPickerQuickSlotAnimation.landingEmphasis(landingElapsed)
+        } else {
+            0.0
+        }
+        val baseFill = if (isHoveredOrFocused) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button
+        val landingFill = EmotionPickerTheme.blendColor(
+            baseFill,
+            EmotionPickerTheme.buttonSelected,
+            landingEmphasis,
+        )
+        val fill = EmotionPickerTheme.blendColor(
+            landingFill,
+            EmotionPickerTheme.buttonSelectedHovered,
+            targetEmphasis,
+        )
+        val outlineEmphasis = maxOf(landingEmphasis, targetEmphasis)
+        EmotionPickerTheme.renderButton(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            fill,
+            EmotionPickerTheme.blendColor(
+                EmotionPickerTheme.buttonOutline,
+                EmotionPickerTheme.selectedOutline,
+                outlineEmphasis,
+            ),
+            false,
+        )
+        val motionReduced = reducedMotion()
+        val landingOffset = if (landing && !motionReduced) {
+            EmotionPickerQuickSlotAnimation.landingOffset(landingElapsed)
+        } else {
+            0.0
+        }
+        val landingScale = if (landing && !motionReduced) {
+            EmotionPickerQuickSlotAnimation.landingScale(landingElapsed)
+        } else {
+            1.0
+        }
+        if (presentationNow == null) {
+            val font = Minecraft.getInstance().font
+            guiGraphics.drawString(
+                font,
+                "?",
+                x + (width - font.width("?")) / 2,
+                y + (height - font.lineHeight) / 2 + 1,
+                EmotionPickerTheme.mutedText,
+                false,
+            )
+            return
+        }
+        val region = presentationNow.regionAt(System.nanoTime() / 1_000_000L)
+        val pose = guiGraphics.pose()
+        pose.pushPose()
+        try {
+            pose.translate(x + width / 2.0, y + height / 2.0 + landingOffset, 0.0)
+            pose.scale(landingScale.toFloat(), landingScale.toFloat(), 1.0F)
+            pose.translate(-previewSize / 2.0, -previewSize / 2.0, 0.0)
+            guiGraphics.blit(
+                EmotionTextureResources.resolve(presentationNow.textureId),
+                0,
+                0,
+                previewSize,
+                previewSize,
+                region.x.toFloat(),
+                region.y.toFloat(),
+                region.width,
+                region.height,
+                region.textureWidth,
+                region.textureHeight,
+            )
+        } finally {
+            pose.popPose()
+        }
+    }
+
+    override fun updateWidgetNarration(narrationElementOutput: NarrationElementOutput) {
+        defaultButtonNarrationText(narrationElementOutput)
+    }
+
+    private fun renderEmptyLabel(guiGraphics: GuiGraphics) {
+        val font = Minecraft.getInstance().font
+        guiGraphics.drawString(
+            font,
+            slotLabel,
+            x + (width - font.width(slotLabel)) / 2,
+            y + (height - font.lineHeight) / 2 + 1,
+            EmotionPickerTheme.mutedText,
+            false,
+        )
+    }
+
+    private fun updateTooltip(assignedNow: Boolean, presentationNow: EmotionPresentation?) {
+        if (tooltipAssigned == assignedNow && tooltipPresentation === presentationNow) {
+            return
+        }
+        tooltipAssigned = assignedNow
+        tooltipPresentation = presentationNow
+        tooltip = Tooltip.create(
+            when {
+                presentationNow != null -> Component.translatable(
+                    "screen.emotify.quick_slot.filled_tooltip",
+                    slotIndex + 1,
+                    presentationNow.nameComponent(),
+                )
+                assignedNow -> Component.translatable(
+                    "screen.emotify.quick_slot.unavailable_tooltip",
+                    slotIndex + 1,
+                )
+                else -> Component.translatable(
+                    "screen.emotify.quick_slot.empty_tooltip",
+                    slotIndex + 1,
+                )
+            },
+        )
+    }
+
+    private fun updateTargetEmphasis(targeted: Boolean, now: Long) {
+        if (lastTargetFrameNanos == Long.MIN_VALUE) {
+            lastTargetFrameNanos = now
+            return
+        }
+        if (targetEmphasis == if (targeted) 1.0 else 0.0) {
+            lastTargetFrameNanos = now
+            return
+        }
+        val elapsedSeconds = ((now - lastTargetFrameNanos).coerceAtLeast(0L) / NANOS_PER_SECOND)
+            .coerceAtMost(MAXIMUM_TARGET_FRAME_SECONDS)
+        lastTargetFrameNanos = now
+        targetEmphasis = EmotionPickerQuickSlotAnimation.nextTargetEmphasis(
+            targetEmphasis,
+            targeted,
+            elapsedSeconds,
+        )
+    }
+
+    private companion object {
+        const val MAXIMUM_TARGET_FRAME_SECONDS = 0.05
+        const val NANOS_PER_SECOND = 1_000_000_000.0
     }
 }
 

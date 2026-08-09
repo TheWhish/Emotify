@@ -29,7 +29,7 @@ import me.whish.emotify.server.core.ServerSelectionPolicy
 class PaperPolicyRefreshQueueTest : FunSpec({
     val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE)
     val catalog = EmotionCatalog.of(listOf(EmotionId.of("emotify:happy")))
-    val hello = ServerHello(capabilities, 2_200, catalog)
+    val hello = ServerHello(capabilities, 3_000, catalog)
     val policy = ServerSelectionPolicy(true, catalog, catalog)
 
     fun connection(index: Long): ConnectionKey = ConnectionKey(UUID(0L, index), ConnectionId.of(index))

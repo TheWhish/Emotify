@@ -4,7 +4,7 @@ custom-emojis:
   enabled: true
   maximum-static-resolution: 128
   maximum-animated-resolution: 64
-cooldown-millis: 2200
+cooldown-millis: 3000
 emotions:
   allow: []
   deny: []

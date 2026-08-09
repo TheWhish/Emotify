@@ -8,9 +8,13 @@ import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.nanoseconds
 import me.whish.emotify.domain.EmotionAnimation
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
+import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.FakeMonotonicTimeSource
 import me.whish.emotify.protocol.EmotionPlay
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.protocol.EventSequence
 import me.whish.emotify.protocol.RuntimeEntityId
 
@@ -146,6 +150,27 @@ class ClientActiveEmotionStoreTest : FunSpec({
         store.activate(1, play(emotionId = happy)) shouldBe EmotionActivationResult.UNKNOWN_EMOTION
         store.activate(1, play(emotionId = custom)) shouldBe EmotionActivationResult.ADDED
         store.visibleFor(7, sourceUuid)?.emotionId shouldBe custom
+    }
+
+    test("custom activation retains its transmitted descriptor") {
+        val time = FakeMonotonicTimeSource()
+        val asset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(64) { it }))
+        val descriptor = CustomEmojiDescriptor.create("Танец", asset.id)
+        val store = ClientActiveEmotionStore(time, isKnownEmotion = { it == asset.id.emotionId })
+        store.begin(1)
+
+        store.activateCustom(
+            1,
+            CustomEmotionPlay(
+                RuntimeEntityId.of(7),
+                sourceUuid,
+                EventSequence.of(1),
+                asset.id,
+                descriptor,
+            ),
+        ) shouldBe EmotionActivationResult.ADDED
+
+        store.visibleFor(7, sourceUuid)?.customDescriptor shouldBe descriptor
     }
 
     test("same player moving to a new runtime entity id replaces the old index") {

@@ -4,6 +4,7 @@ import kotlin.time.Duration
 import me.whish.emotify.domain.CooldownGate
 import me.whish.emotify.domain.CustomEmojiAsset
 import me.whish.emotify.domain.CustomEmojiId
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiTransferRateLimits
 import me.whish.emotify.domain.RemoteCustomEmojiRetention
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
@@ -70,6 +71,7 @@ sealed interface CustomSelectionPreparation {
     data class Ready(
         val asset: CustomEmojiAsset,
         val losslessChunks: List<CustomEmojiAssetChunk>?,
+        val descriptor: CustomEmojiDescriptor,
     ) : CustomSelectionPreparation
 
     data object Ignored : CustomSelectionPreparation
@@ -236,27 +238,27 @@ class ServerPlayerSession(
         if (!supportsCustomEmojiAsset(asset)) {
             return CustomSelectionPreparation.Rejected(SelectionRejectionReason.EMOTION_DISABLED, 0)
         }
-        return CustomSelectionPreparation.Ready(asset, uploaded.losslessChunks)
+        return CustomSelectionPreparation.Ready(asset, uploaded.losslessChunks, selection.descriptor)
     }
 
     fun supportsCustomEmojiSharing(): Boolean {
         val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
-        return supported.negotiated.features.contains(EmotifyProtocolFeatures.CUSTOM_EMOJI_SHARING)
+        return EmotifyProtocolFeatures.supportsCustomEmojiSharing(supported.negotiated.features)
     }
 
     fun supportsCustomEmojiAsset(asset: CustomEmojiAsset): Boolean =
         supportsCustomEmojiSharing() && (
-            !asset.isAnimated || negotiatedFeaturesContain(EmotifyProtocolFeatures.ANIMATED_CUSTOM_EMOJI_SHARING)
+            !asset.isAnimated || negotiatedFeaturesSupportAnimatedCustomEmojiSharing()
             ) && (
             asset.pixels.size <= LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE ||
-                negotiatedFeaturesContain(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS)
+                negotiatedFeaturesSupportLosslessCustomEmojiSharing()
             )
 
     fun receiveCustomAssetChunk(chunk: CustomEmojiAssetChunk, policy: ServerSelectionPolicy): Boolean {
         if (
             !policy.enabled ||
             !policy.customEmojisEnabled ||
-            !negotiatedFeaturesContain(EmotifyProtocolFeatures.LOSSLESS_CUSTOM_EMOJI_ASSETS)
+            !negotiatedFeaturesSupportLosslessCustomEmojiSharing()
         ) {
             resetCustomUpload()
             return false
@@ -377,6 +379,16 @@ class ServerPlayerSession(
     private fun negotiatedFeaturesContain(feature: me.whish.emotify.domain.ProtocolFeature): Boolean {
         val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
         return supported.negotiated.features.contains(feature)
+    }
+
+    private fun negotiatedFeaturesSupportAnimatedCustomEmojiSharing(): Boolean {
+        val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
+        return EmotifyProtocolFeatures.supportsAnimatedCustomEmojiSharing(supported.negotiated.features)
+    }
+
+    private fun negotiatedFeaturesSupportLosslessCustomEmojiSharing(): Boolean {
+        val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
+        return EmotifyProtocolFeatures.supportsLosslessCustomEmojiSharing(supported.negotiated.features)
     }
 
     private fun cacheUploadedCustomAsset(

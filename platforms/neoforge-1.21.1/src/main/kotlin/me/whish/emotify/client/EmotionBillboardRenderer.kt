@@ -5,14 +5,12 @@ import com.mojang.blaze3d.vertex.PoseStack
 import com.mojang.blaze3d.vertex.VertexConsumer
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.presentation.EmotionBillboardLayout
-import me.whish.emotify.client.presentation.EmotionBillboardPose
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionAnimationFrameBuffer
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import net.minecraft.client.Minecraft
 import net.minecraft.client.player.AbstractClientPlayer
 import net.minecraft.client.renderer.texture.OverlayTexture
-import net.minecraft.world.entity.Pose
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent
 import net.neoforged.neoforge.client.event.RenderPlayerEvent
 import net.neoforged.neoforge.client.event.RenderNameTagEvent
@@ -60,37 +58,9 @@ object EmotionBillboardRenderer {
         poseStack.pushPose()
         try {
             val renderOffset = event.renderer.getRenderOffset(player, event.partialTick)
-            val sourcePose = when {
-                player.isFallFlying -> Pose.FALL_FLYING
-                player.isSleeping -> Pose.SLEEPING
-                player.isAutoSpinAttack -> Pose.SPIN_ATTACK
-                else -> player.pose
-            }
-            val poseResolution = EmotionBillboardPoseResolver.resolve(sourcePose)
-            val visualHeight = player.getDimensions(poseResolution.visualPose).height().toDouble()
-            val targetLocalY = EmotionBillboardLayout.localY(
-                visualHeight,
-                renderOffset.y,
-                poseResolution.layoutPose,
-            )
-            val localY = if (sourcePose == Pose.FALL_FLYING) {
-                val uprightLocalY = EmotionBillboardLayout.localY(
-                    player.getDimensions(Pose.STANDING).height().toDouble(),
-                    renderOffset.y,
-                    EmotionBillboardPose.UPRIGHT,
-                )
-                EmotionBillboardLayout.fallFlyingLocalY(
-                    uprightLocalY,
-                    targetLocalY,
-                    player.fallFlyingTicks,
-                    event.partialTick,
-                )
-            } else {
-                targetLocalY
-            }
             poseStack.translate(
                 EmotionBillboardLayout.localX(renderOffset.x),
-                localY,
+                EmotionBillboardPlacement.localY(player, renderOffset.y, event.partialTick),
                 EmotionBillboardLayout.localZ(renderOffset.z),
             )
             poseStack.mulPose(minecraft.entityRenderDispatcher.cameraOrientation())

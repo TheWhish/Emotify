@@ -6,6 +6,9 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import me.whish.emotify.domain.EmotionCatalog
+import me.whish.emotify.server.core.ServerConfigurationFileIO
+import me.whish.emotify.server.core.ServerConfigurationSchema
+import me.whish.emotify.server.core.ServerConfigurationVersion
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
@@ -15,6 +18,12 @@ sealed interface PaperConfigLoadResult {
     data class Loaded(val config: PaperRuntimeConfig) : PaperConfigLoadResult
 
     data class Invalid(val violations: List<String>) : PaperConfigLoadResult
+
+    data class FutureVersion(val version: Int) : PaperConfigLoadResult {
+        init {
+            require(version > ServerConfigurationSchema.CURRENT_VERSION)
+        }
+    }
 
     data class Failed(val failure: Exception) : PaperConfigLoadResult
 }
@@ -40,15 +49,99 @@ class BukkitPaperConfigLoader(
         if (flattened.violations.isNotEmpty()) {
             return PaperConfigLoadResult.Invalid(flattened.violations)
         }
+        val version = try {
+            ServerConfigurationSchema.classify(readDeclaredVersion(flattened.values[CONFIG_VERSION_PATH]))
+        } catch (exception: ConfigInputViolation) {
+            return PaperConfigLoadResult.Invalid(listOf(exception.message.orEmpty()))
+        } catch (exception: IllegalArgumentException) {
+            return PaperConfigLoadResult.Invalid(listOf(exception.message.orEmpty()))
+        }
+        if (version is ServerConfigurationVersion.Future) {
+            return PaperConfigLoadResult.FutureVersion(version.value)
+        }
         return when (
             val parsed = PaperRuntimeConfigParser.parse(
                 PaperConfigDocument(flattened.values),
                 catalog,
             )
         ) {
-            is PaperConfigParseResult.Loaded -> PaperConfigLoadResult.Loaded(parsed.config)
+            is PaperConfigParseResult.Loaded -> {
+                if (version == ServerConfigurationVersion.Legacy) {
+                    try {
+                        migrateLegacy(source)
+                    } catch (exception: Exception) {
+                        return PaperConfigLoadResult.Failed(exception)
+                    }
+                }
+                PaperConfigLoadResult.Loaded(parsed.config)
+            }
             is PaperConfigParseResult.Invalid -> PaperConfigLoadResult.Invalid(parsed.violations)
         }
+    }
+
+    private fun readDeclaredVersion(value: Any?): Int? = when (value) {
+        null -> null
+        is Byte,
+        is Short,
+        is Int,
+        -> (value as Number).toInt()
+        is Long -> {
+            if (value !in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) {
+                throw ConfigInputViolation("config-version must fit a signed 32-bit integer: $value")
+            }
+            value.toInt()
+        }
+        else -> throw ConfigInputViolation("config-version must be an integer")
+    }
+
+    private fun migrateLegacy(source: String) {
+        val path = configFile.toPath()
+        val migrated = migratedSource(source)
+        ServerConfigurationFileIO.createBackupIfAbsent(
+            path,
+            path.resolveSibling("${path.fileName}.v0.bak"),
+            MAXIMUM_CONFIG_BYTES,
+        )
+        ServerConfigurationFileIO.writeUtf8Atomically(path, migrated)
+    }
+
+    private fun migratedSource(source: String): String {
+        val bodyStart = if (source.startsWith(UTF8_BOM)) 1 else 0
+        val newline = if (source.contains("\r\n")) "\r\n" else "\n"
+        val documentMarkerEnd = standaloneDocumentMarkerEnd(source, bodyStart)
+        val insertion = documentMarkerEnd ?: bodyStart
+        val leadingNewline = if (
+            documentMarkerEnd != null &&
+            insertion > bodyStart &&
+            source[insertion - 1] != '\n' &&
+            source[insertion - 1] != '\r'
+        ) {
+            newline
+        } else {
+            ""
+        }
+        val declaration = "$leadingNewline$CONFIG_VERSION_PATH: ${ServerConfigurationSchema.CURRENT_VERSION}$newline"
+        return source.substring(0, insertion) + declaration + source.substring(insertion)
+    }
+
+    private fun standaloneDocumentMarkerEnd(source: String, bodyStart: Int): Int? {
+        var cursor = bodyStart
+        while (cursor < source.length) {
+            val lineFeed = source.indexOf('\n', cursor)
+            val lineEnd = if (lineFeed >= 0) lineFeed else source.length
+            val contentEnd = if (lineEnd > cursor && source[lineEnd - 1] == '\r') lineEnd - 1 else lineEnd
+            val line = source.substring(cursor, contentEnd).trim()
+            val nextLine = if (lineFeed >= 0) lineFeed + 1 else lineEnd
+            when {
+                line.isEmpty() || line.startsWith('#') || line.startsWith('%') -> cursor = nextLine
+                line == "---" || line.startsWith("--- #") -> return nextLine
+                line.startsWith("--- ") -> throw ConfigInputViolation(
+                    "Legacy YAML document content must begin below the --- marker before migration",
+                )
+                else -> return null
+            }
+        }
+        return null
     }
 
     private fun readBoundedUtf8(): String {
@@ -168,6 +261,8 @@ class BukkitPaperConfigLoader(
     private class ConfigInputViolation(message: String, cause: Throwable? = null) : Exception(message, cause)
 
     private companion object {
+        const val CONFIG_VERSION_PATH = "config-version"
+        const val UTF8_BOM = '\uFEFF'
         const val MAXIMUM_CONFIG_BYTES = 65_536
         const val MAXIMUM_NESTING_DEPTH = 4
         const val MAXIMUM_DOCUMENT_ENTRIES = 64

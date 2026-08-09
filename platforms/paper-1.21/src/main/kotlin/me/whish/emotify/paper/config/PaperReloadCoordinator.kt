@@ -105,6 +105,12 @@ class PaperReloadCoordinator(
                 plugin.logger.severe("Emotify configuration rejected: ${result.violations.joinToString("; ")}")
                 requester.send(plugin, "Emotify configuration is invalid. The previous configuration remains active.")
             }
+            is PaperConfigLoadResult.FutureVersion -> {
+                plugin.logger.severe(
+                    "Emotify configuration schema ${result.version} is newer than supported; the file remains unchanged",
+                )
+                requester.send(plugin, "Emotify configuration is from a newer version. The previous configuration remains active.")
+            }
             is PaperConfigLoadResult.Failed -> {
                 plugin.logger.log(Level.SEVERE, "Failed to read Emotify configuration", result.failure)
                 requester.send(plugin, "Failed to read Emotify configuration. The previous configuration remains active.")

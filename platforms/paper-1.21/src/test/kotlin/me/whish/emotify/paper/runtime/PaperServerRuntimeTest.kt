@@ -40,7 +40,7 @@ class PaperServerRuntimeTest : FunSpec({
     val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, FeatureFlags.NONE)
     val emotionId = EmotionId.of("emotify:happy")
     val catalog = EmotionCatalog.of(listOf(emotionId))
-    val serverHello = ServerHello(capabilities, 2_200, catalog)
+    val serverHello = ServerHello(capabilities, 3_000, catalog)
     val policy = ServerSelectionPolicy(true, catalog, catalog)
 
     test("open is idempotent and an unavailable hello leaves no session") {
@@ -106,7 +106,7 @@ class PaperServerRuntimeTest : FunSpec({
 
         shouldThrow<WireEncodeException> {
             PaperServerRuntime(
-                ServerHello(capabilities, 2_200, oversizedCatalog),
+                ServerHello(capabilities, 3_000, oversizedCatalog),
                 ServerSelectionPolicy(true, oversizedCatalog, oversizedCatalog),
                 FakeMonotonicTimeSource(),
                 { _, _, _ -> AudienceVisitCompletion.EXHAUSTED },
@@ -196,7 +196,7 @@ class PaperServerRuntimeTest : FunSpec({
             limits,
         )
         val clientPolicy = runtime.reconfigure(
-            ServerRuntimeConfiguration(serverHello.copy(cooldownMillis = 3_000), policy),
+            ServerRuntimeConfiguration(serverHello.copy(cooldownMillis = 4_000), policy),
             limits,
         )
 

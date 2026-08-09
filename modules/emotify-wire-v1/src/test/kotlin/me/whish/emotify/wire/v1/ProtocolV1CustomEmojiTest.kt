@@ -5,6 +5,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.util.UUID
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiFrame
 import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiPixels
@@ -20,6 +21,7 @@ class ProtocolV1CustomEmojiTest : FunSpec({
         if (index % 3 == 0) 0 else 0xFF00FFFF.toInt()
     })
     val asset = CustomEmojiAsset.create(pixels)
+    val descriptor = CustomEmojiDescriptor.create("Танец", asset.id)
     val largePixels = CustomEmojiPixels.of(16, IntArray(256) { index ->
         when {
             index >= 240 -> 0xFFFF0000.toInt()
@@ -30,14 +32,15 @@ class ProtocolV1CustomEmojiTest : FunSpec({
     val largeAsset = CustomEmojiAsset.create(largePixels)
 
     test("custom selection round trips inline and by reference") {
-        val inline = CustomEmotionSelection(asset.id, asset)
-        val reference = CustomEmotionSelection(asset.id, null)
+        val inline = CustomEmotionSelection(asset.id, asset, descriptor)
+        val reference = CustomEmotionSelection(asset.id, null, descriptor)
 
         ProtocolV1Codecs.customSelection.decode(
             ProtocolV1Codecs.customSelection.encodeToByteArray(inline),
         ).let { decoded ->
             decoded.customEmojiId shouldBe asset.id
             decoded.asset?.pixels shouldBe pixels
+            decoded.descriptor shouldBe descriptor
         }
         ProtocolV1Codecs.customSelection.decode(
             ProtocolV1Codecs.customSelection.encodeToByteArray(reference),
@@ -89,10 +92,28 @@ class ProtocolV1CustomEmojiTest : FunSpec({
             UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
             EventSequence.of(300),
             asset.id,
+            descriptor,
         )
 
         ProtocolV1Codecs.customPlay.decode(ProtocolV1Codecs.customPlay.encodeToByteArray(play)) shouldBe play
         play.asEmotionPlay().emotionId shouldBe asset.id.emotionId
+    }
+
+    test("custom descriptor wire names must already be canonical") {
+        val play = CustomEmotionPlay(
+            RuntimeEntityId.of(1),
+            UUID(0L, 1L),
+            EventSequence.of(1),
+            asset.id,
+            CustomEmojiDescriptor.create("Dance", asset.id),
+        )
+        val encoded = ProtocolV1Codecs.customPlay.encodeToByteArray(play)
+        encoded[encoded.size - 5] = ' '.code.toByte()
+        encoded[encoded.lastIndex] = ' '.code.toByte()
+
+        shouldThrow<WireDecodeException> {
+            ProtocolV1Codecs.customPlay.decode(encoded)
+        }.violation shouldBe WireDecodeViolation.INVALID_CUSTOM_EMOJI
     }
 
     test("animated custom emoji round trips with exact frame timing") {
@@ -117,12 +138,13 @@ class ProtocolV1CustomEmojiTest : FunSpec({
             List(CustomEmojiAsset.MAXIMUM_FRAME_COUNT) { frameIndex ->
                 CustomEmojiFrame(
                     CustomEmojiPixels.of(16, IntArray(256) { pixelIndex -> frameIndex shl 16 or pixelIndex }),
-                    if (frameIndex < 3) 128 else 67,
+                    if (frameIndex < 16) 128 else 67,
                 )
             },
         )
 
-        ProtocolV1Codecs.customAsset.encodeToByteArray(CustomEmojiTransfer(maximum)).size shouldBe 30_810
+        maximum.cycleDurationMillis shouldBe 2_986
+        ProtocolV1Codecs.customAsset.encodeToByteArray(CustomEmojiTransfer(maximum)).size shouldBe 30_823
     }
 
     test("legacy encoders reject dimensions reserved for lossless transfer") {
@@ -180,8 +202,8 @@ class ProtocolV1CustomEmojiTest : FunSpec({
     }
 
     test("custom payload limits remain compact") {
-        ProtocolV1Codecs.customSelection.maxBodyBytes shouldBe 30_811
-        ProtocolV1Codecs.customAsset.maxBodyBytes shouldBe 30_810
-        ProtocolV1Codecs.customPlay.maxBodyBytes shouldBe 55
+        ProtocolV1Codecs.customSelection.maxBodyBytes shouldBe 30_978
+        ProtocolV1Codecs.customAsset.maxBodyBytes shouldBe 30_823
+        ProtocolV1Codecs.customPlay.maxBodyBytes shouldBe 209
     }
 })

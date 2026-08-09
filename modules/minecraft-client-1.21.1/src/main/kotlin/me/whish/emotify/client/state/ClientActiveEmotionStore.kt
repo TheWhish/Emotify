@@ -6,8 +6,10 @@ import java.util.UUID
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionId
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.protocol.EmotionPlay
+import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.protocol.EventSequence
 import me.whish.emotify.protocol.RuntimeEntityId
 
@@ -18,6 +20,7 @@ data class ActiveEmotion(
     val emotionId: EmotionId,
     val animationSeed: Long,
     val startedAtNanos: Long,
+    val customDescriptor: CustomEmojiDescriptor? = null,
 )
 
 enum class EmotionActivationResult {
@@ -56,7 +59,17 @@ class ClientActiveEmotionStore(
         hasObservedTime = false
     }
 
-    fun activate(connectionId: Long, play: EmotionPlay): EmotionActivationResult {
+    fun activate(connectionId: Long, play: EmotionPlay): EmotionActivationResult =
+        activate(connectionId, play, null)
+
+    fun activateCustom(connectionId: Long, play: CustomEmotionPlay): EmotionActivationResult =
+        activate(connectionId, play.asEmotionPlay(), play.descriptor)
+
+    private fun activate(
+        connectionId: Long,
+        play: EmotionPlay,
+        customDescriptor: CustomEmojiDescriptor?,
+    ): EmotionActivationResult {
         if (connectionId != activeConnectionId) {
             return EmotionActivationResult.STALE_CONNECTION
         }
@@ -103,6 +116,7 @@ class ClientActiveEmotionStore(
                 play.emotionId,
             ),
             nowNanos,
+            customDescriptor,
         )
         activeByEntityId[entityId] = active
         entityIdBySourceUuid[play.sourceUuid] = entityId

@@ -1,6 +1,8 @@
 package me.whish.emotify.domain
 
 import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
+import java.text.Normalizer
 
 data class CustomEmojiId(
     val mostSignificantBits: Long,
@@ -49,12 +51,18 @@ data class CustomEmojiId(
             if (!value.startsWith(prefix) || value.length != prefix.length + HEX_LENGTH) {
                 return null
             }
-            val hex = value.substring(prefix.length)
+            return parseHex(value.substring(prefix.length))
+        }
+
+        fun parseHex(value: String): CustomEmojiId? {
+            if (value.length != HEX_LENGTH) {
+                return null
+            }
             return try {
                 CustomEmojiId(
-                    hex.substring(0, 16).toULong(16).toLong(),
-                    hex.substring(16, 32).toULong(16).toLong(),
-                    hex.substring(32, 48).toULong(16).toLong(),
+                    value.substring(0, 16).toULong(16).toLong(),
+                    value.substring(16, 32).toULong(16).toLong(),
+                    value.substring(32, 48).toULong(16).toLong(),
                 )
             } catch (_: IllegalArgumentException) {
                 null
@@ -97,6 +105,40 @@ data class CustomEmojiId(
 
         private const val HEX_DIGITS = "0123456789abcdef"
         private const val ANIMATED_CONTENT_FORMAT: Byte = 1
+    }
+}
+
+class CustomEmojiDescriptor private constructor(
+    val displayName: String,
+    val originId: CustomEmojiId,
+) {
+    override fun equals(other: Any?): Boolean =
+        this === other || other is CustomEmojiDescriptor &&
+            displayName == other.displayName && originId == other.originId
+
+    override fun hashCode(): Int = 31 * displayName.hashCode() + originId.hashCode()
+
+    override fun toString(): String = "CustomEmojiDescriptor(displayName=$displayName, originId=$originId)"
+
+    companion object {
+        const val DEFAULT_DISPLAY_NAME = "Custom emoji"
+        const val MAXIMUM_DISPLAY_NAME_LENGTH = 64
+        const val MAXIMUM_DISPLAY_NAME_UTF8_BYTES = 128
+
+        fun create(displayName: String, originId: CustomEmojiId): CustomEmojiDescriptor {
+            val normalized = Normalizer.normalize(displayName.trim(), Normalizer.Form.NFC)
+            require(normalized.isNotEmpty()) { "Custom emoji display name must not be empty" }
+            require(normalized.length <= MAXIMUM_DISPLAY_NAME_LENGTH) {
+                "Custom emoji display name exceeds $MAXIMUM_DISPLAY_NAME_LENGTH characters"
+            }
+            require(normalized.toByteArray(StandardCharsets.UTF_8).size <= MAXIMUM_DISPLAY_NAME_UTF8_BYTES) {
+                "Custom emoji display name exceeds $MAXIMUM_DISPLAY_NAME_UTF8_BYTES UTF-8 bytes"
+            }
+            require(normalized.none(Char::isISOControl)) { "Custom emoji display name contains control characters" }
+            return CustomEmojiDescriptor(normalized, originId)
+        }
+
+        fun default(contentId: CustomEmojiId): CustomEmojiDescriptor = create(DEFAULT_DISPLAY_NAME, contentId)
     }
 }
 
@@ -260,7 +302,7 @@ class CustomEmojiAsset private constructor(
         const val MINIMUM_FRAME_DURATION_MILLIS =
             (MILLISECONDS_PER_SECOND + MAXIMUM_FRAMES_PER_SECOND - 1) / MAXIMUM_FRAMES_PER_SECOND
         const val MAXIMUM_FRAME_DURATION_MILLIS = 2_000
-        const val MAXIMUM_CYCLE_DURATION_MILLIS = 2_200
+        const val MAXIMUM_CYCLE_DURATION_MILLIS = 3_000
         const val MAXIMUM_ANIMATED_SIZE = 64
         const val MAXIMUM_RAW_BYTE_LENGTH = MAXIMUM_FRAME_COUNT * MAXIMUM_ANIMATED_SIZE * MAXIMUM_ANIMATED_SIZE * Int.SIZE_BYTES
 

@@ -49,14 +49,14 @@ class ProtocolV1GoldenTest : FunSpec({
 
     test("client hello has stable golden bytes") {
         ProtocolV1Codecs.clientHello.encodeToByteArray(ClientHello(capabilities)).toList() shouldContainExactly
-            hex("01 04 00").toList()
+            hex("01 06 00").toList()
     }
 
     test("minimum server hello has stable golden bytes") {
         val envelope = ServerHelloEnvelope.Valid(ServerHello(capabilities, 250, EmotionCatalog.of(emptyList())))
 
         ProtocolV1Codecs.serverHello.encodeToByteArray(envelope).toList() shouldContainExactly
-            hex("01 04 00 FA 01 00").toList()
+            hex("01 06 00 FA 01 00").toList()
     }
 
     test("selection has stable golden bytes") {

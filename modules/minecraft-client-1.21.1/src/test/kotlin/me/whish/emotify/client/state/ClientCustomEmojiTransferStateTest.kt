@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.FakeMonotonicTimeSource
 import kotlin.time.Duration.Companion.seconds
@@ -12,19 +13,20 @@ import me.whish.emotify.domain.SelectionRejectionReason
 @Suppress("unused")
 class ClientCustomEmojiTransferStateTest : FunSpec({
     val asset = CustomEmojiAsset.create(CustomEmojiPixels.of(IntArray(64) { it }))
+    val descriptor = CustomEmojiDescriptor.create("Танец", asset.id)
 
     test("upload tracker sends content once per connection and can recover from server cache loss") {
         val tracker = ClientCustomEmojiUploadTracker()
         tracker.begin(1L)
 
-        tracker.prepare(1L, asset)?.asset shouldBe asset
+        tracker.prepare(1L, asset, descriptor)?.asset shouldBe asset
         tracker.markUploaded(1L, asset.id) shouldBe true
-        tracker.prepare(1L, asset)?.asset.shouldBeNull()
+        tracker.prepare(1L, asset, descriptor)?.asset.shouldBeNull()
         tracker.forget(1L, asset.id) shouldBe true
-        tracker.prepare(1L, asset)?.asset shouldBe asset
+        tracker.prepare(1L, asset, descriptor)?.asset shouldBe asset
 
         tracker.disconnect(1L)
-        tracker.prepare(1L, asset).shouldBeNull()
+        tracker.prepare(1L, asset, descriptor).shouldBeNull()
     }
 
     test("asset ingress guard is connection scoped and bounded") {

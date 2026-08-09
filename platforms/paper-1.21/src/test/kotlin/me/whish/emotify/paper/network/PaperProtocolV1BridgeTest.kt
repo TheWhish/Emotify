@@ -74,7 +74,7 @@ class PaperProtocolV1BridgeTest : FunSpec({
     }
 
     test("incoming bodies use frozen raw bytes without a transport prefix") {
-        PaperProtocolV1Bridge.decodeClientHello(hex("01 04 00")) shouldBe ClientHello(capabilities)
+        PaperProtocolV1Bridge.decodeClientHello(hex("01 06 00")) shouldBe ClientHello(capabilities)
         PaperProtocolV1Bridge.decodeSelection(hex("03 61 3A 62")) shouldBe
             EmotionSelection(EmotionId.of("a:b"))
     }
@@ -82,7 +82,7 @@ class PaperProtocolV1BridgeTest : FunSpec({
     test("outgoing bodies use frozen raw bytes without a transport prefix") {
         PaperProtocolV1Bridge.encodeServerHello(
             ServerHello(capabilities, 250, EmotionCatalog.of(emptyList())),
-        ).toList() shouldContainExactly hex("01 04 00 FA 01 00").toList()
+        ).toList() shouldContainExactly hex("01 06 00 FA 01 00").toList()
         PaperProtocolV1Bridge.encodePlay(
             EmotionPlay(
                 RuntimeEntityId.of(300),

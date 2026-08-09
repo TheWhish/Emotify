@@ -13,9 +13,9 @@ class BuiltInProtocolV1GoldenTest : FunSpec({
         val encoded = ProtocolV1Codecs.serverHello.encodeToByteArray(ServerHelloEnvelope.Valid(EmotifyProtocol.serverHello))
 
         encoded.size shouldBe 2_929
-        encoded.sha256() shouldBe "A89BC95A424C297FD4F07BDDCD9283E32E76F3EED101EF3C7412C3F03E0BC657"
+        encoded.sha256() shouldBe "12D407506DAA5C38911E6B18394E02A38F83E9A3373458D77FD90C640B2A57BC"
         encoded.copyOfRange(0, 32).toHex() shouldBe
-            "0104079811A20115656D6F746966793A6772696E6E696E675F6661636514656D"
+            "01061FB817A20115656D6F746966793A6772696E6E696E675F6661636514656D"
         encoded.copyOfRange(encoded.size - 32, encoded.size).toHex() shouldBe
             "6D6F746966793A676F72696C6C6111656D6F746966793A6F72616E677574616E"
     }

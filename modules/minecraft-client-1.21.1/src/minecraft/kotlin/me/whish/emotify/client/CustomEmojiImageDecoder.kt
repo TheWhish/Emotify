@@ -138,21 +138,20 @@ object CustomEmojiImageDecoder {
             framePixelContentEquals(width, height, left, right)
         }
         val frames = ArrayList<NativeImage>(normalized.size)
+        val durationsMillis = IntArray(normalized.size)
         try {
-            normalized.forEach { frame ->
+            normalized.forEachIndexed { index, frame ->
                 frames += toNativeImage(
                     width,
                     height,
                     frame.sourceIndex * width * height * RGBA_CHANNELS,
                 )
+                durationsMillis[index] = frame.durationMillis
             }
             return if (frames.size == 1) {
                 DecodedCustomEmoji.static(frames.single())
             } else {
-                DecodedCustomEmoji.animated(
-                    frames,
-                    normalized.map { frame -> frame.durationMillis }.toIntArray(),
-                )
+                DecodedCustomEmoji.animated(frames, durationsMillis)
             }
         } catch (failure: Throwable) {
             frames.forEach(NativeImage::close)

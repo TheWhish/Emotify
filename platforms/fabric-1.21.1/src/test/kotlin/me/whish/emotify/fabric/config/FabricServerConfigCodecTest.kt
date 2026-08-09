@@ -3,14 +3,22 @@ package me.whish.emotify.fabric.config
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
+import io.kotest.matchers.types.shouldBeInstanceOf
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import me.whish.emotify.domain.EmotionId
 
 @Suppress("unused")
 class FabricServerConfigCodecTest : FunSpec({
-    test("empty config uses the safe enabled default") {
-        FabricServerConfigCodec.decode("") shouldBe FabricServerConfigSnapshot()
+    test("legacy config uses defaults and requests migration") {
+        val result = FabricServerConfigCodec.decode("")
+            .shouldBeInstanceOf<FabricServerConfigDecodeResult.Ready>()
+        val defaults = result.snapshot
+
+        defaults shouldBe FabricServerConfigSnapshot()
+        defaults.cooldownMillis shouldBe 3_000
+        result.version shouldBe me.whish.emotify.server.core.ServerConfigurationVersion.Legacy
     }
 
     test("complete server settings round trip without losing operational limits") {
@@ -34,27 +42,82 @@ class FabricServerConfigCodecTest : FunSpec({
             selectionGlobalRefillPerSecond = 128,
         )
 
-        FabricServerConfigCodec.decode(FabricServerConfigCodec.encode(configured)) shouldBe configured
+        FabricServerConfigCodec.encode(configured) shouldStartWith "configVersion=1\n"
+        val decoded = FabricServerConfigCodec.decode(FabricServerConfigCodec.encode(configured))
+            .shouldBeInstanceOf<FabricServerConfigDecodeResult.Ready>()
+
+        decoded.snapshot shouldBe configured
+        decoded.version shouldBe me.whish.emotify.server.core.ServerConfigurationVersion.Current
+    }
+
+    test("future schema is opaque and does not parse incompatible values") {
+        FabricServerConfigCodec.decode(
+            "configVersion=2\nfuture.value=opaque\nenabled=not-a-boolean\n",
+        ) shouldBe FabricServerConfigDecodeResult.Future(2)
+    }
+
+    test("legacy storage migration creates one exact backup and current snapshot") {
+        val directory = Files.createTempDirectory("emotify-fabric-config-")
+        try {
+            val config = directory.resolve("emotify-server.properties")
+            val legacy = "enabled=false\ncooldownMillis=3000\n"
+            Files.writeString(config, legacy, StandardCharsets.UTF_8)
+
+            val loaded = FabricServerConfigStorage.load(config)
+
+            loaded.enabled shouldBe false
+            Files.readString(config, StandardCharsets.UTF_8) shouldStartWith "configVersion=1\n"
+            Files.readString(
+                directory.resolve("emotify-server.properties.v0.bak"),
+                StandardCharsets.UTF_8,
+            ) shouldBe legacy
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("future storage config disables runtime without rewriting source") {
+        val directory = Files.createTempDirectory("emotify-fabric-config-")
+        try {
+            val config = directory.resolve("emotify-server.properties")
+            val source = "configVersion=2\nenabled=incompatible\nfuture.value=opaque\n"
+            Files.writeString(config, source, StandardCharsets.UTF_8)
+
+            val loaded = FabricServerConfigStorage.load(config)
+
+            loaded.enabled shouldBe false
+            loaded.customEmojisEnabled shouldBe false
+            Files.readString(config, StandardCharsets.UTF_8) shouldBe source
+            Files.exists(directory.resolve("emotify-server.properties.v0.bak")) shouldBe false
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    test("cooldown below the complete animation lifecycle fails closed") {
+        shouldThrow<IllegalArgumentException> {
+            FabricServerConfigCodec.decodeCompatible("cooldownMillis=2999\n")
+        }
     }
 
     test("unknown duplicate and malformed values fail closed") {
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("unknown=true\n")
+            FabricServerConfigCodec.decodeCompatible("unknown=true\n")
         }
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("customEmojis.enabled=true\ncustomEmojis.enabled=false\n")
+            FabricServerConfigCodec.decodeCompatible("customEmojis.enabled=true\ncustomEmojis.enabled=false\n")
         }
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("customEmojis.enabled=yes\n")
+            FabricServerConfigCodec.decodeCompatible("customEmojis.enabled=yes\n")
         }
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("customEmojis.enabled\n")
+            FabricServerConfigCodec.decodeCompatible("customEmojis.enabled\n")
         }
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("broadcast.radiusBlocks=65\n")
+            FabricServerConfigCodec.decodeCompatible("broadcast.radiusBlocks=65\n")
         }
         shouldThrow<IllegalArgumentException> {
-            FabricServerConfigCodec.decode("emotions.allow=emotify:happy\nemotions.deny=emotify:happy\n")
+            FabricServerConfigCodec.decodeCompatible("emotions.allow=emotify:happy\nemotions.deny=emotify:happy\n")
         }
     }
 

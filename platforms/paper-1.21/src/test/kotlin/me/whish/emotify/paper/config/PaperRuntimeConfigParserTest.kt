@@ -132,7 +132,7 @@ class PaperRuntimeConfigParserTest : FunSpec({
                 mapOf(
                     "enabled" to "true",
                     "custom-emojis.enabled" to "false",
-                    "cooldown" to 2_200,
+                    "cooldown" to 3_000,
                 ),
             ),
             catalog,

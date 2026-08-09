@@ -5,9 +5,11 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.types.shouldBeInstanceOf
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.CustomEmojiFrame
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.domain.EmotifyProtocolFeatures
+import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.domain.SelectionRejectionReason
@@ -39,16 +41,18 @@ class CustomEmojiServerEngineTest : FunSpec({
         harness.openSupported(source, hello)
         harness.openSupported(recipient, hello)
         harness.audiencePort.delegate = candidateAudiencePort(listOf(AudienceCandidateFixture(recipient)))
+        val descriptor = CustomEmojiDescriptor.create("Танец", asset.id)
 
-        harness.engine.selectCustom(testPlayer(source), CustomEmotionSelection(asset.id, asset))
+        harness.engine.selectCustom(testPlayer(source), CustomEmotionSelection(asset.id, asset, descriptor))
             .shouldBeInstanceOf<ServerSelectionResult.Published>()
         harness.time.advanceBy(TEST_SERVER_HELLO.cooldownMillis.milliseconds)
-        harness.engine.selectCustom(testPlayer(source), CustomEmotionSelection(asset.id, null))
+        harness.engine.selectCustom(testPlayer(source), CustomEmotionSelection(asset.id, null, descriptor))
             .shouldBeInstanceOf<ServerSelectionResult.Published>()
 
         harness.transport.customAssets.size shouldBe 1
         harness.transport.customAssets.single().playerId shouldBe recipient.playerId
         harness.transport.customPlays.size shouldBe 4
+        harness.transport.customPlays.all { recorded -> recorded.play.descriptor == descriptor } shouldBe true
     }
 
     test("unknown custom reference is rejected without publication") {
@@ -236,18 +240,28 @@ class CustomEmojiServerEngineTest : FunSpec({
         harness.engine.receiveCustomAssetChunk(source, secondChunks[1]) shouldBe false
     }
 
-    test("animated assets are delivered only to recipients that negotiated protocol one point three") {
+    test("animated assets are delivered only to recipients that negotiated the three second cycle") {
         val harness = engineHarness(serverHello = serverHello, featureRegistry = EmotifyProtocolFeatures.registry)
         val source = testConnection(1L)
         val animatedRecipient = testConnection(2L)
-        val staticRecipient = testConnection(3L)
+        val previousAnimatedRecipient = testConnection(3L)
+        val staticRecipient = testConnection(4L)
+        val previousAnimatedCapabilities = ProtocolCapabilities(
+            ProtocolVersion.CURRENT,
+            FeatureFlags(
+                EmotifyProtocolFeatures.supported.bits and
+                    EmotifyProtocolFeatures.THREE_SECOND_ANIMATED_CUSTOM_EMOJI_CYCLE.bit.inv(),
+            ),
+        )
         val staticCapabilities = ProtocolCapabilities(ProtocolVersion(1, 2), EmotifyProtocolFeatures.supported)
         harness.openSupported(source, hello)
         harness.openSupported(animatedRecipient, hello)
+        harness.openSupported(previousAnimatedRecipient, ClientHello(previousAnimatedCapabilities))
         harness.openSupported(staticRecipient, ClientHello(staticCapabilities))
         harness.audiencePort.delegate = candidateAudiencePort(
             listOf(
                 AudienceCandidateFixture(animatedRecipient),
+                AudienceCandidateFixture(previousAnimatedRecipient),
                 AudienceCandidateFixture(staticRecipient),
             ),
         )
@@ -260,11 +274,17 @@ class CustomEmojiServerEngineTest : FunSpec({
             listOf(source.playerId, animatedRecipient.playerId)
     }
 
-    test("a protocol one point two sender cannot upload an animated asset") {
+    test("a sender without the three second cycle feature cannot upload an animated asset") {
         val harness = engineHarness(serverHello = serverHello, featureRegistry = EmotifyProtocolFeatures.registry)
         val source = testConnection(1L)
-        val staticCapabilities = ProtocolCapabilities(ProtocolVersion(1, 2), EmotifyProtocolFeatures.supported)
-        harness.openSupported(source, ClientHello(staticCapabilities))
+        val previousAnimatedCapabilities = ProtocolCapabilities(
+            ProtocolVersion.CURRENT,
+            FeatureFlags(
+                EmotifyProtocolFeatures.supported.bits and
+                    EmotifyProtocolFeatures.THREE_SECOND_ANIMATED_CUSTOM_EMOJI_CYCLE.bit.inv(),
+            ),
+        )
+        harness.openSupported(source, ClientHello(previousAnimatedCapabilities))
 
         val result = harness.engine.selectCustom(
             testPlayer(source),

@@ -1,18 +1,16 @@
 package me.whish.emotify.fabric.config
 
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
-import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
+import me.whish.emotify.fabric.EmotifyFabric
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.server.core.AudienceBudgetLimits
 import me.whish.emotify.server.core.GlobalSelectionIngressLimits
 import me.whish.emotify.server.core.ServerAudiencePolicy
+import me.whish.emotify.server.core.ServerConfigurationFileIO
+import me.whish.emotify.server.core.ServerConfigurationSchema
+import me.whish.emotify.server.core.ServerConfigurationVersion
 import me.whish.emotify.server.core.ServerRuntimeSettings
 import net.fabricmc.loader.api.FabricLoader
 
@@ -21,7 +19,7 @@ data class FabricServerConfigSnapshot(
     val customEmojisEnabled: Boolean = true,
     val maximumStaticCustomEmojiSize: Int = 128,
     val maximumAnimatedCustomEmojiSize: Int = 64,
-    val cooldownMillis: Int = 2_200,
+    val cooldownMillis: Int = ServerRuntimeSettings.MINIMUM_COOLDOWN_MILLIS,
     val allowedEmotionIds: Set<EmotionId> = emptySet(),
     val deniedEmotionIds: Set<EmotionId> = emptySet(),
     val broadcastRadiusBlocks: Double = 64.0,
@@ -63,8 +61,30 @@ data class FabricServerConfigSnapshot(
     )
 }
 
+sealed interface FabricServerConfigDecodeResult {
+    data class Ready(
+        val snapshot: FabricServerConfigSnapshot,
+        val version: ServerConfigurationVersion,
+    ) : FabricServerConfigDecodeResult
+
+    data class Future(val version: Int) : FabricServerConfigDecodeResult
+}
+
 object FabricServerConfigCodec {
     fun decode(
+        source: String,
+        defaults: FabricServerConfigSnapshot = FabricServerConfigSnapshot(),
+    ): FabricServerConfigDecodeResult {
+        val version = ServerConfigurationSchema.classify(declaredVersion(source))
+        return when (version) {
+            is ServerConfigurationVersion.Future -> FabricServerConfigDecodeResult.Future(version.value)
+            ServerConfigurationVersion.Current,
+            ServerConfigurationVersion.Legacy,
+            -> FabricServerConfigDecodeResult.Ready(decodeCompatible(source, defaults), version)
+        }
+    }
+
+    fun decodeCompatible(
         source: String,
         defaults: FabricServerConfigSnapshot = FabricServerConfigSnapshot(),
     ): FabricServerConfigSnapshot {
@@ -97,6 +117,11 @@ object FabricServerConfigCodec {
             val value = line.substring(separator + 1).trim()
             require(observedKeys.add(key)) { "Duplicate Emotify server config key: $key" }
             when (key) {
+                CONFIG_VERSION_KEY -> value.toInt().also { version ->
+                    require(version in ServerConfigurationSchema.LEGACY_VERSION..ServerConfigurationSchema.CURRENT_VERSION) {
+                        "Unsupported compatible Emotify server config version: $version"
+                    }
+                }
                 ENABLED_KEY -> enabled = value.toBooleanStrict()
                 CUSTOM_EMOJIS_ENABLED_KEY -> customEmojisEnabled = value.toBooleanStrict()
                 MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_KEY -> maximumStaticCustomEmojiSize = value.toSupportedSize(128)
@@ -149,6 +174,7 @@ object FabricServerConfigCodec {
     }
 
     fun encode(snapshot: FabricServerConfigSnapshot): String = buildString {
+        appendSetting(CONFIG_VERSION_KEY, ServerConfigurationSchema.CURRENT_VERSION)
         appendSetting(ENABLED_KEY, snapshot.enabled)
         appendSetting(CUSTOM_EMOJIS_ENABLED_KEY, snapshot.customEmojisEnabled)
         appendSetting(MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_KEY, snapshot.maximumStaticCustomEmojiSize)
@@ -206,6 +232,21 @@ object FabricServerConfigCodec {
         return java.util.Set.copyOf(ids)
     }
 
+    private fun declaredVersion(source: String): Int? {
+        var declaredVersion: Int? = null
+        source.lineSequence().forEach { rawLine ->
+            val line = rawLine.trim()
+            val separator = line.indexOf('=')
+            if (separator <= 0 || line.substring(0, separator).trim() != CONFIG_VERSION_KEY) {
+                return@forEach
+            }
+            require(declaredVersion == null) { "Duplicate Emotify server config key: $CONFIG_VERSION_KEY" }
+            declaredVersion = line.substring(separator + 1).trim().toInt()
+        }
+        return declaredVersion
+    }
+
+    private const val CONFIG_VERSION_KEY = "configVersion"
     private const val ENABLED_KEY = "enabled"
     private const val CUSTOM_EMOJIS_ENABLED_KEY = "customEmojis.enabled"
     private const val MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_KEY = "customEmojis.maximumStaticResolution"
@@ -225,6 +266,7 @@ object FabricServerConfigCodec {
     private const val SELECTION_GLOBAL_REFILL_KEY = "ingress.globalRefillPerSecond"
     private val SUPPORTED_SIZES = setOf(8, 16, 32, 64, 128)
     private val KNOWN_KEYS = setOf(
+        CONFIG_VERSION_KEY,
         ENABLED_KEY,
         CUSTOM_EMOJIS_ENABLED_KEY,
         MAXIMUM_STATIC_CUSTOM_EMOJI_SIZE_KEY,
@@ -253,14 +295,7 @@ object FabricServerConfig {
 
     fun initialize() {
         current = try {
-            if (Files.exists(configPath, LinkOption.NOFOLLOW_LINKS)) {
-                require(Files.isRegularFile(configPath, LinkOption.NOFOLLOW_LINKS)) {
-                    "Emotify server config is not a regular file: $configPath"
-                }
-                FabricServerConfigCodec.decode(readBoundedUtf8()).also(::persist)
-            } else {
-                FabricServerConfigSnapshot().also(::persist)
-            }
+            FabricServerConfigStorage.load(configPath)
         } catch (exception: Exception) {
             throw IllegalStateException("Failed to load Emotify server config from $configPath", exception)
         }
@@ -269,23 +304,49 @@ object FabricServerConfig {
     fun snapshot(): FabricServerConfigSnapshot = checkNotNull(current) {
         "Emotify Fabric server config has not been initialized"
     }
+}
 
-    private fun persist(snapshot: FabricServerConfigSnapshot) {
-        FabricServerConfigPersistence.write(configPath, FabricServerConfigCodec.encode(snapshot))
+internal object FabricServerConfigStorage {
+    fun load(path: Path): FabricServerConfigSnapshot {
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            return FabricServerConfigSnapshot().also { snapshot -> persist(path, snapshot) }
+        }
+        require(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            "Emotify server config is not a regular file: $path"
+        }
+        val source = ServerConfigurationFileIO.readUtf8(path, MAXIMUM_CONFIG_BYTES)
+        return when (val decoded = FabricServerConfigCodec.decode(source)) {
+            is FabricServerConfigDecodeResult.Ready -> loadReady(path, decoded)
+            is FabricServerConfigDecodeResult.Future -> loadFuture(decoded)
+        }
     }
 
-    private fun readBoundedUtf8(): String {
-        val bytes = Files.newInputStream(configPath).use { input ->
-            input.readNBytes(MAXIMUM_CONFIG_BYTES + 1)
+    private fun loadReady(
+        path: Path,
+        decoded: FabricServerConfigDecodeResult.Ready,
+    ): FabricServerConfigSnapshot {
+        if (decoded.version == ServerConfigurationVersion.Legacy) {
+            ServerConfigurationFileIO.createBackupIfAbsent(
+                path,
+                path.resolveSibling("${path.fileName}.v0.bak"),
+                MAXIMUM_CONFIG_BYTES,
+            )
+            persist(path, decoded.snapshot)
         }
-        require(bytes.size <= MAXIMUM_CONFIG_BYTES) {
-            "Emotify server config exceeds $MAXIMUM_CONFIG_BYTES bytes"
-        }
-        return StandardCharsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes))
-            .toString()
+        return decoded.snapshot
+    }
+
+    private fun loadFuture(decoded: FabricServerConfigDecodeResult.Future): FabricServerConfigSnapshot {
+        EmotifyFabric.LOGGER.error(
+            "Emotify Fabric server config schema {} is newer than supported schema {}; Emotify is disabled and the file remains unchanged",
+            decoded.version,
+            ServerConfigurationSchema.CURRENT_VERSION,
+        )
+        return FabricServerConfigSnapshot(enabled = false, customEmojisEnabled = false)
+    }
+
+    private fun persist(path: Path, snapshot: FabricServerConfigSnapshot) {
+        FabricServerConfigPersistence.write(path, FabricServerConfigCodec.encode(snapshot))
     }
 
     private const val MAXIMUM_CONFIG_BYTES = 16_384
@@ -293,33 +354,6 @@ object FabricServerConfig {
 
 internal object FabricServerConfigPersistence {
     fun write(path: Path, content: String) {
-        val parent = checkNotNull(path.parent) { "Emotify config path has no parent: $path" }
-        Files.createDirectories(parent)
-        val temporary = Files.createTempFile(parent, ".${path.fileName}.", ".tmp")
-        try {
-            Files.writeString(
-                temporary,
-                content,
-                StandardCharsets.UTF_8,
-                StandardOpenOption.WRITE,
-                StandardOpenOption.TRUNCATE_EXISTING,
-                LinkOption.NOFOLLOW_LINKS,
-            )
-            require(Files.isRegularFile(temporary, LinkOption.NOFOLLOW_LINKS)) {
-                "Emotify temporary config is not a regular file: $temporary"
-            }
-            try {
-                Files.move(
-                    temporary,
-                    path,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
-            }
-        } finally {
-            Files.deleteIfExists(temporary)
-        }
+        ServerConfigurationFileIO.writeUtf8Atomically(path, content)
     }
 }

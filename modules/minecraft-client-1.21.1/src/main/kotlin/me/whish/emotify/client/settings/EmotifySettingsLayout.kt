@@ -48,16 +48,17 @@ data class EmotifyIgnoredPlayersGeometry(
 
 object EmotifySettingsVisualMetrics {
     const val SCREEN_MARGIN = 2
-    const val PANEL_WIDTH = EmotionPickerLayoutMetrics.PANEL_WIDTH
-    const val PANEL_HEIGHT = 195
-    const val IGNORED_PLAYERS_PANEL_HEIGHT = 167
     const val GAP = EmotionPickerVisualMetrics.GAP
     const val FRAME_THICKNESS = EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val CONTENT_PADDING = EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
+    const val CONTENT_WIDTH = 234
+    const val PANEL_WIDTH = CONTENT_WIDTH + CONTENT_PADDING * 2
+    const val PANEL_HEIGHT = 195
+    const val IGNORED_PLAYERS_PANEL_HEIGHT = 167
     const val TITLE_AREA_TOP = EmotionPickerLayoutMetrics.TITLE_AREA_TOP
     const val TITLE_AREA_HEIGHT = EmotionPickerLayoutMetrics.TITLE_AREA_HEIGHT
     const val CONTENT_TOP = EmotionPickerLayoutMetrics.TAB_Y_OFFSET
-    const val ACTION_HEIGHT = EmotionPickerLayoutMetrics.TAB_HEIGHT
+    const val ACTION_HEIGHT = 20
     const val ACTION_GAP = EmotionPickerLayoutMetrics.CONTROL_GAP
     const val SETTINGS_ROW_HEIGHT = 24
     const val SETTINGS_ROW_COUNT = 5
@@ -95,7 +96,11 @@ object EmotifyVolumeLayout {
 
 object EmotifySettingsLayout {
     fun main(screenWidth: Int, screenHeight: Int): EmotifySettingsGeometry {
-        val panel = centeredPanel(screenWidth, screenHeight, EmotifySettingsVisualMetrics.PANEL_HEIGHT)
+        val panel = centeredPanel(
+            screenWidth,
+            screenHeight,
+            EmotifySettingsVisualMetrics.PANEL_HEIGHT,
+        )
         val listBottom = footerTop(panel) - EmotifySettingsVisualMetrics.GAP
         val list = EmotifyUiBounds(
             panel.x + EmotifySettingsVisualMetrics.CONTENT_PADDING,

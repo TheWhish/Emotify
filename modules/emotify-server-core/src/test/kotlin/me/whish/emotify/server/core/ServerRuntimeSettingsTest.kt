@@ -10,7 +10,7 @@ class ServerRuntimeSettingsTest : FunSpec({
         val settings = ServerRuntimeSettings()
         val configuration = settings.configuration(TEST_SERVER_HELLO)
 
-        configuration.serverHello.cooldownMillis shouldBe 2_200
+        configuration.serverHello.cooldownMillis shouldBe 3_000
         configuration.serverHello.emotionCatalog shouldBe TEST_CATALOG
         configuration.selectionPolicy.enabled shouldBe true
         configuration.selectionPolicy.customEmojisEnabled shouldBe true

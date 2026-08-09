@@ -4,6 +4,7 @@ import java.util.UUID
 import kotlin.time.Duration.Companion.milliseconds
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiDescriptor
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.domain.ProtocolFeatureRegistry
 import me.whish.emotify.domain.SelectionRejectionReason
@@ -266,6 +267,7 @@ class EmotifyServerEngine(
                 session,
                 preparation.asset,
                 preparation.losslessChunks,
+                preparation.descriptor,
             )
             CustomSelectionPreparation.Ignored -> ServerSelectionResult.Ignored(SelectionIgnoreReason.UNKNOWN_EMOTION)
             is CustomSelectionPreparation.Rejected -> reject(
@@ -470,6 +472,7 @@ class EmotifyServerEngine(
         session: ServerPlayerSession,
         asset: CustomEmojiAsset,
         losslessChunks: List<CustomEmojiAssetChunk>?,
+        descriptor: CustomEmojiDescriptor,
     ): ServerSelectionResult {
         if (!eventSequence.hasCapacity()) {
             return reject(
@@ -494,7 +497,7 @@ class EmotifyServerEngine(
             "Event sequence exhausted after a successful capacity check"
         }
         val play = EmotionPlay(player.entityId, player.connection.playerId, sequence, asset.id.emotionId)
-        val customPlay = CustomEmotionPlay(player.entityId, player.connection.playerId, sequence, asset.id)
+        val customPlay = CustomEmotionPlay(player.entityId, player.connection.playerId, sequence, asset.id, descriptor)
         val preparedAsset: PreparedCustomEmojiAssetDelivery
         val preparedPlay: PreparedCustomEmotionDelivery
         try {
