@@ -175,6 +175,7 @@ internal fun engineHarness(
     policy: ServerSelectionPolicy = TEST_ENABLED_POLICY,
     serverHello: ServerHello = TEST_SERVER_HELLO,
     featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
+    customAssetIngressBudget: CustomAssetIngressBudget = CustomAssetIngressBudget(timeSource = time),
 ): EngineHarness {
     val engine = EmotifyServerEngine(
         serverHello,
@@ -186,6 +187,7 @@ internal fun engineHarness(
         sequence,
         ingressBudget,
         featureRegistry = featureRegistry,
+        customAssetIngressBudget = customAssetIngressBudget,
     )
     return EngineHarness(time, audiencePort, transport, audienceBudget, sequence, ingressBudget, engine)
 }

@@ -36,6 +36,7 @@ class FabricClientConfigCodecTest : FunSpec({
             ),
             listOf(first, second),
             listOf(second, custom, first),
+            customCopyHintDismissed = true,
         )
 
         val encoded = FabricClientConfigCodec.encode(snapshot)
@@ -62,6 +63,19 @@ class FabricClientConfigCodecTest : FunSpec({
         decoded.snapshot.settings.ignoredPlayers shouldBe emptyList()
         decoded.snapshot.favorites.shouldContainExactly(second)
         decoded.snapshot.quickSlots.shouldContainExactly(List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { null })
+        decoded.snapshot.customCopyHintDismissed shouldBe false
+    }
+
+    test("schema one config preserves quick slots and introduces the tutorial hint") {
+        val decoded = FabricClientConfigCodec.decode(
+            "configVersion=1\nfavorites=${first.value}\n" +
+                "quickSlots=${second.value},,,,,,,,\n",
+            defaults,
+        ) as FabricClientConfigDecodeResult.Ready
+
+        decoded.migrationRequired shouldBe true
+        decoded.snapshot.quickSlots.first() shouldBe second
+        decoded.snapshot.customCopyHintDismissed shouldBe false
     }
 
     test("duplicate favorites are normalized without reordering") {
@@ -75,9 +89,9 @@ class FabricClientConfigCodecTest : FunSpec({
 
     test("future schema remains opaque and is never interpreted as the current document") {
         FabricClientConfigCodec.decode(
-            "configVersion=2\nfutureOption=true\n",
+            "configVersion=3\nfutureOption=true\n",
             defaults,
-        ) shouldBe FabricClientConfigDecodeResult.Future(2)
+        ) shouldBe FabricClientConfigDecodeResult.Future(3)
     }
 
     test("malformed values and duplicate keys are rejected") {
@@ -117,7 +131,7 @@ class FabricClientConfigCodecTest : FunSpec({
         }
         shouldThrow<IllegalArgumentException> {
             FabricClientConfigCodec.decode(
-                "configVersion=1\nfavorites=${first.value},${second.value}\n" +
+                "configVersion=2\nfavorites=${first.value},${second.value}\n" +
                     "quickSlots=${first.value},${first.value},,,,,,,\n",
                 defaults,
             )

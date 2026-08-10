@@ -30,11 +30,23 @@ object FabricClientConfigCodec {
                 ),
                 migrationRequired = true,
             )
+            ClientConfigurationVersion.SchemaOne -> FabricClientConfigDecodeResult.Ready(
+                ClientConfigurationMigration.fromSchemaOne(
+                    decodeSettings(entries, defaults.settings, PREVIOUS_KEYS),
+                    decodeFavorites(entries[FAVORITES_KEY], defaults.favorites),
+                    decodeQuickSlots(entries[QUICK_SLOTS_KEY], defaults.quickSlots),
+                ),
+                migrationRequired = true,
+            )
             ClientConfigurationVersion.Current -> FabricClientConfigDecodeResult.Ready(
                 ClientConfigurationSnapshot.create(
                     decodeSettings(entries, defaults.settings, CURRENT_KEYS),
                     decodeFavorites(entries[FAVORITES_KEY], defaults.favorites),
                     decodeQuickSlots(entries[QUICK_SLOTS_KEY], defaults.quickSlots),
+                    decodeBoolean(
+                        entries[CUSTOM_COPY_HINT_DISMISSED_KEY],
+                        defaults.customCopyHintDismissed,
+                    ),
                 ),
                 migrationRequired = false,
             )
@@ -69,6 +81,10 @@ object FabricClientConfigCodec {
         append(QUICK_SLOTS_KEY)
         append('=')
         append(snapshot.quickSlots.joinToString(",") { emotionId -> emotionId?.value.orEmpty() })
+        append('\n')
+        append(CUSTOM_COPY_HINT_DISMISSED_KEY)
+        append('=')
+        append(snapshot.customCopyHintDismissed)
         append('\n')
     }
 
@@ -119,6 +135,9 @@ object FabricClientConfigCodec {
         ) { "Emotify sound volume is outside the supported range: $volume" }
         return volume
     }
+
+    private fun decodeBoolean(value: String?, fallback: Boolean): Boolean =
+        value?.toBooleanStrict() ?: fallback
 
     private fun decodeIgnoredPlayers(value: String): List<IgnoredPlayerIdentity> {
         if (value.isEmpty()) {
@@ -182,6 +201,7 @@ object FabricClientConfigCodec {
     private const val IGNORED_PLAYERS_KEY = "ignoredPlayers"
     private const val FAVORITES_KEY = "favorites"
     private const val QUICK_SLOTS_KEY = "quickSlots"
+    private const val CUSTOM_COPY_HINT_DISMISSED_KEY = "customCopyHintDismissed"
     private val LEGACY_KEYS = setOf(
         CONFIG_VERSION_KEY,
         SHOW_OTHER_PLAYERS_KEY,
@@ -191,5 +211,6 @@ object FabricClientConfigCodec {
         IGNORED_PLAYERS_KEY,
         FAVORITES_KEY,
     )
-    private val CURRENT_KEYS = LEGACY_KEYS + QUICK_SLOTS_KEY
+    private val PREVIOUS_KEYS = LEGACY_KEYS + QUICK_SLOTS_KEY
+    private val CURRENT_KEYS = PREVIOUS_KEYS + CUSTOM_COPY_HINT_DISMISSED_KEY
 }

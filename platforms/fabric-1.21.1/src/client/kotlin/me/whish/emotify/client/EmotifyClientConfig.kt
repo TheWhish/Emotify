@@ -18,7 +18,7 @@ import net.fabricmc.loader.api.FabricLoader
 
 object EmotifyClientConfig {
     private val configPath = FabricLoader.getInstance().configDir.resolve("emotify-client.properties")
-    private val backupPath = configPath.resolveSibling("${configPath.fileName}.v0.bak")
+    private val backupPath = configPath.resolveSibling("${configPath.fileName}.pre-v2.bak")
     private val failureLogGate = FailureLogGate(TimeUnit.SECONDS.toNanos(30))
     private val persistenceExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Emotify Client Config Persistence").apply {
@@ -71,8 +71,10 @@ object EmotifyClientConfig {
         updateSnapshot { current -> current.withQuickSlots(ids) }
     }
 
-    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>) {
-        updateSnapshot { current -> current.retainAvailableCustomQuickSlots(availableCustomEmotionIds) }
+    fun isCustomCopyHintDismissed(): Boolean = snapshots.load().customCopyHintDismissed
+
+    fun dismissCustomCopyHint() {
+        updateSnapshot { current -> current.withCustomCopyHintDismissed(true) }
     }
 
     fun flush() {

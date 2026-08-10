@@ -8,6 +8,7 @@ import me.whish.emotify.network.payload.EmotionSelectionPayload
 import me.whish.emotify.network.payload.SelectionRejectedPayload
 import me.whish.emotify.network.payload.ServerHelloPayload
 import me.whish.emotify.network.payload.CustomEmotionSelectionPayload
+import me.whish.emotify.network.payload.CustomEmojiAssetChunkPayload
 import me.whish.emotify.network.payload.CustomEmojiAssetPayload
 import me.whish.emotify.network.payload.CustomEmotionPlayPayload
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
@@ -64,6 +65,19 @@ class EmotifyChannelsTest : FunSpec({
             setOf(CustomEmojiAssetPayload.TYPE, CustomEmotionPlayPayload.TYPE)::contains,
         ) shouldBe true
         EmotifyChannels.clientCanReceiveCustomEmojis(setOf(CustomEmotionPlayPayload.TYPE)::contains) shouldBe false
+    }
+
+    test("lossless custom emoji delivery requires asset play and chunk channels together") {
+        val required = listOf(
+            CustomEmojiAssetPayload.TYPE,
+            CustomEmotionPlayPayload.TYPE,
+            CustomEmojiAssetChunkPayload.TYPE,
+        )
+
+        EmotifyChannels.clientCanReceiveLosslessCustomEmojis(required.toSet()::contains) shouldBe true
+        required.forEach { missing ->
+            EmotifyChannels.clientCanReceiveLosslessCustomEmojis(required.without(missing)::contains) shouldBe false
+        }
     }
 })
 

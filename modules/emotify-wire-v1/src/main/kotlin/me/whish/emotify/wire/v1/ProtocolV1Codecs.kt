@@ -74,6 +74,9 @@ private object CustomEmojiAssetChunkCodec : BoundedWireCodec<CustomEmojiAssetChu
 private object CustomEmotionSelectionCodec : BoundedWireCodec<CustomEmotionSelection>(
     ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES,
 ) {
+    override fun prepareEncoding(value: CustomEmotionSelection): PreparedWireEncoding =
+        CustomEmotionSelectionEncoding(value, value.asset?.let(CustomEmojiAssetEncodingPlan::create))
+
     override fun computeEncodedSize(value: CustomEmotionSelection): Int =
         me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + customEmojiDescriptorSize(value.descriptor) + 1 +
             (value.asset?.let(::customEmojiAssetSize) ?: 0)
@@ -103,6 +106,9 @@ private object CustomEmotionSelectionCodec : BoundedWireCodec<CustomEmotionSelec
 private object CustomEmojiTransferCodec : BoundedWireCodec<CustomEmojiTransfer>(
     ProtocolV1Limits.CUSTOM_ASSET_BODY_BYTES,
 ) {
+    override fun prepareEncoding(value: CustomEmojiTransfer): PreparedWireEncoding =
+        CustomEmojiTransferEncoding(value, CustomEmojiAssetEncodingPlan.create(value.asset))
+
     override fun computeEncodedSize(value: CustomEmojiTransfer): Int =
         me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + customEmojiAssetSize(value.asset)
 
@@ -114,6 +120,33 @@ private object CustomEmojiTransferCodec : BoundedWireCodec<CustomEmojiTransfer>(
     override fun decodeBody(reader: WireReader): CustomEmojiTransfer {
         val id = reader.readCustomEmojiId()
         return CustomEmojiTransfer(reader.readCustomEmojiAsset(id))
+    }
+}
+
+private class CustomEmotionSelectionEncoding(
+    private val selection: CustomEmotionSelection,
+    private val asset: CustomEmojiAssetEncodingPlan?,
+) : PreparedWireEncoding {
+    override val encodedSize: Int = me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH +
+        customEmojiDescriptorSize(selection.descriptor) + 1 + (asset?.encodedSize ?: 0)
+
+    override fun encode(writer: WireWriter) {
+        writer.writeCustomEmojiId(selection.customEmojiId)
+        writer.writeCustomEmojiDescriptor(selection.descriptor)
+        writer.writeUnsignedByte(if (asset == null) 0 else 1)
+        asset?.encode(writer)
+    }
+}
+
+private class CustomEmojiTransferEncoding(
+    private val transfer: CustomEmojiTransfer,
+    private val asset: CustomEmojiAssetEncodingPlan,
+) : PreparedWireEncoding {
+    override val encodedSize: Int = me.whish.emotify.domain.CustomEmojiId.BYTE_LENGTH + asset.encodedSize
+
+    override fun encode(writer: WireWriter) {
+        writer.writeCustomEmojiId(transfer.asset.id)
+        asset.encode(writer)
     }
 }
 

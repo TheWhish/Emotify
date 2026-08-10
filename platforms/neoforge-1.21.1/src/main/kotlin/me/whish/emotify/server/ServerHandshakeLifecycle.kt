@@ -79,6 +79,7 @@ object ServerHandshakeLifecycle {
 
     private fun onServerTick(event: ServerTickEvent.Post) {
         val server = event.server
+        ServerHandshakeService.drainCustomAssetVerifications(server)
         serverHelloRetries.drain { playerId, connectionId, attemptsRemaining ->
             val player = server.playerList.getPlayer(playerId) ?: return@drain
             val activeConnectionId = player.connection.connection

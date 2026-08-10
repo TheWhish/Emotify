@@ -4,6 +4,8 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import me.whish.emotify.client.state.FavoriteEmotionStore
+import me.whish.emotify.client.state.FavoriteToggleResult
 import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.EmotionId
 
@@ -12,7 +14,7 @@ class ClientConfigurationMigrationTest : FunSpec({
     val first = EmotionId.of("emotify:smile")
     val second = EmotionId.of("emotify:heart")
 
-    test("legacy schema migrates settings and favorites into schema one") {
+    test("legacy schema migrates settings and favorites into the current schema") {
         val settings = ClientSettingsSnapshot.defaults()
 
         val migrated = ClientConfigurationMigration.fromLegacy(
@@ -24,20 +26,22 @@ class ClientConfigurationMigrationTest : FunSpec({
         migrated.settings shouldBe settings
         migrated.favorites.shouldContainExactly(first, second)
         migrated.quickSlots.shouldContainExactly(List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { null })
+        migrated.customCopyHintDismissed shouldBe false
     }
 
     test("schema classification distinguishes legacy current and future documents") {
         ClientConfigurationSchema.classify(null) shouldBe ClientConfigurationVersion.Legacy
         ClientConfigurationSchema.classify(0) shouldBe ClientConfigurationVersion.Legacy
-        ClientConfigurationSchema.classify(1) shouldBe ClientConfigurationVersion.Current
-        ClientConfigurationSchema.classify(2) shouldBe ClientConfigurationVersion.Future(2)
+        ClientConfigurationSchema.classify(1) shouldBe ClientConfigurationVersion.SchemaOne
+        ClientConfigurationSchema.classify(2) shouldBe ClientConfigurationVersion.Current
+        ClientConfigurationSchema.classify(3) shouldBe ClientConfigurationVersion.Future(3)
 
         shouldThrow<IllegalArgumentException> {
             ClientConfigurationSchema.classify(-1)
         }
     }
 
-    test("schema one snapshot has exactly nine unique quick slots independent from favorites") {
+    test("current snapshot has exactly nine unique quick slots independent from favorites") {
         val snapshot = ClientConfigurationSnapshot.create(
             ClientSettingsSnapshot.defaults(),
             listOf(first),
@@ -100,6 +104,8 @@ class ClientConfigurationMigrationTest : FunSpec({
         (snapshot.withSettings(settings) === snapshot) shouldBe true
         (snapshot.withFavorites(listOf(first, second, first)) === snapshot) shouldBe true
         (snapshot.withQuickSlots(snapshot.quickSlots) === snapshot) shouldBe true
+        (snapshot.withCustomCopyHintDismissed(false) === snapshot) shouldBe true
+        snapshot.withCustomCopyHintDismissed(true).customCopyHintDismissed shouldBe true
     }
 
     test("assigning a quick slot atomically moves an existing emotion") {
@@ -143,18 +149,19 @@ class ClientConfigurationMigrationTest : FunSpec({
         snapshot.quickSlot(0) shouldBe first
     }
 
-    test("missing local custom emotions are removed without touching built in slots") {
+    test("missing local custom emotions are removed from favorites and slots without touching built ins") {
         val availableCustom = CustomEmojiId(1L, 2L, 3L).emotionId
         val missingCustom = CustomEmojiId(4L, 5L, 6L).emotionId
         val malformedCustom = EmotionId.of("emotify_custom:not-a-content-hash")
         val snapshot = ClientConfigurationSnapshot.create(
             ClientSettingsSnapshot.defaults(),
-            listOf(first),
+            listOf(first, availableCustom, missingCustom, malformedCustom),
             listOf(first, availableCustom, missingCustom, malformedCustom),
         )
 
-        val reconciled = snapshot.retainAvailableCustomQuickSlots(setOf(availableCustom))
+        val reconciled = snapshot.retainAvailableCustomReferences(setOf(availableCustom))
 
+        reconciled.favorites.shouldContainExactly(first, availableCustom)
         reconciled.quickSlots.shouldContainExactly(
             first,
             availableCustom,
@@ -167,7 +174,23 @@ class ClientConfigurationMigrationTest : FunSpec({
             null,
         )
         snapshot.quickSlot(2) shouldBe missingCustom
-        (reconciled.retainAvailableCustomQuickSlots(setOf(availableCustom)) === reconciled) shouldBe true
+        (reconciled.retainAvailableCustomReferences(setOf(availableCustom)) === reconciled) shouldBe true
+    }
+
+    test("stale custom favorites no longer consume the favorite capacity") {
+        val staleFavorites = List(me.whish.emotify.domain.EmotionCatalog.MAX_SIZE) { index ->
+            CustomEmojiId(index.toLong(), index.toLong() + 1L, index.toLong() + 2L).emotionId
+        }
+        val snapshot = ClientConfigurationSnapshot.create(
+            ClientSettingsSnapshot.defaults(),
+            staleFavorites,
+        )
+
+        val reconciled = snapshot.retainAvailableCustomReferences(emptySet())
+        val store = FavoriteEmotionStore.from(reconciled.favorites)
+
+        reconciled.favorites shouldBe emptyList()
+        store.toggle(first, setOf(first)) shouldBe FavoriteToggleResult.ADDED
     }
 
     test("quick slot mutations validate bounds and favorite membership") {

@@ -7,6 +7,13 @@ import me.whish.emotify.client.picker.EmotionPickerContext
 import me.whish.emotify.client.picker.EmotionPickerDragGesture
 import me.whish.emotify.client.picker.EmotionPickerDragPreview
 import me.whish.emotify.client.picker.EmotionPickerGeometry
+import me.whish.emotify.client.picker.EmotionPickerGridContent
+import me.whish.emotify.client.picker.EmotionPickerGridItem
+import me.whish.emotify.client.picker.EmotionPickerHintAnimation
+import me.whish.emotify.client.picker.EmotionPickerHintBounds
+import me.whish.emotify.client.picker.EmotionPickerHintLayout
+import me.whish.emotify.client.picker.EmotionPickerHintTextLayout
+import me.whish.emotify.client.picker.EmotionPickerHoverAnimation
 import me.whish.emotify.client.picker.EmotionPickerKeyboardRouting
 import me.whish.emotify.client.picker.EmotionPickerLayoutMetrics
 import me.whish.emotify.client.picker.EmotionPickerModel
@@ -18,6 +25,7 @@ import me.whish.emotify.client.picker.EmotionPickerNoticeLayout
 import me.whish.emotify.client.picker.EmotionPickerSection
 import me.whish.emotify.client.picker.EmotionPickerSectionKind
 import me.whish.emotify.client.picker.EmotionPickerState
+import me.whish.emotify.client.picker.EmotionPickerViewportMode
 import me.whish.emotify.client.picker.messageTranslationKey
 import me.whish.emotify.client.presentation.EmotionPresentation
 import me.whish.emotify.client.presentation.EmotionPresentationCatalog
@@ -30,6 +38,7 @@ import me.whish.emotify.client.settings.ClientConfigurationSchema
 import me.whish.emotify.client.state.ClientSelectionSendResult
 import me.whish.emotify.client.state.FavoriteEmotionStore
 import me.whish.emotify.client.state.FavoriteToggleResult
+import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.MonotonicTimeSource
 import me.whish.emotify.domain.SystemMonotonicTimeSource
 import net.minecraft.client.Minecraft
@@ -45,12 +54,13 @@ class EmotionPickerScreen(
     Component.literal(EmotionPickerBrand.TITLE),
 ) {
     private var context = initialContext
-    private val favorites = FavoriteEmotionStore.from(EmotifyClientConfig.loadFavorites())
+    private var favorites = FavoriteEmotionStore.from(EmotifyClientConfig.loadFavorites())
     private var quickSlots = loadQuickSlotsSnapshot()
     private val quickSlotInputGate = QuickSlotInputGate()
     private var model = createModel(initialContext)
     private var state = requireNotNull(model.initialState()) { "Emotion picker requires at least one section" }
     private var displayedEmotions = model.emotions(state)
+    private var displayedGridItems = createGridItems(displayedEmotions)
     private var notice: EmotionPickerNotice? = null
     private lateinit var geometry: EmotionPickerGeometry
     private lateinit var grid: EmotionGridList
@@ -59,6 +69,11 @@ class EmotionPickerScreen(
     private var dragSession: EmotionDragSession? = null
     private var dragTargetSlot = NO_QUICK_SLOT
     private var reducedMotion = false
+    private var customCopyHintDismissed = false
+    private var customCopyHintStartedAtNanos = Long.MIN_VALUE
+    private var customCopyHintDismissStartedAtNanos = Long.MIN_VALUE
+    private val customHintCloseHoverMotion = EmotionPickerHoverAnimation.Motion()
+    private val customHintVisual = CustomHintVisualState()
     private var retainedWidgetState: PickerWidgetState? = null
 
     override fun init() {
@@ -66,6 +81,8 @@ class EmotionPickerScreen(
         cancelDrag()
         quickSlots = loadQuickSlotsSnapshot()
         reducedMotion = EmotifyClientConfig.settings().reducedMotion
+        customCopyHintDismissed = EmotifyClientConfig.isCustomCopyHintDismissed()
+        customCopyHintDismissStartedAtNanos = Long.MIN_VALUE
         quickSlotButtons.clear()
         geometry = EmotionPickerGeometry.calculate(width, height, model.sections)
         model.sections.forEachIndexed { index, section ->
@@ -130,12 +147,12 @@ class EmotionPickerScreen(
             field.setResponder(::onSearchChanged)
         }
         addRenderableWidget(searchBox)
-        val searching = isSearching()
+        val viewportMode = viewportMode()
         grid = EmotionGridList(
             client,
             geometry.listWidth,
-            geometry.listHeight(searching),
-            geometry.listY(searching),
+            geometry.listHeight(viewportMode),
+            geometry.listY(viewportMode),
             geometry.rowWidth,
             geometry.cellWidths,
             ::selectEmotion,
@@ -145,7 +162,7 @@ class EmotionPickerScreen(
             ::isDragging,
         )
         grid.setX(geometry.listX)
-        grid.replaceEmotions(displayedEmotions)
+        grid.replaceItems(displayedGridItems)
         addRenderableWidget(grid)
         configureSearchMode()
         retainedWidgetState?.let(::restoreWidgetState)
@@ -180,6 +197,7 @@ class EmotionPickerScreen(
         }
         CustomEmojiRegistry.refreshIfChanged(client) {
             if (client.screen === this) {
+                favorites = FavoriteEmotionStore.from(EmotifyClientConfig.loadFavorites())
                 quickSlots = loadQuickSlotsSnapshot()
                 applyPolicy(context)
             }
@@ -223,7 +241,7 @@ class EmotionPickerScreen(
 
     override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.render(guiGraphics, mouseX, mouseY, partialTick)
-        if (displayedEmotions.isEmpty()) {
+        if (displayedGridItems.isEmpty()) {
             val emptyMessage = when (model.section(state).kind) {
                 EmotionPickerSectionKind.FAVORITES -> NO_FAVORITES_MESSAGE
                 EmotionPickerSectionKind.SEARCH -> NO_SEARCH_RESULTS_MESSAGE
@@ -233,9 +251,9 @@ class EmotionPickerScreen(
                     NO_EMOTIONS_MESSAGE
                 }
             }
-            val searching = isSearching()
-            val listY = geometry.listY(searching)
-            val listHeight = geometry.listHeight(searching)
+            val viewportMode = viewportMode()
+            val listY = geometry.listY(viewportMode)
+            val listHeight = geometry.listHeight(viewportMode)
             guiGraphics.drawString(
                 font,
                 emptyMessage,
@@ -246,6 +264,7 @@ class EmotionPickerScreen(
             )
         }
         val nowNanos = timeSource.nowNanos()
+        renderCustomHint(guiGraphics, mouseX, mouseY, nowNanos)
         notice?.let { current -> renderNotice(guiGraphics, current, nowNanos) }
         renderDragPreview(guiGraphics, mouseX, mouseY, nowNanos)
     }
@@ -263,6 +282,8 @@ class EmotionPickerScreen(
             }
             CustomEmojiRegistry.refreshIfChanged(client) {
                 if (client.screen === this) {
+                    favorites = FavoriteEmotionStore.from(EmotifyClientConfig.loadFavorites())
+                    quickSlots = loadQuickSlotsSnapshot()
                     applyPolicy(context)
                 }
             }
@@ -285,6 +306,9 @@ class EmotionPickerScreen(
             }
             EmotionPickerMouseDecision.CONSUME_MOVEMENT -> return true
             EmotionPickerMouseDecision.DISPATCH -> Unit
+        }
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && dismissCustomHintAt(mouseX, mouseY)) {
+            return true
         }
         val shouldClearSearchFocus =
             isSearching() && searchBox.isFocused && !searchBox.isMouseOver(mouseX, mouseY)
@@ -417,7 +441,8 @@ class EmotionPickerScreen(
         }
         state = nextState
         displayedEmotions = model.emotions(state)
-        grid.replaceEmotions(displayedEmotions)
+        displayedGridItems = createGridItems(displayedEmotions)
+        grid.replaceItems(displayedGridItems)
         configureSearchMode()
     }
 
@@ -443,7 +468,8 @@ class EmotionPickerScreen(
         }
         state = nextState
         displayedEmotions = model.emotions(state)
-        grid.replaceEmotions(displayedEmotions)
+        displayedGridItems = createGridItems(displayedEmotions)
+        grid.replaceItems(displayedGridItems)
     }
 
     private fun selectEmotion(presentation: EmotionPresentation) {
@@ -531,6 +557,7 @@ class EmotionPickerScreen(
             EmotionPickerState(retainedSection.id, 0, state.query)
         }
         displayedEmotions = model.emotions(state)
+        displayedGridItems = createGridItems(displayedEmotions)
         notice = null
         rebuildWidgets()
         restoreWidgetState(widgetState)
@@ -539,15 +566,23 @@ class EmotionPickerScreen(
     private fun toggleFavorite(presentation: EmotionPresentation) {
         val availableIds = model.sections.last().emotions.map(EmotionPresentation::emotionId)
         val result = favorites.toggle(presentation.emotionId, availableIds)
-        if (result != FavoriteToggleResult.ADDED && result != FavoriteToggleResult.REMOVED) {
-            return
+        when (result) {
+            FavoriteToggleResult.ADDED,
+            FavoriteToggleResult.REMOVED,
+            -> Unit
+            FavoriteToggleResult.CAPACITY_REACHED -> {
+                showNotice(Component.translatable("message.emotify.favorite_capacity", EmotionCatalog.MAX_SIZE))
+                return
+            }
+            FavoriteToggleResult.UNKNOWN_EMOTION -> return
         }
         val orderedIds = favorites.orderedIds()
         model = model.withFavorites(favorites.snapshot)
         state = EmotionPickerState(state.sectionId, state.firstVisibleRow, state.query)
         displayedEmotions = model.emotions(state)
+        displayedGridItems = createGridItems(displayedEmotions)
         if (model.section(state).kind == EmotionPickerSectionKind.FAVORITES) {
-            grid.replaceEmotions(displayedEmotions, resetScroll = false)
+            grid.replaceItems(displayedGridItems, resetScroll = false)
         }
         EmotifyClientConfig.saveFavorites(orderedIds)
     }
@@ -558,9 +593,9 @@ class EmotionPickerScreen(
         searchBox.active = searching
         grid.setViewport(
             geometry.listX,
-            geometry.listY(searching),
+            geometry.listY(viewportMode()),
             geometry.listWidth,
-            geometry.listHeight(searching),
+            geometry.listHeight(viewportMode()),
         )
         if (!searching) {
             if (searchBox.isFocused) {
@@ -571,6 +606,18 @@ class EmotionPickerScreen(
 
     private fun isSearching(): Boolean =
         model.section(state).kind == EmotionPickerSectionKind.SEARCH
+
+    private fun isCustomSection(): Boolean = state.sectionId == EmotionPickerModel.CUSTOM_SECTION_ID
+
+    private fun viewportMode(): EmotionPickerViewportMode =
+        if (isSearching()) EmotionPickerViewportMode.SEARCH else EmotionPickerViewportMode.NORMAL
+
+    private fun createGridItems(emotions: List<EmotionPresentation>): List<EmotionPickerGridItem> =
+        if (isCustomSection()) {
+            EmotionPickerGridContent.custom(emotions, CustomEmojiRegistry.diagnostics())
+        } else {
+            EmotionPickerGridContent.regular(emotions)
+        }
 
     private fun isSearchInputFocused(): Boolean =
         isSearching() && ::searchBox.isInitialized && searchBox.isFocused
@@ -708,6 +755,199 @@ class EmotionPickerScreen(
         return EmotionPresentationCatalog.find(emotionId) ?: CustomEmojiRegistry.find(emotionId)
     }
 
+    private fun renderCustomHint(
+        guiGraphics: GuiGraphics,
+        mouseX: Int,
+        mouseY: Int,
+        nowNanos: Long,
+    ) {
+        if (!shouldRenderCustomHint(nowNanos)) {
+            return
+        }
+        val text = customHintText()
+        val bounds = customHintBounds(text, nowNanos)
+        val visual = customHintVisualState(nowNanos)
+        val panelAlpha = EmotionPickerNoticeAnimation.renderAlpha(visual.panelOpacity)
+        if (panelAlpha == 0) {
+            return
+        }
+        val closeHovered = !customCopyHintDismissed && bounds.containsClose(
+            mouseX.toDouble(),
+            mouseY.toDouble(),
+            visual.horizontalScale,
+            visual.verticalScale,
+            visual.verticalOffset,
+            visual.closeScale,
+        )
+        val closeHoverEmphasis = customHintCloseHoverMotion.advance(closeHovered, nowNanos)
+        val pose = guiGraphics.pose()
+        val centerX = bounds.x + bounds.width / 2.0
+        val centerY = bounds.y + bounds.height / 2.0
+        pose.pushPose()
+        try {
+            pose.translate(centerX, centerY + visual.verticalOffset, 0.0)
+            pose.scale(visual.horizontalScale.toFloat(), visual.verticalScale.toFloat(), 1.0F)
+            pose.translate(-centerX, -centerY, 0.0)
+            EmotionPickerTheme.renderHint(guiGraphics, bounds.x, bounds.y, bounds.width, bounds.height, panelAlpha)
+            val closeAlpha = EmotionPickerNoticeAnimation.renderAlpha(visual.closeOpacity)
+            if (closeAlpha > 0) {
+                val closeCenterX = bounds.closeX + bounds.closeSize / 2.0
+                val closeCenterY = bounds.closeY + bounds.closeSize / 2.0
+                pose.pushPose()
+                try {
+                    pose.translate(closeCenterX, closeCenterY, 0.0)
+                    pose.scale(visual.closeScale.toFloat(), visual.closeScale.toFloat(), 1.0F)
+                    pose.translate(-closeCenterX, -closeCenterY, 0.0)
+                    EmotionPickerTheme.renderHintClose(
+                        guiGraphics,
+                        bounds.closeX,
+                        bounds.closeY,
+                        bounds.closeSize,
+                        closeHoverEmphasis,
+                        closeAlpha,
+                    )
+                } finally {
+                    pose.popPose()
+                }
+            }
+            val textAlpha = EmotionPickerNoticeAnimation.renderAlpha(visual.textOpacity)
+            if (textAlpha > 0) {
+                val textX = EmotionPickerHintTextLayout.x(bounds)
+                val textY = EmotionPickerHintTextLayout.y(bounds, font.lineHeight)
+                pose.pushPose()
+                try {
+                    pose.translate(
+                        textX + visual.textHorizontalOffset,
+                        textY.toDouble(),
+                        0.0,
+                    )
+                    guiGraphics.drawString(
+                        font,
+                        text,
+                        0,
+                        0,
+                        EmotionPickerTheme.colorWithOpacity(EmotionPickerTheme.secondaryTextOnPanel, textAlpha),
+                        false,
+                    )
+                } finally {
+                    pose.popPose()
+                }
+            }
+        } finally {
+            pose.popPose()
+        }
+    }
+
+    private fun customHintVisualState(nowNanos: Long): CustomHintVisualState {
+        if (reducedMotion) {
+            val opacity = if (customCopyHintDismissed) 0.0 else 1.0
+            customHintVisual.panelOpacity = opacity
+            customHintVisual.textOpacity = opacity
+            customHintVisual.closeOpacity = opacity
+            customHintVisual.horizontalScale = 1.0
+            customHintVisual.verticalScale = 1.0
+            customHintVisual.verticalOffset = 0.0
+            customHintVisual.textHorizontalOffset = 0.0
+            customHintVisual.closeScale = 1.0
+            return customHintVisual
+        }
+        val ageMillis = customHintAgeMillis(nowNanos)
+        val dismissAgeMillis = if (customCopyHintDismissed) customHintDismissAgeMillis(nowNanos) else 0.0
+        val dismissOpacity = if (customCopyHintDismissed) {
+            EmotionPickerHintAnimation.dismissOpacityAt(dismissAgeMillis)
+        } else {
+            1.0
+        }
+        val dismissScale = if (customCopyHintDismissed) {
+            EmotionPickerHintAnimation.dismissScaleAt(dismissAgeMillis)
+        } else {
+            1.0
+        }
+        val dismissOffset = if (customCopyHintDismissed) {
+            EmotionPickerHintAnimation.dismissVerticalOffsetAt(dismissAgeMillis)
+        } else {
+            0.0
+        }
+        customHintVisual.panelOpacity = EmotionPickerHintAnimation.panelOpacityAt(ageMillis) * dismissOpacity
+        customHintVisual.textOpacity = EmotionPickerHintAnimation.textOpacityAt(ageMillis) * dismissOpacity
+        customHintVisual.closeOpacity = EmotionPickerHintAnimation.closeOpacityAt(ageMillis) * dismissOpacity
+        customHintVisual.horizontalScale = EmotionPickerHintAnimation.horizontalScaleAt(ageMillis) * dismissScale
+        customHintVisual.verticalScale = dismissScale
+        customHintVisual.verticalOffset = EmotionPickerHintAnimation.verticalOffsetAt(ageMillis) + dismissOffset
+        customHintVisual.textHorizontalOffset = EmotionPickerHintAnimation.textHorizontalOffsetAt(ageMillis)
+        customHintVisual.closeScale = EmotionPickerHintAnimation.closeScaleAt(ageMillis)
+        return customHintVisual
+    }
+
+    private fun dismissCustomHintAt(mouseX: Double, mouseY: Double): Boolean {
+        if (!shouldShowCustomHint()) {
+            return false
+        }
+        val nowNanos = timeSource.nowNanos()
+        val bounds = customHintBounds(customHintText(), nowNanos)
+        val visual = customHintVisualState(nowNanos)
+        if (!bounds.containsClose(
+                mouseX,
+                mouseY,
+                visual.horizontalScale,
+                visual.verticalScale,
+                visual.verticalOffset,
+                visual.closeScale,
+            )
+        ) {
+            return false
+        }
+        customCopyHintDismissed = true
+        customCopyHintDismissStartedAtNanos = nowNanos
+        EmotionSoundEngine.playInterfaceClick()
+        EmotifyClientConfig.dismissCustomCopyHint()
+        return true
+    }
+
+    private fun shouldShowCustomHint(): Boolean =
+        isCustomSection() && !customCopyHintDismissed && notice == null
+
+    private fun shouldRenderCustomHint(nowNanos: Long): Boolean {
+        if (!isCustomSection() || notice != null) {
+            return false
+        }
+        if (!customCopyHintDismissed) {
+            return true
+        }
+        return !reducedMotion &&
+            customCopyHintDismissStartedAtNanos != Long.MIN_VALUE &&
+            !EmotionPickerHintAnimation.isDismissFinished(customHintDismissAgeMillis(nowNanos))
+    }
+
+    private fun customHintText(): String {
+        return fittedNoticeMessage(
+            Component.translatable("screen.emotify.custom_hint.message").string,
+            EmotionPickerHintLayout.maximumTextWidth(width, geometry.panelWidth),
+        )
+    }
+
+    private fun customHintBounds(text: String, nowNanos: Long): EmotionPickerHintBounds {
+        if (customCopyHintStartedAtNanos == Long.MIN_VALUE) {
+            customCopyHintStartedAtNanos = nowNanos
+        }
+        return EmotionPickerHintLayout.bounds(
+            width,
+            height,
+            geometry.panelX,
+            geometry.panelY,
+            geometry.panelWidth,
+            geometry.panelHeight,
+            font.width(text),
+            font.lineHeight,
+        )
+    }
+
+    private fun customHintAgeMillis(nowNanos: Long): Double =
+        (nowNanos - customCopyHintStartedAtNanos).coerceAtLeast(0L) / NANOS_PER_MILLISECOND
+
+    private fun customHintDismissAgeMillis(nowNanos: Long): Double =
+        (nowNanos - customCopyHintDismissStartedAtNanos).coerceAtLeast(0L) / NANOS_PER_MILLISECOND
+
     private fun renderNotice(guiGraphics: GuiGraphics, current: EmotionPickerNotice, nowNanos: Long) {
         val opacity = current.opacityAt(nowNanos)
         val alpha = EmotionPickerNoticeAnimation.renderAlpha(opacity)
@@ -798,11 +1038,23 @@ class EmotionPickerScreen(
         private const val NO_QUICK_SLOT = -1
         private const val MAXIMUM_DRAG_FRAME_SECONDS = 0.05
         private const val NANOS_PER_SECOND = 1_000_000_000.0
+        private const val NANOS_PER_MILLISECOND = 1_000_000.0
     }
 
     private data class PickerWidgetState(
         val scrollAmount: Double,
         val searchFocused: Boolean,
+    )
+
+    private class CustomHintVisualState(
+        var panelOpacity: Double = 1.0,
+        var textOpacity: Double = 1.0,
+        var closeOpacity: Double = 1.0,
+        var horizontalScale: Double = 1.0,
+        var verticalScale: Double = 1.0,
+        var verticalOffset: Double = 0.0,
+        var textHorizontalOffset: Double = 0.0,
+        var closeScale: Double = 1.0,
     )
 
     private class EmotionDragSession(

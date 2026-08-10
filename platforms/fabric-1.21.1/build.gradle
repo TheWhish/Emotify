@@ -459,6 +459,7 @@ def verifyFabricReleaseJar = tasks.register('verifyFabricReleaseJar') {
                 'me/whish/emotify/fabric/mixin/ServerCommonPacketListenerAccessor.class',
                 'me/whish/emotify/fabric/mixin/client/EditBoxMixin.class',
                 'me/whish/emotify/fabric/mixin/client/GameRendererMixin.class',
+                'me/whish/emotify/fabric/mixin/client/MinecraftMixin.class',
                 'me/whish/emotify/fabric/mixin/client/PlayerRendererMixin.class',
                 'me/whish/emotify/client/EmotionPickerScreen.class',
                 'me/whish/emotify/client/CustomEmojiRegistry.class',

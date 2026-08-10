@@ -30,7 +30,6 @@ import net.fabricmc.fabric.api.networking.v1.PlayerLookup
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
-import me.whish.emotify.wire.v1.CustomEmojiAssetChunkCache
 
 internal class FabricAudiencePort(
     private val server: MinecraftServer,
@@ -77,8 +76,6 @@ internal class FabricAudiencePort(
 internal class FabricOutboundTransport(
     private val server: MinecraftServer,
 ) : OutboundTransport {
-    private val customEmojiAssets = CustomEmojiAssetChunkCache()
-
     override fun prepareServerHello(hello: ServerHello): PreparedServerHelloDelivery {
         val payload = FabricServerHelloPayload(hello)
         return PreparedServerHelloDelivery { connection ->
@@ -116,8 +113,12 @@ internal class FabricOutboundTransport(
         losslessChunks: List<CustomEmojiAssetChunk>?,
     ): PreparedCustomEmojiAssetDelivery {
         if (transfer.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
-            val payloads = (losslessChunks ?: customEmojiAssets.chunks(transfer.asset))
-                .map(::FabricCustomEmojiAssetChunkPayload)
+            val chunks = requireNotNull(losslessChunks) {
+                "A large custom asset requires prepared lossless chunks"
+            }
+            val payloads by lazy(LazyThreadSafetyMode.NONE) {
+                chunks.map(::FabricCustomEmojiAssetChunkPayload)
+            }
             return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
                 sendCustom(playerId, connectionId, requireLossless = true) { player ->
                     payloads.forEach { payload -> ServerPlayNetworking.send(player, payload) }

@@ -65,6 +65,10 @@ class PaperProtocolV1BridgeTest : FunSpec({
             PaperProtocolChannels.acceptsIncoming(channel) shouldBe false
         }
         PaperProtocolChannels.acceptsIncoming("emotify:custom_asset_chunk") shouldBe true
+        PaperProtocolChannels.requiresUsePermission("emotify:client_hello") shouldBe false
+        PaperProtocolChannels.requiresUsePermission("emotify:select") shouldBe true
+        PaperProtocolChannels.requiresUsePermission("emotify:custom_select") shouldBe true
+        PaperProtocolChannels.requiresUsePermission("emotify:custom_asset_chunk") shouldBe true
         PaperProtocolChannels.requiresBukkitSubscription("emotify:server_hello") shouldBe true
         PaperProtocolChannels.requiresBukkitSubscription("emotify:play") shouldBe true
         PaperProtocolChannels.requiresBukkitSubscription("emotify:selection_rejected") shouldBe true

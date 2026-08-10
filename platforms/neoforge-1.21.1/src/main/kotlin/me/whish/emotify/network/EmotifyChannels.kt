@@ -38,7 +38,9 @@ object EmotifyChannels {
     fun clientCanReceiveCustomEmojis(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
         hasChannel(CustomEmojiAssetPayload.TYPE) && hasChannel(CustomEmotionPlayPayload.TYPE)
 
+    fun clientCanReceiveLosslessCustomEmojis(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
+        clientCanReceiveCustomEmojis(hasChannel) && hasChannel(CustomEmojiAssetChunkPayload.TYPE)
+
     fun serverCanReceiveLosslessCustomEmojis(hasChannel: (CustomPacketPayload.Type<*>) -> Boolean): Boolean =
         hasChannel(CustomEmojiAssetChunkPayload.TYPE)
-
 }

@@ -77,6 +77,8 @@ class EmotionPickerGeometryTest : FunSpec({
         geometry.quickSlotAt(61.0, geometry.quickSlotY.toDouble()) shouldBe 1
         geometry.quickSlotAt(60.0, (geometry.quickSlotY + 22).toDouble()) shouldBe -1
         geometry.searchListY - (geometry.searchFieldY + geometry.searchFieldHeight) shouldBe 4
+        geometry.listY(EmotionPickerViewportMode.NORMAL) shouldBe geometry.normalListY
+        geometry.listY(EmotionPickerViewportMode.SEARCH) shouldBe geometry.searchListY
         geometry.rowWidth shouldBe 218
         geometry.cellWidths shouldContainExactly listOf(67, 66, 66)
         geometry.gridWidth shouldBe 207
@@ -208,6 +210,16 @@ class EmotionPickerGeometryTest : FunSpec({
         EmotionPickerScrollMath.draggedAmount(195.0, 5.0, 200.0, 100) shouldBe 200.0
         EmotionPickerScrollMath.draggedAmount(5.0, -5.0, 200.0, 100) shouldBe 0.0
         EmotionPickerScrollMath.draggedAmount(0.0, 20.0, 0.0, 100) shouldBe 0.0
+    }
+
+    test("scrollbar thumb remains valid for every positive compact track height") {
+        (1..100).forEach { trackHeight ->
+            val thumbHeight = EmotionPickerScrollbarMetrics.thumbHeight(trackHeight, trackHeight + 120)
+            val maximum = (trackHeight - 8).coerceAtLeast(1)
+
+            (thumbHeight in 1..maximum) shouldBe true
+        }
+        EmotionPickerScrollbarMetrics.thumbHeight(41, 200) shouldBe 33
     }
 
     test("critical scroll motion starts gently remains monotonic and settles exactly") {

@@ -186,6 +186,46 @@ object EmotionPickerDragPreview {
     private const val SNAP_VELOCITY = 0.05
 }
 
+object EmotionPickerHoverAnimation {
+    class Motion {
+        var emphasis = 0.0
+            private set
+
+        private var lastFrameNanos = Long.MIN_VALUE
+
+        fun advance(hovered: Boolean, nowNanos: Long): Double {
+            val elapsedSeconds = if (lastFrameNanos == Long.MIN_VALUE) {
+                INITIAL_FRAME_SECONDS
+            } else {
+                ((nowNanos - lastFrameNanos).coerceAtLeast(0L) / NANOS_PER_SECOND)
+                    .coerceAtMost(MAXIMUM_FRAME_SECONDS)
+            }
+            lastFrameNanos = nowNanos
+            emphasis = nextEmphasis(emphasis, hovered, elapsedSeconds)
+            return emphasis
+        }
+    }
+
+    fun nextEmphasis(current: Double, hovered: Boolean, elapsedSeconds: Double): Double {
+        require(current.isFinite() && current in 0.0..1.0) {
+            "Hover emphasis is outside the supported range: $current"
+        }
+        require(elapsedSeconds.isFinite() && elapsedSeconds >= 0.0) {
+            "Hover elapsed time must be finite and non-negative: $elapsedSeconds"
+        }
+        val target = if (hovered) 1.0 else 0.0
+        val response = 1.0 - exp(-RESPONSE * elapsedSeconds.coerceAtMost(MAXIMUM_FRAME_SECONDS))
+        val updated = current + (target - current) * response
+        return if (abs(target - updated) <= SNAP_DISTANCE) target else updated.coerceIn(0.0, 1.0)
+    }
+
+    private const val RESPONSE = 16.0
+    private const val SNAP_DISTANCE = 0.001
+    private const val INITIAL_FRAME_SECONDS = 1.0 / 60.0
+    private const val MAXIMUM_FRAME_SECONDS = 0.1
+    private const val NANOS_PER_SECOND = 1_000_000_000.0
+}
+
 enum class EmotionPickerQuickSlotMouseDecision {
     DISPATCH,
     CONSUME_EMPTY,

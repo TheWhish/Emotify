@@ -8,6 +8,8 @@ import me.whish.emotify.domain.EmotionId
 sealed interface ClientConfigurationVersion {
     data object Legacy : ClientConfigurationVersion
 
+    data object SchemaOne : ClientConfigurationVersion
+
     data object Current : ClientConfigurationVersion
 
     data class Future(val value: Int) : ClientConfigurationVersion {
@@ -21,7 +23,8 @@ sealed interface ClientConfigurationVersion {
 
 object ClientConfigurationSchema {
     const val LEGACY_VERSION = 0
-    const val CURRENT_VERSION = 1
+    const val SCHEMA_ONE_VERSION = 1
+    const val CURRENT_VERSION = 2
     const val QUICK_SLOT_COUNT = 9
 
     fun classify(declaredVersion: Int?): ClientConfigurationVersion {
@@ -29,6 +32,7 @@ object ClientConfigurationSchema {
         require(version >= LEGACY_VERSION) { "Client configuration version must not be negative: $version" }
         return when {
             version == LEGACY_VERSION -> ClientConfigurationVersion.Legacy
+            version == SCHEMA_ONE_VERSION -> ClientConfigurationVersion.SchemaOne
             version == CURRENT_VERSION -> ClientConfigurationVersion.Current
             else -> ClientConfigurationVersion.Future(version)
         }
@@ -40,6 +44,7 @@ data class ClientConfigurationSnapshot private constructor(
     val settings: ClientSettingsSnapshot,
     val favorites: List<EmotionId>,
     val quickSlots: List<EmotionId?>,
+    val customCopyHintDismissed: Boolean,
 ) {
     private val quickSlotNumbers: Map<EmotionId, Int> = quickSlotNumbers(quickSlots)
 
@@ -47,17 +52,28 @@ data class ClientConfigurationSnapshot private constructor(
         get() = ClientConfigurationSchema.CURRENT_VERSION
 
     fun withSettings(settings: ClientSettingsSnapshot): ClientConfigurationSnapshot =
-        if (settings == this.settings) this else create(settings, favorites, quickSlots)
+        if (settings == this.settings) this else create(settings, favorites, quickSlots, customCopyHintDismissed)
 
     fun withFavorites(favorites: Collection<EmotionId>): ClientConfigurationSnapshot {
         val normalizedFavorites = normalizeFavorites(favorites)
-        return if (normalizedFavorites == this.favorites) this else create(settings, normalizedFavorites, quickSlots)
+        return if (normalizedFavorites == this.favorites) {
+            this
+        } else {
+            create(settings, normalizedFavorites, quickSlots, customCopyHintDismissed)
+        }
     }
 
     fun withQuickSlots(quickSlots: Collection<EmotionId?>): ClientConfigurationSnapshot {
-        val updated = create(settings, favorites, quickSlots)
+        val updated = create(settings, favorites, quickSlots, customCopyHintDismissed)
         return if (updated.quickSlots == this.quickSlots) this else updated
     }
+
+    fun withCustomCopyHintDismissed(dismissed: Boolean): ClientConfigurationSnapshot =
+        if (dismissed == customCopyHintDismissed) {
+            this
+        } else {
+            create(settings, favorites, quickSlots, dismissed)
+        }
 
     fun quickSlot(index: Int): EmotionId? {
         requireQuickSlotIndex(index)
@@ -76,7 +92,7 @@ data class ClientConfigurationSnapshot private constructor(
             updatedSlots[previousSlotNumber - 1] = null
         }
         updatedSlots[index] = emotionId
-        return create(settings, favorites, updatedSlots)
+        return create(settings, favorites, updatedSlots, customCopyHintDismissed)
     }
 
     fun clearQuickSlot(index: Int): ClientConfigurationSnapshot {
@@ -86,22 +102,29 @@ data class ClientConfigurationSnapshot private constructor(
         }
         val updatedSlots = ArrayList(quickSlots)
         updatedSlots[index] = null
-        return create(settings, favorites, updatedSlots)
+        return create(settings, favorites, updatedSlots, customCopyHintDismissed)
     }
 
-    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>): ClientConfigurationSnapshot {
+    fun retainAvailableCustomReferences(availableCustomEmotionIds: Set<EmotionId>): ClientConfigurationSnapshot {
+        val updatedFavorites = favorites.filterNot { emotionId ->
+            emotionId.isUnavailableCustomReference(availableCustomEmotionIds)
+        }
         var updatedSlots: ArrayList<EmotionId?>? = null
         quickSlots.forEachIndexed { index, emotionId ->
-            if (
-                emotionId != null &&
-                emotionId.value.startsWith(CUSTOM_EMOTION_ID_PREFIX) &&
-                emotionId !in availableCustomEmotionIds
-            ) {
+            if (emotionId != null && emotionId.isUnavailableCustomReference(availableCustomEmotionIds)) {
                 val mutableSlots = updatedSlots ?: ArrayList(quickSlots).also { updatedSlots = it }
                 mutableSlots[index] = null
             }
         }
-        return updatedSlots?.let { slots -> create(settings, favorites, slots) } ?: this
+        if (updatedFavorites.size == favorites.size && updatedSlots == null) {
+            return this
+        }
+        return create(
+            settings,
+            updatedFavorites,
+            updatedSlots ?: quickSlots,
+            customCopyHintDismissed,
+        )
     }
 
     companion object {
@@ -109,6 +132,7 @@ data class ClientConfigurationSnapshot private constructor(
             settings: ClientSettingsSnapshot,
             favorites: Collection<EmotionId>,
             quickSlots: Collection<EmotionId?> = emptyList(),
+            customCopyHintDismissed: Boolean = false,
         ): ClientConfigurationSnapshot {
             val normalizedFavorites = normalizeFavorites(favorites)
             require(quickSlots.size <= ClientConfigurationSchema.QUICK_SLOT_COUNT) {
@@ -129,6 +153,7 @@ data class ClientConfigurationSnapshot private constructor(
                 settings,
                 normalizedFavorites,
                 Collections.unmodifiableList(normalizedQuickSlots),
+                customCopyHintDismissed,
             )
         }
 
@@ -155,6 +180,9 @@ data class ClientConfigurationSnapshot private constructor(
             }
         }
 
+        private fun EmotionId.isUnavailableCustomReference(availableCustomEmotionIds: Set<EmotionId>): Boolean =
+            value.startsWith(CUSTOM_EMOTION_ID_PREFIX) && this !in availableCustomEmotionIds
+
         private const val CUSTOM_EMOTION_ID_PREFIX = "${CustomEmojiId.NAMESPACE}:"
     }
 }
@@ -164,4 +192,10 @@ object ClientConfigurationMigration {
         settings: ClientSettingsSnapshot,
         favorites: Collection<EmotionId>,
     ): ClientConfigurationSnapshot = ClientConfigurationSnapshot.create(settings, favorites)
+
+    fun fromSchemaOne(
+        settings: ClientSettingsSnapshot,
+        favorites: Collection<EmotionId>,
+        quickSlots: Collection<EmotionId?>,
+    ): ClientConfigurationSnapshot = ClientConfigurationSnapshot.create(settings, favorites, quickSlots)
 }

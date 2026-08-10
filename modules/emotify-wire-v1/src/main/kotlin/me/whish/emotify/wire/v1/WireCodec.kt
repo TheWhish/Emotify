@@ -21,8 +21,24 @@ internal abstract class BoundedWireCodec<T : Any>(
         require(maxBodyBytes > 0) { "Protocol 1 body limit must be positive: $maxBodyBytes" }
     }
 
-    final override fun encodedSize(value: T): Int {
-        val size = computeEncodedSize(value)
+    final override fun encodedSize(value: T): Int = checkedEncodedSize(
+        prepareEncoding(value)?.encodedSize ?: computeEncodedSize(value),
+    )
+
+    final override fun encode(writer: WireWriter, value: T) {
+        val prepared = prepareEncoding(value)
+        encode(writer, value, checkedEncodedSize(prepared?.encodedSize ?: computeEncodedSize(value)), prepared)
+    }
+
+    final override fun encodeToByteArray(value: T): ByteArray {
+        val prepared = prepareEncoding(value)
+        val size = checkedEncodedSize(prepared?.encodedSize ?: computeEncodedSize(value))
+        val writer = ByteArrayWireWriter(size)
+        encode(writer, value, size, prepared)
+        return writer.toByteArray()
+    }
+
+    private fun checkedEncodedSize(size: Int): Int {
         if (size > maxBodyBytes) {
             throw WireEncodeException(
                 WireEncodeViolation.BODY_TOO_LARGE,
@@ -32,21 +48,19 @@ internal abstract class BoundedWireCodec<T : Any>(
         return size
     }
 
-    final override fun encode(writer: WireWriter, value: T) {
-        encode(writer, value, encodedSize(value))
-    }
-
-    final override fun encodeToByteArray(value: T): ByteArray {
-        val size = encodedSize(value)
-        val writer = ByteArrayWireWriter(size)
-        encode(writer, value, size)
-        return writer.toByteArray()
-    }
-
-    private fun encode(writer: WireWriter, value: T, expectedSize: Int) {
+    private fun encode(
+        writer: WireWriter,
+        value: T,
+        expectedSize: Int,
+        prepared: PreparedWireEncoding?,
+    ) {
         val initialPosition = writer.position
         try {
-            encodeBody(writer, value)
+            if (prepared == null) {
+                encodeBody(writer, value)
+            } else {
+                prepared.encode(writer)
+            }
             val actualSize = writer.position - initialPosition
             if (actualSize != expectedSize) {
                 throw WireEncodeException(
@@ -96,5 +110,13 @@ internal abstract class BoundedWireCodec<T : Any>(
 
     protected abstract fun encodeBody(writer: WireWriter, value: T)
 
+    protected open fun prepareEncoding(value: T): PreparedWireEncoding? = null
+
     protected abstract fun decodeBody(reader: WireReader): T
+}
+
+internal interface PreparedWireEncoding {
+    val encodedSize: Int
+
+    fun encode(writer: WireWriter)
 }

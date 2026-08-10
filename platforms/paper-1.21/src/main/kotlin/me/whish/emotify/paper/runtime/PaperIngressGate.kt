@@ -3,29 +3,47 @@ package me.whish.emotify.paper.runtime
 import java.util.concurrent.atomic.AtomicBoolean
 import me.whish.emotify.server.core.ConnectionKey
 
+enum class PaperIngressLane {
+    SERIAL,
+    CUSTOM_ASSET_CHUNK,
+}
+
 class PaperIngressGate(
     maximumOutstanding: Int,
 ) {
     private val lock = Any()
-    private val reservations = HashMap<ConnectionKey, Any>()
+    private val reservations = HashMap<ConnectionKey, ConnectionReservation>()
     private var maximumOutstanding = validatedMaximum(maximumOutstanding)
+    private var outstanding = 0
 
     val outstandingCount: Int
-        get() = synchronized(lock) { reservations.size }
+        get() = synchronized(lock) { outstanding }
 
-    fun tryAcquire(connection: ConnectionKey): PaperIngressLease? {
+    fun tryAcquire(
+        connection: ConnectionKey,
+        lane: PaperIngressLane = PaperIngressLane.SERIAL,
+        maximumForLane: Int = 1,
+    ): PaperIngressLease? {
+        require(maximumForLane > 0) {
+            "Maximum outstanding Paper ingress tasks per lane must be positive: $maximumForLane"
+        }
         val reservation = synchronized(lock) {
-            if (reservations.containsKey(connection) || reservations.size >= maximumOutstanding) {
+            val existing = reservations[connection]
+            if (outstanding >= maximumOutstanding || existing != null && existing.count(lane) >= maximumForLane) {
                 return null
             }
-            Any().also { created -> reservations[connection] = created }
+            val active = existing ?: ConnectionReservation().also { created -> reservations[connection] = created }
+            active.increment(lane)
+            outstanding++
+            active
         }
-        return PaperIngressLease { release(connection, reservation) }
+        return PaperIngressLease { release(connection, reservation, lane) }
     }
 
     fun clear() {
         synchronized(lock) {
             reservations.clear()
+            outstanding = 0
         }
     }
 
@@ -36,15 +54,58 @@ class PaperIngressGate(
         }
     }
 
-    private fun release(connection: ConnectionKey, reservation: Any) {
+    private fun release(
+        connection: ConnectionKey,
+        reservation: ConnectionReservation,
+        lane: PaperIngressLane,
+    ) {
         synchronized(lock) {
-            reservations.remove(connection, reservation)
+            if (reservations[connection] !== reservation) {
+                return
+            }
+            reservation.decrement(lane)
+            outstanding--
+            if (reservation.isEmpty()) {
+                reservations.remove(connection)
+            }
         }
     }
 
     private fun validatedMaximum(value: Int): Int {
         require(value > 0) { "Maximum outstanding Paper ingress tasks must be positive: $value" }
         return value
+    }
+
+    private class ConnectionReservation {
+        private var serial = 0
+        private var customAssetChunks = 0
+
+        fun count(lane: PaperIngressLane): Int = when (lane) {
+            PaperIngressLane.SERIAL -> serial
+            PaperIngressLane.CUSTOM_ASSET_CHUNK -> customAssetChunks
+        }
+
+        fun increment(lane: PaperIngressLane) {
+            when (lane) {
+                PaperIngressLane.SERIAL -> serial++
+                PaperIngressLane.CUSTOM_ASSET_CHUNK -> customAssetChunks++
+            }
+        }
+
+        fun decrement(lane: PaperIngressLane) {
+            when (lane) {
+                PaperIngressLane.SERIAL -> {
+                    check(serial > 0) { "Paper serial ingress reservation count became invalid" }
+                    serial--
+                }
+                PaperIngressLane.CUSTOM_ASSET_CHUNK -> {
+                    check(customAssetChunks > 0) { "Paper custom asset ingress reservation count became invalid" }
+                    customAssetChunks--
+                }
+            }
+        }
+
+        fun isEmpty(): Boolean = serial == 0 && customAssetChunks == 0
     }
 }
 

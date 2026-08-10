@@ -123,7 +123,7 @@ object CustomEmojiAssetExporter {
                             val formatName = metadata.nativeMetadataFormatName
                             val root = metadata.getAsTree(formatName) as IIOMetadataNode
                             val control = root.node("GraphicControlExtension")
-                            control.setAttribute("disposalMethod", "none")
+                            control.setAttribute("disposalMethod", "restoreToBackgroundColor")
                             control.setAttribute("userInputFlag", "FALSE")
                             control.setAttribute("transparentColorFlag", if (frame.pixels.hasTransparency()) "TRUE" else "FALSE")
                             control.setAttribute("delayTime", delays[index].toString())

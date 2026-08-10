@@ -7,11 +7,15 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.UUID
 import me.whish.emotify.domain.EmotionCatalog
 import me.whish.emotify.domain.EmotionId
+import me.whish.emotify.domain.CustomEmojiAsset
+import me.whish.emotify.domain.CustomEmojiPixels
+import me.whish.emotify.domain.EmotifyProtocolFeatures
 import me.whish.emotify.domain.FakeMonotonicTimeSource
 import me.whish.emotify.domain.FeatureFlags
 import me.whish.emotify.domain.ProtocolCapabilities
 import me.whish.emotify.domain.ProtocolVersion
 import me.whish.emotify.protocol.ClientHello
+import me.whish.emotify.protocol.CustomEmotionSelection
 import me.whish.emotify.protocol.EmotionPlay
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.RuntimeEntityId
@@ -22,6 +26,7 @@ import me.whish.emotify.server.core.AudienceBudgetLimits
 import me.whish.emotify.server.core.AudienceVisitCompletion
 import me.whish.emotify.server.core.ConnectionId
 import me.whish.emotify.server.core.ConnectionKey
+import me.whish.emotify.server.core.CustomAssetUploadPreparation
 import me.whish.emotify.server.core.OutboundDeliveryStatus
 import me.whish.emotify.server.core.OutboundTransport
 import me.whish.emotify.server.core.PlayerSnapshot
@@ -32,8 +37,10 @@ import me.whish.emotify.server.core.ServerHandshakeTransition
 import me.whish.emotify.server.core.ServerHelloResult
 import me.whish.emotify.server.core.ServerSelectionPolicy
 import me.whish.emotify.server.core.ServerSelectionResult
+import me.whish.emotify.server.core.SelectionIgnoreReason
 import me.whish.emotify.server.core.ServerRuntimeConfiguration
 import me.whish.emotify.wire.v1.WireEncodeException
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
 
 @Suppress("unused")
 class PaperServerRuntimeTest : FunSpec({
@@ -202,6 +209,61 @@ class PaperServerRuntimeTest : FunSpec({
 
         serverOnly.refreshPlan shouldBe null
         (clientPolicy.refreshPlan != null) shouldBe true
+    }
+
+    test("lossless custom asset verification resumes selection through the bounded worker") {
+        val customCapabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
+        val customHello = ServerHello(customCapabilities, 3_000, catalog)
+        val source = connection(UUID.randomUUID(), 1)
+        val snapshot = PlayerSnapshot(
+            source,
+            RuntimeEntityId.of(1),
+            alive = true,
+            spectator = false,
+            invisible = false,
+            dimensionId = 1,
+            regionKey = 1,
+        )
+        val resumed = ArrayList<ServerSelectionResult>()
+        val runtime = PaperServerRuntime(
+            customHello,
+            policy,
+            FakeMonotonicTimeSource(),
+            { _, _, _ -> AudienceVisitCompletion.EXHAUSTED },
+            RecordingPaperOutboundTransport(),
+            { true },
+            featureRegistry = EmotifyProtocolFeatures.registry,
+            playerSnapshotProvider = { connection -> snapshot.takeIf { it.connection == connection } },
+            resumedSelectionConsumer = { _, result -> resumed += result },
+        )
+        val asset = CustomEmojiAsset.create(
+            CustomEmojiPixels.of(128, IntArray(128 * 128) { index -> 0xFF000000.toInt() or index }),
+        )
+
+        try {
+            runtime.open(source) shouldBe PaperServerOpenResult.Opened
+            runtime.receiveClientHello(source, ClientHello(customCapabilities))
+                .shouldBeInstanceOf<ServerHelloResult.Processed>()
+            val chunks = CustomEmojiAssetChunker.split(asset)
+            chunks.dropLast(1).forEach { chunk ->
+                runtime.enqueueCustomAssetChunk(source, chunk, permittedToUpload = true) shouldBe
+                    CustomAssetUploadPreparation.Pending
+            }
+            runtime.enqueueCustomAssetChunk(source, chunks.last(), permittedToUpload = true)
+                .shouldBeInstanceOf<CustomAssetUploadPreparation.VerificationRequired>()
+            runtime.selectCustom(snapshot, CustomEmotionSelection(asset.id, null)) shouldBe
+                ServerSelectionResult.Ignored(SelectionIgnoreReason.CUSTOM_ASSET_VERIFYING)
+
+            val deadline = System.nanoTime() + 5_000_000_000L
+            while (resumed.isEmpty() && System.nanoTime() < deadline) {
+                runtime.drainCustomAssetVerifications()
+                Thread.onSpinWait()
+            }
+
+            resumed.single().shouldBeInstanceOf<ServerSelectionResult.Undelivered>()
+        } finally {
+            runtime.clear()
+        }
     }
 
     test("every runtime state operation requires the primary server thread") {

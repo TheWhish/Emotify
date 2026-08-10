@@ -180,6 +180,7 @@ def verifyPaperReleaseJar = tasks.register('verifyPaperReleaseJar') {
             'assets/emotify/emotions.json',
             'me/whish/emotify/paper/PaperEmotifyPlugin.class',
             'me/whish/emotify/paper/PaperPermissions.class',
+            'me/whish/emotify/paper/PaperCustomAssetChunkPayloadCache.class',
             'me/whish/emotify/paper/BukkitPaperAudiencePort.class',
             'me/whish/emotify/paper/BukkitPaperOutboundTransport.class',
             'me/whish/emotify/paper/config/BukkitPaperConfigLoader.class',

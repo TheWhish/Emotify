@@ -104,6 +104,7 @@ object FabricServerLifecycle {
 
     private fun openDeferredConnections(server: MinecraftServer) {
         check(server.isSameThread) { "Emotify Fabric connections must be opened on the main server thread" }
+        FabricServerRuntime.drainCustomAssetVerifications(server)
         deferredConnectionOpens.drain { playerId, connectionIdentity, attemptsRemaining ->
             val player = server.playerList.getPlayer(playerId) ?: return@drain
             if (player.connection !== connectionIdentity) {

@@ -38,6 +38,41 @@ class PaperIngressGateTest : FunSpec({
         gate.outstandingCount shouldBe 0
     }
 
+    test("chunk lane leaves one bounded serial slot for the final custom selection") {
+        val gate = PaperIngressGate(32)
+        val connection = connection(UUID.randomUUID(), 1)
+        val chunkLeases = List(18) {
+            gate.tryAcquire(
+                connection,
+                PaperIngressLane.CUSTOM_ASSET_CHUNK,
+                maximumForLane = 18,
+            )
+        }
+        val selectionLease = gate.tryAcquire(connection)
+
+        chunkLeases.all { lease -> lease != null } shouldBe true
+        (selectionLease != null) shouldBe true
+        gate.tryAcquire(connection) shouldBe null
+        gate.tryAcquire(
+            connection,
+            PaperIngressLane.CUSTOM_ASSET_CHUNK,
+            maximumForLane = 18,
+        ) shouldBe null
+        gate.outstandingCount shouldBe 19
+
+        selectionLease?.release()
+        gate.outstandingCount shouldBe 18
+        chunkLeases.forEach { lease -> lease?.release() }
+        gate.outstandingCount shouldBe 0
+
+        val staleChunk = gate.tryAcquire(connection, PaperIngressLane.CUSTOM_ASSET_CHUNK, 18)
+        val staleSelection = gate.tryAcquire(connection)
+        gate.clear()
+        staleChunk?.release()
+        staleSelection?.release()
+        gate.outstandingCount shouldBe 0
+    }
+
     test("a stale lease cannot release a reservation created after clear") {
         val gate = PaperIngressGate(512)
         val playerId = UUID.randomUUID()

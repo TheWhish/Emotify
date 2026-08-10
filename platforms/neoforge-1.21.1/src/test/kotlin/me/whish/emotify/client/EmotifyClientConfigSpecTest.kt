@@ -16,6 +16,7 @@ class EmotifyClientConfigSpecTest : FunSpec({
         config.set<Int>("configVersion", ClientConfigurationSchema.CURRENT_VERSION)
         config.set<Boolean>("showOtherPlayersEmotions", true)
         config.set<Boolean>("showCustomEmotions", false)
+        config.set<Boolean>("customCopyHintDismissed", true)
         config.set<Boolean>("reducedMotion", false)
         config.set<Int>("soundVolumePercent", 100)
         config.set<List<String>>("ignoredPlayers", emptyList<String>())
@@ -25,6 +26,7 @@ class EmotifyClientConfigSpecTest : FunSpec({
         EmotifyClientConfig.spec.correct(config)
         config.get<Int>("configVersion") shouldBe ClientConfigurationSchema.CURRENT_VERSION
         config.get<Boolean>("showCustomEmotions") shouldBe false
+        config.get<Boolean>("customCopyHintDismissed") shouldBe true
         config.get<List<String>>("favorites") shouldBe emptyList()
         config.get<List<String>>("quickSlots") shouldBe List(ClientConfigurationSchema.QUICK_SLOT_COUNT) { "" }
     }
@@ -34,6 +36,7 @@ class EmotifyClientConfigSpecTest : FunSpec({
         config.set<Int>("configVersion", ClientConfigurationSchema.CURRENT_VERSION + 1)
         config.set<Boolean>("showOtherPlayersEmotions", true)
         config.set<Boolean>("showCustomEmotions", true)
+        config.set<Boolean>("customCopyHintDismissed", false)
         config.set<Boolean>("reducedMotion", false)
         config.set<Int>("soundVolumePercent", 100)
         config.set<List<String>>("ignoredPlayers", emptyList<String>())
@@ -45,13 +48,15 @@ class EmotifyClientConfigSpecTest : FunSpec({
         config.get<Int>("configVersion") shouldBe ClientConfigurationSchema.CURRENT_VERSION + 1
     }
 
-    test("TOML preflight classifies legacy current and future schemas before registration") {
+    test("TOML preflight classifies legacy previous current and future schemas before registration") {
         NeoForgeClientConfigVersionCodec.inspect("reducedMotion = true\n") shouldBe
             ClientConfigurationVersion.Legacy
-        NeoForgeClientConfigVersionCodec.inspect("configVersion = 1 # current\n") shouldBe
+        NeoForgeClientConfigVersionCodec.inspect("configVersion = 1 # previous\n") shouldBe
+            ClientConfigurationVersion.SchemaOne
+        NeoForgeClientConfigVersionCodec.inspect("configVersion = 2 # current\n") shouldBe
             ClientConfigurationVersion.Current
-        NeoForgeClientConfigVersionCodec.inspect("configVersion=2\nfutureOption=true\n") shouldBe
-            ClientConfigurationVersion.Future(2)
+        NeoForgeClientConfigVersionCodec.inspect("configVersion=3\nfutureOption=true\n") shouldBe
+            ClientConfigurationVersion.Future(3)
 
         shouldThrow<IllegalArgumentException> {
             NeoForgeClientConfigVersionCodec.inspect("configVersion=1\nconfigVersion=2\n")

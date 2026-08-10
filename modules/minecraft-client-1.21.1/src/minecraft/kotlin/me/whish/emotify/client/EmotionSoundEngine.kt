@@ -44,4 +44,14 @@ internal object EmotionSoundEngine {
         )
         return true
     }
+
+    fun playInterfaceClick() {
+        Minecraft.getInstance().soundManager.play(
+            SimpleSoundInstance.forUI(
+                SoundEvents.UI_BUTTON_CLICK.value(),
+                1.0f,
+                0.45f,
+            ),
+        )
+    }
 }

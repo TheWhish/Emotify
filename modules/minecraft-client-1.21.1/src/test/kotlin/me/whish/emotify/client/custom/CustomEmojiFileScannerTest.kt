@@ -71,6 +71,25 @@ class CustomEmojiFileScannerTest : FunSpec({
                 CustomEmojiFileRejectionReason.UNSUPPORTED_DIMENSIONS,
                 CustomEmojiFileRejectionReason.FILE_TOO_LARGE,
             )
+            scan.rejected.map(CustomEmojiFileRejection::displayName).toSet() shouldBe setOf(
+                "broken",
+                "large",
+                "oversized",
+                "unsupported",
+                "wide",
+            )
+            scan.rejected.all { rejection -> rejection.path.fileName.toString().startsWith(rejection.displayName) } shouldBe
+                true
+            scan.rejected.map(CustomEmojiFileRejection::format).toSet() shouldBe setOf(
+                CustomEmojiFileFormat.PNG,
+                CustomEmojiFileFormat.JPEG,
+                CustomEmojiFileFormat.GIF,
+            )
+            scan.rejected.map(CustomEmojiDiagnostic::from).all { diagnostic ->
+                diagnostic.displayName.isNotBlank() &&
+                    diagnostic.displayName.none(Char::isISOControl) &&
+                    diagnostic.toString().contains(directory.toString()).not()
+            } shouldBe true
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -153,6 +172,34 @@ class CustomEmojiFileScannerTest : FunSpec({
         }
     }
 
+    test("unchanged files reuse their bounded inspection while changed files are inspected again") {
+        val root = Files.createTempDirectory("emotify-custom-emoji-incremental-scan")
+        val directory = root.resolve("emoji")
+
+        try {
+            Files.createDirectories(directory)
+            val unchangedPath = directory.resolve("first.png")
+            val changedPath = directory.resolve("second.png")
+            writePng(unchangedPath, 8, 8)
+            writePng(changedPath, 8, 8)
+            val first = CustomEmojiFileScanner.scan(directory)
+            val firstUnchanged = first.accepted.single { file -> file.path == unchangedPath }
+            val firstChanged = first.accepted.single { file -> file.path == changedPath }
+
+            writePng(changedPath, 16, 16)
+
+            val second = CustomEmojiFileScanner.scan(directory, first)
+            val secondUnchanged = second.accepted.single { file -> file.path == unchangedPath }
+            val secondChanged = second.accepted.single { file -> file.path == changedPath }
+
+            (secondUnchanged === firstUnchanged) shouldBe true
+            (secondChanged === firstChanged) shouldBe false
+            secondChanged.sourceSize shouldBe 16
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     test("file names are normalized into descriptor safe display names") {
         val root = Files.createTempDirectory("emotify-custom-emoji-name")
         val directory = root.resolve("emoji")
@@ -166,6 +213,24 @@ class CustomEmojiFileScannerTest : FunSpec({
 
             descriptor.displayName shouldBe displayName
             (displayName.toByteArray(Charsets.UTF_8).size <= CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_UTF8_BYTES) shouldBe true
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    test("unsafe unicode formatting is removed from local display names") {
+        val root = Files.createTempDirectory("emotify-custom-emoji-safe-name")
+        val directory = root.resolve("emoji")
+
+        try {
+            Files.createDirectories(directory)
+            writePng(directory.resolve("before\u202Eafter.png"), 8, 8)
+
+            val displayName = CustomEmojiFileScanner.scan(directory).accepted.single().displayName
+            val descriptor = CustomEmojiDescriptor.create(displayName, CustomEmojiId(1L, 2L, 3L))
+
+            displayName shouldBe "beforeafter"
+            descriptor.displayName shouldBe displayName
         } finally {
             root.toFile().deleteRecursively()
         }

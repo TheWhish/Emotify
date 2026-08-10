@@ -40,6 +40,7 @@ object EmotifyClientConfig {
     )
     private val showOtherPlayersEmotions = builder.define("showOtherPlayersEmotions", true)
     private val showCustomEmotions = builder.define("showCustomEmotions", true)
+    private val customCopyHintDismissed = builder.define("customCopyHintDismissed", false)
     private val reducedMotion = builder.define("reducedMotion", false)
     private val soundVolumePercent = builder.defineInRange(
         "soundVolumePercent",
@@ -104,8 +105,9 @@ object EmotifyClientConfig {
                     ClientConfigurationFileIO.readUtf8(configPath, MAXIMUM_CONFIG_BYTES),
                 )
             ) {
-                ClientConfigurationVersion.Legacy -> {
-                    val backupPath = configPath.resolveSibling("${configPath.fileName}.v0.bak")
+                ClientConfigurationVersion.Legacy,
+                ClientConfigurationVersion.SchemaOne -> {
+                    val backupPath = configPath.resolveSibling("${configPath.fileName}.pre-v2.bak")
                     ClientConfigurationFileIO.createBackupIfAbsent(
                         configPath,
                         backupPath,
@@ -177,8 +179,11 @@ object EmotifyClientConfig {
         updateSnapshot { current -> current.withQuickSlots(ids) }
     }
 
-    fun retainAvailableCustomQuickSlots(availableCustomEmotionIds: Set<EmotionId>) {
-        updateSnapshot { current -> current.retainAvailableCustomQuickSlots(availableCustomEmotionIds) }
+    fun isCustomCopyHintDismissed(): Boolean = configuredSnapshot().customCopyHintDismissed
+
+    @Suppress("unused")
+    fun dismissCustomCopyHint() {
+        updateSnapshot { current -> current.withCustomCopyHintDismissed(true) }
     }
 
     fun flush() {
@@ -213,6 +218,7 @@ object EmotifyClientConfig {
             ),
             favorites = favorites,
             quickSlots = decodeNeoForgeQuickSlotIds(quickSlotIds.get()),
+            customCopyHintDismissed = customCopyHintDismissed.get(),
         )
     }
 
@@ -247,6 +253,7 @@ object EmotifyClientConfig {
         ignoredPlayers.set(snapshot.settings.ignoredPlayers.map(IgnoredPlayerIdentityCodec::encode))
         favoriteIds.set(snapshot.favorites.map(EmotionId::value))
         quickSlotIds.set(snapshot.quickSlots.map { emotionId -> emotionId?.value.orEmpty() })
+        customCopyHintDismissed.set(snapshot.customCopyHintDismissed)
         spec.save()
     }
 

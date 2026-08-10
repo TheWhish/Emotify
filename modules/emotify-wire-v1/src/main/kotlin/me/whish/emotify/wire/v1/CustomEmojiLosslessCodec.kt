@@ -10,6 +10,39 @@ import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
 
+enum class CustomEmojiLosslessEncoding {
+    RAW,
+    DEFLATE,
+}
+
+data class CustomEmojiLosslessPreflight(
+    val size: Int,
+    val frameCount: Int,
+    val rawBytes: Int,
+    val frameBytes: Int,
+    val encodedBytes: Int,
+    val encoding: CustomEmojiLosslessEncoding,
+) {
+    init {
+        require(CustomEmojiPixels.supports(size)) { "Unsupported custom emoji preflight dimensions: $size" }
+        require(frameCount in 1..CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
+            "Invalid custom emoji preflight frame count: $frameCount"
+        }
+        require(frameCount == 1 || size <= CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE) {
+            "Animated custom emoji preflight dimensions exceed the safe limit: $size"
+        }
+        require(frameBytes == size * size * Int.SIZE_BYTES) {
+            "Custom emoji preflight frame size does not match its dimensions: $frameBytes"
+        }
+        require(rawBytes == frameBytes * frameCount) {
+            "Custom emoji preflight decoded size does not match its frames: $rawBytes"
+        }
+        require(encodedBytes in 1..CustomEmojiLosslessCodec.MAXIMUM_ENCODED_BYTES) {
+            "Custom emoji preflight encoded size is outside safe limits: $encodedBytes"
+        }
+    }
+}
+
 object CustomEmojiLosslessCodec {
     const val MAXIMUM_ENCODED_BYTES = 512 * 1_024
 
@@ -44,46 +77,13 @@ object CustomEmojiLosslessCodec {
         }
         val reader = ByteArrayWireReader(encoded)
         try {
-            if (reader.readUnsignedByte() != FORMAT_VERSION) {
-                invalid("Unsupported custom emoji lossless format")
+            val header = readHeader(reader, encoded.size)
+            val payload = reader.readBytes(header.payloadBytes)
+            val transformed = when (header.preflight.encoding) {
+                CustomEmojiLosslessEncoding.RAW -> payload
+                CustomEmojiLosslessEncoding.DEFLATE -> inflate(payload, header.preflight.rawBytes)
             }
-            val size = reader.readUnsignedByte()
-            if (!CustomEmojiPixels.supports(size)) {
-                invalid("Unsupported custom emoji dimensions")
-            }
-            val frameCount = reader.readUnsignedByte()
-            if (frameCount !in 1..CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
-                invalid("Invalid custom emoji frame count")
-            }
-            if (frameCount > 1 && size > CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE) {
-                invalid("Animated custom emoji dimensions exceed the safe limit")
-            }
-            val durations = IntArray(frameCount) { reader.readCanonicalVarInt() }
-            validateDurations(durations)
-            val expectedTransformedBytes = size * size * Int.SIZE_BYTES * frameCount
-            val transformedBytes = reader.readCanonicalVarInt()
-            if (transformedBytes != expectedTransformedBytes || transformedBytes > CustomEmojiAsset.MAXIMUM_RAW_BYTE_LENGTH) {
-                invalid("Invalid custom emoji decoded size")
-            }
-            val encoding = reader.readUnsignedByte()
-            val payloadBytes = reader.readCanonicalVarInt()
-            if (payloadBytes !in 1..reader.remainingBytes || payloadBytes > MAXIMUM_ENCODED_BYTES) {
-                invalid("Invalid custom emoji encoded payload size")
-            }
-            if (payloadBytes != reader.remainingBytes) {
-                invalid("Custom emoji encoded payload contains trailing bytes")
-            }
-            val payload = reader.readBytes(payloadBytes)
-            val transformed = when (encoding) {
-                RAW -> payload.also { bytes ->
-                    if (bytes.size != expectedTransformedBytes) {
-                        invalid("Raw custom emoji payload has an invalid size")
-                    }
-                }
-                DEFLATE -> inflate(payload, expectedTransformedBytes)
-                else -> invalid("Unknown custom emoji lossless encoding")
-            }
-            val frames = restore(size, durations, transformed)
+            val frames = restore(header.preflight.size, header.durations, transformed)
             return CustomEmojiAsset.verify(id, frames)
                 ?: invalid("Custom emoji content does not match its ID")
         } catch (exception: WireDecodeException) {
@@ -95,6 +95,75 @@ object CustomEmojiLosslessCodec {
                 exception,
             )
         }
+    }
+
+    fun preflightFirstChunk(chunk: CustomEmojiAssetChunk): CustomEmojiLosslessPreflight {
+        customEmojiAssetChunkValidationError(chunk)?.let(::invalid)
+        if (chunk.index != 0) {
+            invalid("Custom emoji lossless preflight requires the first chunk")
+        }
+        return try {
+            readHeader(ByteArrayWireReader(chunk.borrowedData()), chunk.totalBytes).preflight
+        } catch (exception: WireDecodeException) {
+            throw exception
+        } catch (exception: RuntimeException) {
+            throw WireDecodeException(
+                WireDecodeViolation.INVALID_CUSTOM_EMOJI,
+                "Invalid lossless custom emoji header",
+                exception,
+            )
+        }
+    }
+
+    private fun readHeader(reader: ByteArrayWireReader, encodedBytes: Int): LosslessHeader {
+        if (reader.readUnsignedByte() != FORMAT_VERSION) {
+            invalid("Unsupported custom emoji lossless format")
+        }
+        val size = reader.readUnsignedByte()
+        if (!CustomEmojiPixels.supports(size)) {
+            invalid("Unsupported custom emoji dimensions")
+        }
+        val frameCount = reader.readUnsignedByte()
+        if (frameCount !in 1..CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
+            invalid("Invalid custom emoji frame count")
+        }
+        if (frameCount > 1 && size > CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE) {
+            invalid("Animated custom emoji dimensions exceed the safe limit")
+        }
+        val durations = IntArray(frameCount) { reader.readCanonicalVarInt() }
+        validateDurations(durations)
+        val expectedRawBytes = size * size * Int.SIZE_BYTES * frameCount
+        val rawBytes = reader.readCanonicalVarInt()
+        if (rawBytes != expectedRawBytes || rawBytes > CustomEmojiAsset.MAXIMUM_RAW_BYTE_LENGTH) {
+            invalid("Invalid custom emoji decoded size")
+        }
+        val encoding = when (reader.readUnsignedByte()) {
+            RAW -> CustomEmojiLosslessEncoding.RAW
+            DEFLATE -> CustomEmojiLosslessEncoding.DEFLATE
+            else -> invalid("Unknown custom emoji lossless encoding")
+        }
+        val payloadBytes = reader.readCanonicalVarInt()
+        if (payloadBytes !in 1..MAXIMUM_ENCODED_BYTES) {
+            invalid("Invalid custom emoji encoded payload size")
+        }
+        if (reader.position + payloadBytes != encodedBytes) {
+            invalid("Custom emoji encoded payload does not match its declared transfer size")
+        }
+        if (encoding == CustomEmojiLosslessEncoding.RAW && payloadBytes != rawBytes) {
+            invalid("Raw custom emoji payload has an invalid size")
+        }
+        return LosslessHeader(
+            CustomEmojiLosslessPreflight(
+                size,
+                frameCount,
+                rawBytes,
+                size * size * Int.SIZE_BYTES,
+                encodedBytes,
+                encoding,
+            ),
+            durations,
+            payloadBytes,
+        )
     }
 
     private fun transform(asset: CustomEmojiAsset): ByteArray {
@@ -235,6 +304,12 @@ object CustomEmojiLosslessCodec {
     private fun invalid(message: String): Nothing =
         throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, message)
 
+    private class LosslessHeader(
+        val preflight: CustomEmojiLosslessPreflight,
+        val durations: IntArray,
+        val payloadBytes: Int,
+    )
+
     private const val FORMAT_VERSION = 1
     private const val RAW = 0
     private const val DEFLATE = 1
@@ -353,12 +428,21 @@ class CustomEmojiAssetAssembler(
     fun accept(chunk: CustomEmojiAssetChunk, nowMillis: Long): CustomEmojiAsset? =
         acceptAssembly(chunk, nowMillis)?.asset
 
-    fun acceptAssembly(chunk: CustomEmojiAssetChunk, nowMillis: Long): CustomEmojiAssetAssembly? {
+    fun acceptAssembly(chunk: CustomEmojiAssetChunk, nowMillis: Long): CustomEmojiAssetAssembly? =
+        acceptEncodedAssembly(chunk, nowMillis)?.verify()
+
+    fun acceptEncodedAssembly(chunk: CustomEmojiAssetChunk, nowMillis: Long): CustomEmojiEncodedAssembly? {
         customEmojiAssetChunkValidationError(chunk)?.let { message ->
             state = null
             invalid(message)
         }
         if (chunk.index == 0) {
+            try {
+                CustomEmojiLosslessCodec.preflightFirstChunk(chunk)
+            } catch (exception: WireDecodeException) {
+                state = null
+                throw exception
+            }
             state = AssemblyState(chunk, nowMillis)
         }
         val current = state ?: invalid("Custom emoji transfer did not start with its first chunk")
@@ -390,10 +474,22 @@ class CustomEmojiAssetAssembler(
         if (current.encodedBytes != current.totalBytes) {
             invalid("Custom emoji transfer ended before its declared size")
         }
-        return CustomEmojiAssetAssembly(
-            CustomEmojiLosslessCodec.decode(current.id, current.encoded),
+        return CustomEmojiEncodedAssembly(
+            current.id,
+            current.encoded,
             current.chunks,
         )
+    }
+
+    fun tryAcceptEncodedAssembly(
+        chunk: CustomEmojiAssetChunk,
+        nowMillis: Long,
+    ): CustomEmojiEncodedAssemblyResult = try {
+        acceptEncodedAssembly(chunk, nowMillis)?.let(CustomEmojiEncodedAssemblyResult::Completed)
+            ?: CustomEmojiEncodedAssemblyResult.Pending
+    } catch (exception: WireDecodeException) {
+        reset()
+        CustomEmojiEncodedAssemblyResult.Rejected(exception.violation)
     }
 
     fun tryAcceptAssembly(chunk: CustomEmojiAssetChunk, nowMillis: Long): CustomEmojiAssetAssemblyResult = try {
@@ -418,7 +514,10 @@ class CustomEmojiAssetAssembler(
         var nextIndex: Int,
         var encodedBytes: Int,
     ) {
-        constructor(chunk: CustomEmojiAssetChunk, startedMillis: Long) : this(
+        constructor(
+            chunk: CustomEmojiAssetChunk,
+            startedMillis: Long,
+        ) : this(
             chunk.customEmojiId,
             chunk.totalBytes,
             chunk.count,
@@ -432,6 +531,47 @@ class CustomEmojiAssetAssembler(
 
     private fun invalid(message: String): Nothing =
         throw WireDecodeException(WireDecodeViolation.INVALID_CUSTOM_EMOJI, message)
+}
+
+sealed interface CustomEmojiEncodedAssemblyResult {
+    data object Pending : CustomEmojiEncodedAssemblyResult
+
+    data class Completed(
+        val assembly: CustomEmojiEncodedAssembly,
+    ) : CustomEmojiEncodedAssemblyResult
+
+    data class Rejected(
+        val violation: WireDecodeViolation,
+    ) : CustomEmojiEncodedAssemblyResult
+}
+
+class CustomEmojiEncodedAssembly internal constructor(
+    val customEmojiId: CustomEmojiId,
+    private val encoded: ByteArray,
+    chunks: List<CustomEmojiAssetChunk>,
+) {
+    val chunks: List<CustomEmojiAssetChunk> = java.util.List.copyOf(chunks)
+
+    fun verify(): CustomEmojiAssetAssembly = CustomEmojiAssetAssembly(
+        CustomEmojiLosslessCodec.decode(customEmojiId, encoded),
+        chunks,
+    )
+
+    fun tryVerify(): CustomEmojiAssetVerificationResult = try {
+        CustomEmojiAssetVerificationResult.Verified(verify())
+    } catch (exception: WireDecodeException) {
+        CustomEmojiAssetVerificationResult.Rejected(exception.violation)
+    }
+}
+
+sealed interface CustomEmojiAssetVerificationResult {
+    data class Verified(
+        val assembly: CustomEmojiAssetAssembly,
+    ) : CustomEmojiAssetVerificationResult
+
+    data class Rejected(
+        val violation: WireDecodeViolation,
+    ) : CustomEmojiAssetVerificationResult
 }
 
 sealed interface CustomEmojiAssetAssemblyResult {

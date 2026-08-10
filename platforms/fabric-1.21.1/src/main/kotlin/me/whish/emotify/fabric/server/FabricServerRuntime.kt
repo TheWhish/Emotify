@@ -17,6 +17,11 @@ import me.whish.emotify.server.core.AudienceTraversalOutcome
 import me.whish.emotify.server.core.AudienceBudget
 import me.whish.emotify.server.core.ConnectionId
 import me.whish.emotify.server.core.ConnectionKey
+import me.whish.emotify.server.core.CustomAssetUploadCommit
+import me.whish.emotify.server.core.CustomAssetUploadPreparation
+import me.whish.emotify.server.core.CustomAssetUploadRejection
+import me.whish.emotify.server.core.CustomAssetVerificationQueue
+import me.whish.emotify.server.core.CustomAssetVerificationQueueEvent
 import me.whish.emotify.server.core.EmotifyServerEngine
 import me.whish.emotify.server.core.GlobalSelectionIngressAdmission
 import me.whish.emotify.server.core.GlobalSelectionIngressBudget
@@ -186,7 +191,25 @@ object FabricServerRuntime {
         if (FabricServerConnectionRegistry.current(player.uuid) !== state) {
             return
         }
-        runtime.engine.receiveCustomAssetChunk(ConnectionKey(player.uuid, state.connectionId), chunk)
+        val connection = ConnectionKey(player.uuid, state.connectionId)
+        when (val preparation = runtime.engine.prepareCustomAssetChunk(connection, chunk, permittedToUpload = true)) {
+            CustomAssetUploadPreparation.Pending -> Unit
+            is CustomAssetUploadPreparation.Rejected -> Unit
+            is CustomAssetUploadPreparation.VerificationRequired -> {
+                if (!runtime.customAssetVerifications.trySubmit(preparation.task)) {
+                    runtime.engine.cancelCustomAssetVerification(
+                        preparation.task,
+                        CustomAssetUploadRejection.QUEUE_SATURATED,
+                    )
+                }
+            }
+        }
+    }
+
+    fun drainCustomAssetVerifications(server: MinecraftServer) {
+        check(server.isSameThread) { "Emotify custom asset verifications must complete on the main server thread" }
+        val runtime = activeRuntime(server) ?: return
+        drainCustomAssetVerifications(runtime)
     }
 
     fun close(server: MinecraftServer, playerId: UUID, connectionId: ConnectionId) {
@@ -199,6 +222,8 @@ object FabricServerRuntime {
         check(server.isSameThread) { "Emotify server state must be cleared on the main server thread" }
         val runtime = activeRuntime
         if (runtime != null && runtime.server === server) {
+            runtime.customAssetVerifications.close()
+            drainCustomAssetVerifications(runtime, allowPlayerSnapshots = false)
             runtime.engine.clear()
             runtime.dimensionOrdinals.clear()
             activeRuntime = null
@@ -231,11 +256,61 @@ object FabricServerRuntime {
                 featureRegistry = EmotifyProtocolFeatures.registry,
                 audiencePolicy = configuration.audiencePolicy,
             ),
+            CustomAssetVerificationQueue(),
         ).also { created -> activeRuntime = created }
     }
 
     private fun activeRuntime(server: MinecraftServer): Runtime? =
         activeRuntime?.takeIf { runtime -> runtime.server === server }
+
+    private fun drainCustomAssetVerifications(runtime: Runtime, allowPlayerSnapshots: Boolean = true) {
+        while (true) {
+            val event = runtime.customAssetVerifications.pollEvent() ?: return
+            when (event) {
+                is CustomAssetVerificationQueueEvent.Cancelled -> runtime.engine.cancelCustomAssetVerification(
+                    event.task,
+                    CustomAssetUploadRejection.QUEUE_SATURATED,
+                )
+                is CustomAssetVerificationQueueEvent.Completed -> {
+                    val connection = event.completion.task.connection
+                    val commit = runtime.engine.completeCustomAssetVerification(
+                        event.completion,
+                        if (allowPlayerSnapshots) currentPlayerSnapshot(runtime, connection) else null,
+                    )
+                    resumedSelection(commit)?.let { result ->
+                        reportSelectionFailures(connection.playerId, connection.connectionId, result)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun currentPlayerSnapshot(runtime: Runtime, connection: ConnectionKey): PlayerSnapshot? {
+        val player = runtime.server.playerList.getPlayer(connection.playerId) ?: return null
+        val state = FabricServerConnectionRegistry.current(connection.playerId)
+            ?.takeIf { candidate -> candidate.connectionId == connection.connectionId }
+            ?: return null
+        if (!FabricChannelSupport.clientCanReceiveCustomEmojis(player)) {
+            return null
+        }
+        val entityId = RuntimeEntityId.parse(player.id) ?: return null
+        return PlayerSnapshot(
+            connection,
+            entityId,
+            alive = player.isAlive,
+            spectator = player.isSpectator,
+            invisible = player.isInvisible,
+            dimensionId = runtime.dimensionOrdinals.resolve(player.level().dimension()),
+            regionKey = ChunkPos.asLong(player.blockX shr 4, player.blockZ shr 4),
+            permittedToPublish = FabricServerConnectionRegistry.current(player.uuid) === state,
+        )
+    }
+
+    private fun resumedSelection(commit: CustomAssetUploadCommit): ServerSelectionResult? = when (commit) {
+        is CustomAssetUploadCommit.Accepted -> commit.resumedSelection
+        is CustomAssetUploadCommit.Rejected -> commit.resumedSelection
+        CustomAssetUploadCommit.Stale -> null
+    }
 
     private fun reportSelectionFailures(
         playerId: UUID,
@@ -312,6 +387,7 @@ object FabricServerRuntime {
         val server: MinecraftServer,
         val dimensionOrdinals: DimensionOrdinalRegistry,
         val engine: EmotifyServerEngine,
+        val customAssetVerifications: CustomAssetVerificationQueue,
     )
 
     private const val DIAGNOSTIC_BURST_CAPACITY = 8

@@ -1,7 +1,11 @@
 package me.whish.emotify.client
 
+import java.util.ArrayDeque
 import me.whish.emotify.Emotify
 import me.whish.emotify.catalog.builtin.BuiltInEmotionCatalog
+import me.whish.emotify.client.custom.RemoteCustomAssetAdmission
+import me.whish.emotify.client.custom.RemoteCustomAssetDecodePipeline
+import me.whish.emotify.client.custom.RemoteCustomAssetDecodeResult
 import me.whish.emotify.client.picker.ClientSelectionEligibility
 import me.whish.emotify.client.picker.EmotionPickerContext
 import me.whish.emotify.client.settings.ClientSettingsSnapshot
@@ -22,6 +26,7 @@ import me.whish.emotify.client.state.ClientServerHelloIngressGuard
 import me.whish.emotify.client.state.ClientCustomEmojiUploadTracker
 import me.whish.emotify.client.state.ClientCustomEmojiAssetIngressGuard
 import me.whish.emotify.client.state.EmotionActivationResult
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.SelectionRejectionReason
 import me.whish.emotify.domain.SystemMonotonicTimeSource
@@ -41,8 +46,6 @@ import me.whish.emotify.protocol.CustomEmojiTransfer
 import me.whish.emotify.protocol.CustomEmotionPlay
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.protocol.CustomEmotionSelection
-import me.whish.emotify.wire.v1.CustomEmojiAssetAssembler
-import me.whish.emotify.wire.v1.CustomEmojiAssetAssemblyResult
 import net.minecraft.client.Minecraft
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.client.multiplayer.ClientPacketListener
@@ -74,7 +77,13 @@ object ClientHandshakeController {
     private val activeEmotions = ClientActiveEmotionStore(SystemMonotonicTimeSource, EmotionPresentationRegistry::contains)
     private val customUploads = ClientCustomEmojiUploadTracker()
     private val customAssetIngress = ClientCustomEmojiAssetIngressGuard(SystemMonotonicTimeSource)
-    private val customAssetAssembler = CustomEmojiAssetAssembler()
+    private val customAssetDecoder = RemoteCustomAssetDecodePipeline<RemoteCustomEmojiRegistry.PreparedRemoteCustomEmoji>(
+        completionExecutor = { task -> Minecraft.getInstance().execute(task) },
+        completionListener = ::completeCustomAssetDecode,
+        preparer = { assembly -> RemoteCustomEmojiRegistry.prepare(assembly.asset) },
+        preparedDisposer = RemoteCustomEmojiRegistry::discard,
+    )
+    private val deferredCustomPlays = ArrayDeque<CustomEmotionPlay>(MAXIMUM_DEFERRED_CUSTOM_PLAYS)
     private var playDropDiagnostics = newDropDiagnostics()
     private var customAssetDropDiagnostics = newDropDiagnostics()
 
@@ -169,13 +178,13 @@ object ClientHandshakeController {
         }
         when (rejection.code.knownReason) {
             SelectionRejectionReason.CUSTOM_ASSET_MISSING ->
-                me.whish.emotify.domain.CustomEmojiId.parse(rejectedEmotion)?.let { id ->
+                CustomEmojiId.parse(rejectedEmotion)?.let { id ->
                     customUploads.forget(activeConnectionId, id)
                 }
             SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED ->
                 customUploads.rejectAll(activeConnectionId, SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED)
             SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE ->
-                me.whish.emotify.domain.CustomEmojiId.parse(rejectedEmotion)?.let { id ->
+                CustomEmojiId.parse(rejectedEmotion)?.let { id ->
                     customUploads.reject(activeConnectionId, id, SelectionRejectionReason.CUSTOM_EMOJI_TOO_LARGE)
                 }
             else -> Unit
@@ -284,36 +293,49 @@ object ClientHandshakeController {
         if (!EmotifyProtocolFeatures.supportsLosslessCustomEmojiSharing(supported.negotiated.features)) {
             return
         }
-        val asset = when (
-            val result = customAssetAssembler.tryAcceptAssembly(chunk, System.nanoTime() / 1_000_000L)
-        ) {
-            CustomEmojiAssetAssemblyResult.Pending -> return
-            is CustomEmojiAssetAssemblyResult.Completed -> result.assembly.asset
-            is CustomEmojiAssetAssemblyResult.Rejected -> {
+        when (customAssetDecoder.submit(activeConnectionId, chunk)) {
+            RemoteCustomAssetAdmission.ACCEPTED -> Unit
+            RemoteCustomAssetAdmission.INACTIVE_CONNECTION -> Unit
+            RemoteCustomAssetAdmission.SATURATED -> {
                 if (customAssetDropDiagnostics.tryConsume()) {
                     Emotify.LOGGER.warn(
-                        "Rejected malformed custom emoji transfer on connection {}: {}",
+                        "Rejected custom emoji transfer on connection {} because the decode queue is saturated",
                         activeConnectionId,
-                        result.violation,
                     )
                 }
-                return
             }
+            RemoteCustomAssetAdmission.CLOSED -> Emotify.LOGGER.error(
+                "Rejected custom emoji transfer because the decode pipeline is closed",
+            )
         }
-        if (asset.isAnimated && !EmotifyProtocolFeatures.supportsAnimatedCustomEmojiSharing(supported.negotiated.features)) {
-            return
-        }
-        RemoteCustomEmojiRegistry.register(activeConnectionId, asset)
     }
 
     fun receive(connection: Connection, play: CustomEmotionPlay) {
-        if (activeConnection !== connection || !playIngressGuard.tryAdmit(activeConnectionId)) {
+        if (activeConnection !== connection) {
             return
         }
         val supported = state as? ClientHandshakeState.Supported ?: return
         if (!EmotifyProtocolFeatures.supportsCustomEmojiSharing(supported.negotiated.features)) {
             return
         }
+        if (!playIngressGuard.tryAdmit(activeConnectionId)) {
+            return
+        }
+        if (!hasCustomPresentation(play.customEmojiId)) {
+            if (
+                customAssetDecoder.isAwaiting(activeConnectionId, play.customEmojiId) &&
+                deferredCustomPlays.size < MAXIMUM_DEFERRED_CUSTOM_PLAYS
+            ) {
+                deferredCustomPlays.addLast(play)
+            } else {
+                logUnavailableCustomPlay(play)
+            }
+            return
+        }
+        processCustomPlay(play)
+    }
+
+    private fun processCustomPlay(play: CustomEmotionPlay) {
         val minecraft = Minecraft.getInstance()
         val localPlayer = minecraft.player ?: return
         val source = minecraft.level?.getEntity(play.entityId.value) as? Player ?: return
@@ -347,21 +369,6 @@ object ClientHandshakeController {
                 return
             }
             ClientEmotionPlayDisposition.VISIBLE -> Unit
-        }
-        if (
-            CustomEmojiRegistry.find(play.customEmojiId.emotionId) == null &&
-            RemoteCustomEmojiRegistry.find(play.customEmojiId.emotionId) == null
-        ) {
-            if (playDropDiagnostics.tryConsume()) {
-                Emotify.LOGGER.warn(
-                    "Emotify custom play dropped after acknowledgement because its presentation is unavailable: connection={}, emotion={}, entityId={}, sequence={}",
-                    activeConnectionId,
-                    play.customEmojiId.emotionId,
-                    play.entityId.value,
-                    play.sequence.value,
-                )
-            }
-            return
         }
         val basePlay = play.asEmotionPlay()
         val activation = activeEmotions.activateCustom(activeConnectionId, play)
@@ -555,8 +562,9 @@ object ClientHandshakeController {
         activeEmotions.begin(activeConnectionId)
         customUploads.begin(activeConnectionId)
         customAssetIngress.begin(activeConnectionId)
-        customAssetAssembler.reset()
         RemoteCustomEmojiRegistry.begin(activeConnectionId)
+        customAssetDecoder.begin(activeConnectionId)
+        deferredCustomPlays.clear()
         playDropDiagnostics = newDropDiagnostics()
         customAssetDropDiagnostics = newDropDiagnostics()
         session.begin(activeConnectionId)
@@ -586,7 +594,8 @@ object ClientHandshakeController {
         activeEmotions.disconnect(activeConnectionId)
         customUploads.disconnect(activeConnectionId)
         customAssetIngress.disconnect(activeConnectionId)
-        customAssetAssembler.reset()
+        customAssetDecoder.disconnect(activeConnectionId)
+        deferredCustomPlays.clear()
         RemoteCustomEmojiRegistry.disconnect(activeConnectionId)
     }
 
@@ -607,6 +616,86 @@ object ClientHandshakeController {
         activeEmotions.clearWorld(activeConnectionId)
         selectionResponseGate.reset()
         selectionAttemptGate.reset()
+        deferredCustomPlays.clear()
+    }
+
+    private fun completeCustomAssetDecode(
+        connectionId: Long,
+        customEmojiId: CustomEmojiId,
+        result: RemoteCustomAssetDecodeResult<RemoteCustomEmojiRegistry.PreparedRemoteCustomEmoji>,
+    ) {
+        when (result) {
+            is RemoteCustomAssetDecodeResult.Prepared -> {
+                val supported = state as? ClientHandshakeState.Supported
+                val asset = result.value.asset
+                if (
+                    connectionId != activeConnectionId ||
+                    supported == null ||
+                    !EmotifyProtocolFeatures.supportsLosslessCustomEmojiSharing(supported.negotiated.features) ||
+                    asset.isAnimated &&
+                    !EmotifyProtocolFeatures.supportsAnimatedCustomEmojiSharing(supported.negotiated.features)
+                ) {
+                    RemoteCustomEmojiRegistry.discard(result.value)
+                    discardDeferredCustomPlays(customEmojiId)
+                    return
+                }
+                if (RemoteCustomEmojiRegistry.register(connectionId, result.value)) {
+                    drainDeferredCustomPlays(customEmojiId)
+                } else {
+                    discardDeferredCustomPlays(customEmojiId)
+                }
+            }
+            is RemoteCustomAssetDecodeResult.Rejected -> {
+                discardDeferredCustomPlays(customEmojiId)
+                if (customAssetDropDiagnostics.tryConsume()) {
+                    Emotify.LOGGER.warn(
+                        "Rejected malformed custom emoji transfer on connection {}: {}",
+                        connectionId,
+                        result.violation,
+                    )
+                }
+            }
+            is RemoteCustomAssetDecodeResult.Failed -> {
+                discardDeferredCustomPlays(customEmojiId)
+                Emotify.LOGGER.error(
+                    "Failed to prepare custom emoji transfer on connection {}",
+                    connectionId,
+                    result.failure,
+                )
+            }
+            RemoteCustomAssetDecodeResult.Abandoned -> discardDeferredCustomPlays(customEmojiId)
+        }
+    }
+
+    private fun hasCustomPresentation(customEmojiId: CustomEmojiId): Boolean =
+        CustomEmojiRegistry.find(customEmojiId.emotionId) != null ||
+            RemoteCustomEmojiRegistry.find(customEmojiId.emotionId) != null
+
+    private fun drainDeferredCustomPlays(customEmojiId: CustomEmojiId) {
+        val iterator = deferredCustomPlays.iterator()
+        while (iterator.hasNext()) {
+            val play = iterator.next()
+            if (play.customEmojiId == customEmojiId) {
+                iterator.remove()
+                processCustomPlay(play)
+            }
+        }
+    }
+
+    private fun discardDeferredCustomPlays(customEmojiId: CustomEmojiId) {
+        deferredCustomPlays.removeIf { play -> play.customEmojiId == customEmojiId }
+    }
+
+    private fun logUnavailableCustomPlay(play: CustomEmotionPlay) {
+        if (playDropDiagnostics.tryConsume()) {
+            Emotify.LOGGER.warn(
+                "Emotify custom play dropped after acknowledgement because its presentation is unavailable: connection={}, emotion={}, entityId={}, sequence={}",
+                activeConnectionId,
+                play.customEmojiId.emotionId,
+                play.entityId.value,
+                play.sequence.value,
+            )
+        }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -705,6 +794,7 @@ object ClientHandshakeController {
     private const val PLAY_DROP_DIAGNOSTIC_BURST_CAPACITY = 4
     private const val PLAY_DROP_DIAGNOSTIC_REFILL_TOKENS_PER_SECOND = 2
     private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
+    private const val MAXIMUM_DEFERRED_CUSTOM_PLAYS = 16
 
     private fun SelectionRejected.userMessage(): Component = when (code.knownReason) {
         SelectionRejectionReason.COOLDOWN -> Component.translatable("message.emotify.selection_cooldown")

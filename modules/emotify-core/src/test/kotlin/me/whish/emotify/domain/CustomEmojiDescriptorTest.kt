@@ -27,6 +27,23 @@ class CustomEmojiDescriptorTest : FunSpec({
         }
     }
 
+    test("unicode direction overrides separators and malformed surrogates are rejected") {
+        val malformedSurrogate = String(charArrayOf('\uD800'))
+        listOf(
+            "safe\u061Cname",
+            "safe\u200Fname",
+            "safe\u202Ename",
+            "safe\u2066name",
+            "safe\u2028name",
+            "safe\u2029name",
+            "safe${malformedSurrogate}name",
+        ).forEach { displayName ->
+            shouldThrow<IllegalArgumentException> {
+                CustomEmojiDescriptor.create(displayName, origin)
+            }
+        }
+    }
+
     test("default descriptor uses the content ID as its origin") {
         CustomEmojiDescriptor.default(origin) shouldBe
             CustomEmojiDescriptor.create(CustomEmojiDescriptor.DEFAULT_DISPLAY_NAME, origin)

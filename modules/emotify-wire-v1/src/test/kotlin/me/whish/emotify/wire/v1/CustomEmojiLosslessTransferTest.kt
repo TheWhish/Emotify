@@ -9,6 +9,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.util.SplittableRandom
 import me.whish.emotify.domain.CustomEmojiAsset
 import me.whish.emotify.domain.CustomEmojiFrame
+import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.domain.CustomEmojiPixels
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
 
@@ -53,6 +54,32 @@ class CustomEmojiLosslessTransferTest : FunSpec({
         decoded shouldBe asset
         decoded.frames.map(CustomEmojiFrame::durationMillis) shouldBe frames.map(CustomEmojiFrame::durationMillis)
         encoded.size shouldBeLessThan asset.rawByteLength
+    }
+
+    test("first chunk preflight accounts for a highly compressible maximum animation") {
+        val asset = CustomEmojiAsset.create(
+            List(CustomEmojiAsset.MAXIMUM_FRAME_COUNT) {
+                CustomEmojiFrame(
+                    CustomEmojiPixels.of(
+                        CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE,
+                        IntArray(CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE * CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE),
+                    ),
+                    CustomEmojiAsset.MINIMUM_FRAME_DURATION_MILLIS,
+                )
+            },
+        )
+        val chunks = CustomEmojiAssetChunker.split(asset)
+
+        val preflight = CustomEmojiLosslessCodec.preflightFirstChunk(chunks.first())
+
+        preflight.size shouldBe CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE
+        preflight.frameCount shouldBe CustomEmojiAsset.MAXIMUM_FRAME_COUNT
+        preflight.rawBytes shouldBe asset.rawByteLength
+        preflight.frameBytes shouldBe CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE *
+            CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE * Int.SIZE_BYTES
+        preflight.encodedBytes shouldBe chunks.first().totalBytes
+        preflight.encoding shouldBe CustomEmojiLosslessEncoding.DEFLATE
+        (preflight.encodedBytes < preflight.rawBytes / 10) shouldBe true
     }
 
     test("three second animation round trips at the lifecycle boundary") {
@@ -142,6 +169,33 @@ class CustomEmojiLosslessTransferTest : FunSpec({
                 result shouldBe CustomEmojiAssetAssemblyResult.Pending
             }
         }
+    }
+
+    test("encoded assembly defers content hash verification until the worker phase") {
+        val asset = CustomEmojiAsset.create(CustomEmojiPixels.of(128, IntArray(128 * 128) { it }))
+        val wrongId = CustomEmojiId(1L, 2L, 3L)
+        val chunks = CustomEmojiAssetChunker.split(asset).map { chunk ->
+            CustomEmojiAssetChunk(
+                wrongId,
+                chunk.totalBytes,
+                chunk.index,
+                chunk.count,
+                chunk.borrowedData(),
+            )
+        }
+        val assembler = CustomEmojiAssetAssembler()
+        var encodedAssembly: CustomEmojiEncodedAssembly? = null
+
+        chunks.forEachIndexed { index, chunk ->
+            when (val result = assembler.tryAcceptEncodedAssembly(chunk, index.toLong())) {
+                is CustomEmojiEncodedAssemblyResult.Completed -> encodedAssembly = result.assembly
+                CustomEmojiEncodedAssemblyResult.Pending -> Unit
+                is CustomEmojiEncodedAssemblyResult.Rejected -> error("Encoded collection rejected before verification")
+            }
+        }
+
+        encodedAssembly?.customEmojiId shouldBe wrongId
+        encodedAssembly?.tryVerify().shouldBeInstanceOf<CustomEmojiAssetVerificationResult.Rejected>()
     }
 
     test("assembler validates direct chunks before allocating declared capacity") {

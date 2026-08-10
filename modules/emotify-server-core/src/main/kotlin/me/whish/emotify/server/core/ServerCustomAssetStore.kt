@@ -33,6 +33,9 @@ class ServerCustomAssetStore(
         asset: CustomEmojiAsset,
         losslessAssembly: CustomEmojiAssetAssembly?,
     ): ServerCustomAsset {
+        require(asset.pixels.size <= LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE || losslessAssembly != null) {
+            "A large custom asset requires a prepared lossless assembly"
+        }
         require(losslessAssembly == null || losslessAssembly.asset == asset) {
             "A lossless custom asset assembly must match the stored asset"
         }

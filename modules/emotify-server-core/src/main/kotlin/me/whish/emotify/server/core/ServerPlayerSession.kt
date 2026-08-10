@@ -9,7 +9,10 @@ import me.whish.emotify.domain.CustomEmojiTransferRateLimits
 import me.whish.emotify.domain.RemoteCustomEmojiRetention
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.wire.v1.CustomEmojiAssetAssembler
-import me.whish.emotify.wire.v1.CustomEmojiAssetAssemblyResult
+import me.whish.emotify.wire.v1.CustomEmojiAssetVerificationResult
+import me.whish.emotify.wire.v1.CustomEmojiEncodedAssemblyResult
+import me.whish.emotify.wire.v1.CustomEmojiLosslessCodec
+import me.whish.emotify.wire.v1.WireDecodeException
 import me.whish.emotify.domain.EmotifyProtocolFeatures
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.MAX_SELECTION_RETRY_AFTER_MILLIS
@@ -76,6 +79,8 @@ sealed interface CustomSelectionPreparation {
 
     data object Ignored : CustomSelectionPreparation
 
+    data object Deferred : CustomSelectionPreparation
+
     data class Rejected(
         val reason: SelectionRejectionReason,
         val retryAfterMillis: Int,
@@ -123,8 +128,9 @@ class ServerPlayerSession(
         timeSource = timeSource,
     )
     private val customAssetAssembler = CustomEmojiAssetAssembler()
-    private var customUploadAdmitted = false
-    private var customUploadLease: CustomAssetIngressBudget.Lease? = null
+    private val customUploadOwner = Any()
+    private var customUploadGeneration = 0L
+    private var customUploadState: CustomUploadState? = null
     private val authorizedCustomAssets = object : LinkedHashMap<CustomEmojiId, Unit>(
         MAXIMUM_UPLOADED_CUSTOM_ASSETS * 4 / 3 + 1,
         0.75f,
@@ -223,6 +229,13 @@ class ServerPlayerSession(
             }
             cacheUploadedCustomAsset(asset, null)
         }
+        val verifyingUpload = customUploadState as? CustomUploadState.Verifying
+        if (verifyingUpload?.ticket?.assembly?.customEmojiId == selection.customEmojiId) {
+            if (verifyingUpload.deferredSelection == null) {
+                verifyingUpload.deferredSelection = selection
+            }
+            return CustomSelectionPreparation.Deferred
+        }
         rejectedCustomAssets[selection.customEmojiId]?.let { reason ->
             return CustomSelectionPreparation.Rejected(reason, 0)
         }
@@ -254,63 +267,174 @@ class ServerPlayerSession(
                 negotiatedFeaturesSupportLosslessCustomEmojiSharing()
             )
 
-    fun receiveCustomAssetChunk(chunk: CustomEmojiAssetChunk, policy: ServerSelectionPolicy): Boolean {
-        if (
-            !policy.enabled ||
-            !policy.customEmojisEnabled ||
-            !negotiatedFeaturesSupportLosslessCustomEmojiSharing()
-        ) {
-            resetCustomUpload()
-            return false
+    fun receiveCustomAssetChunk(chunk: CustomEmojiAssetChunk, policy: ServerSelectionPolicy): Boolean =
+        when (val preparation = prepareCustomAssetChunk(chunk, policy, permittedToUpload = true)) {
+            SessionCustomAssetUploadPreparation.Pending -> true
+            is SessionCustomAssetUploadPreparation.VerificationRequired -> when (
+                completeCustomAssetVerification(
+                    preparation.ticket,
+                    preparation.ticket.assembly.tryVerify(),
+                    policy,
+                    permittedToUpload = true,
+                )
+            ) {
+                is SessionCustomAssetUploadCommit.Accepted -> true
+                is SessionCustomAssetUploadCommit.Rejected,
+                SessionCustomAssetUploadCommit.Stale,
+                -> false
+            }
+            is SessionCustomAssetUploadPreparation.Rejected -> false
+        }
+
+    internal fun prepareCustomAssetChunk(
+        chunk: CustomEmojiAssetChunk,
+        policy: ServerSelectionPolicy,
+        permittedToUpload: Boolean,
+    ): SessionCustomAssetUploadPreparation {
+        uploadAdmissionRejection(policy, permittedToUpload)?.let { rejection ->
+            resetCollectingCustomUpload()
+            return SessionCustomAssetUploadPreparation.Rejected(rejection.first)
+        }
+        if (customUploadState is CustomUploadState.Verifying) {
+            return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.BUSY)
         }
         if (chunk.index == 0) {
-            resetCustomUpload()
-            customUploadAdmitted = customUploadStarts.tryConsume() &&
-                customUploadBytes.tryConsume(chunk.totalBytes)
-            if (customUploadAdmitted) {
-                customUploadLease = customAssetIngressBudget.tryAcquire(chunk.totalBytes, ::expireCustomUpload)
-                customUploadAdmitted = customUploadLease != null
+            val preflight = try {
+                CustomEmojiLosslessCodec.preflightFirstChunk(chunk)
+            } catch (_: WireDecodeException) {
+                resetCollectingCustomUpload()
+                return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.INVALID_TRANSFER)
             }
+            resetCollectingCustomUpload()
+            val generation = Math.incrementExact(customUploadGeneration)
+            customUploadGeneration = generation
+            if (!customUploadStarts.tryConsume() || !customUploadBytes.tryConsume(chunk.totalBytes)) {
+                return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.RATE_LIMITED)
+            }
+            val lease = customAssetIngressBudget.tryAcquire(preflight) {
+                expireCustomUpload(generation)
+            } ?: return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.RATE_LIMITED)
+            customUploadState = CustomUploadState.Collecting(
+                generation,
+                chunk.customEmojiId,
+                lease,
+            )
         }
-        if (!customUploadAdmitted) {
-            return false
-        }
-        if (customUploadLease?.isActive(timeSource.nowNanos()) != true) {
-            resetCustomUpload()
-            return false
+
+        val collecting = customUploadState as? CustomUploadState.Collecting
+            ?: return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.INVALID_TRANSFER)
+        if (collecting.lease.isActive(timeSource.nowNanos()).not()) {
+            resetCollectingCustomUpload()
+            return SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.RATE_LIMITED)
         }
         return when (
-            val result = customAssetAssembler.tryAcceptAssembly(
+            val result = customAssetAssembler.tryAcceptEncodedAssembly(
                 chunk,
                 timeSource.nowNanos() / NANOS_PER_MILLISECOND,
             )
         ) {
-            CustomEmojiAssetAssemblyResult.Pending -> true
-            is CustomEmojiAssetAssemblyResult.Completed -> {
-                finishCustomUpload()
-                val rejection = customAssetRejection(result.assembly.asset, policy)
-                if (rejection == null) {
-                    cacheUploadedCustomAsset(
-                        result.assembly.asset,
-                        result.assembly.takeIf { completed ->
-                            completed.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE
-                        },
-                    )
-                    true
-                } else {
-                    rejectedCustomAssets[result.assembly.asset.id] = rejection
-                    false
-                }
+            CustomEmojiEncodedAssemblyResult.Pending -> SessionCustomAssetUploadPreparation.Pending
+            is CustomEmojiEncodedAssemblyResult.Completed -> {
+                val ticket = SessionCustomAssetVerificationTicket(
+                    customUploadOwner,
+                    collecting.generation,
+                    collecting.lease,
+                    result.assembly,
+                )
+                customUploadState = CustomUploadState.Verifying(ticket)
+                SessionCustomAssetUploadPreparation.VerificationRequired(ticket)
             }
-            is CustomEmojiAssetAssemblyResult.Rejected -> {
-                finishCustomUpload()
-                false
+            is CustomEmojiEncodedAssemblyResult.Rejected -> {
+                resetCollectingCustomUpload()
+                SessionCustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.INVALID_TRANSFER)
             }
         }
     }
 
+    internal fun completeCustomAssetVerification(
+        ticket: SessionCustomAssetVerificationTicket,
+        verification: CustomEmojiAssetVerificationResult,
+        policy: ServerSelectionPolicy,
+        permittedToUpload: Boolean,
+    ): SessionCustomAssetUploadCommit {
+        val verifying = customUploadState as? CustomUploadState.Verifying
+        if (
+            ticket.owner !== customUploadOwner ||
+            verifying?.ticket !== ticket ||
+            ticket.generation != customUploadGeneration
+        ) {
+            ticket.lease.close()
+            return SessionCustomAssetUploadCommit.Stale
+        }
+        customUploadState = null
+        val deferredSelection = verifying.deferredSelection
+        return try {
+            uploadAdmissionRejection(policy, permittedToUpload)?.let { rejection ->
+                return SessionCustomAssetUploadCommit.Rejected(
+                    rejection.first,
+                    rejection.second,
+                    deferredSelection,
+                )
+            }
+            when (verification) {
+                is CustomEmojiAssetVerificationResult.Rejected -> {
+                    rejectedCustomAssets[ticket.assembly.customEmojiId] = SelectionRejectionReason.CUSTOM_ASSET_MISSING
+                    SessionCustomAssetUploadCommit.Rejected(
+                        CustomAssetUploadRejection.VERIFICATION_FAILED,
+                        SelectionRejectionReason.CUSTOM_ASSET_MISSING,
+                        deferredSelection,
+                    )
+                }
+                is CustomEmojiAssetVerificationResult.Verified -> {
+                    val assembly = verification.assembly
+                    val rejection = customAssetRejection(assembly.asset, policy)
+                    if (rejection != null) {
+                        rejectedCustomAssets[assembly.asset.id] = rejection
+                        SessionCustomAssetUploadCommit.Rejected(
+                            CustomAssetUploadRejection.POLICY_REJECTED,
+                            rejection,
+                            deferredSelection,
+                        )
+                    } else {
+                        cacheUploadedCustomAsset(
+                            assembly.asset,
+                            assembly.takeIf { completed ->
+                                completed.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE
+                            },
+                        )
+                        SessionCustomAssetUploadCommit.Accepted(deferredSelection)
+                    }
+                }
+            }
+        } finally {
+            ticket.lease.close()
+        }
+    }
+
+    internal fun cancelCustomAssetVerification(ticket: SessionCustomAssetVerificationTicket): Boolean {
+        val verifying = customUploadState as? CustomUploadState.Verifying ?: return false
+        if (
+            ticket.owner !== customUploadOwner ||
+            verifying.ticket !== ticket ||
+            ticket.generation != customUploadGeneration
+        ) {
+            return false
+        }
+        customUploadState = null
+        ticket.lease.close()
+        return true
+    }
+
     fun close() {
-        resetCustomUpload()
+        when (val upload = customUploadState) {
+            is CustomUploadState.Collecting -> resetCollectingCustomUpload()
+            is CustomUploadState.Verifying -> {
+                customAssetAssembler.reset()
+                customUploadState = null
+                upload.ticket.lease.close()
+            }
+            null -> Unit
+        }
     }
 
     fun needsCustomAsset(customEmojiId: CustomEmojiId): Boolean = !deliveredCustomAssets.contains(customEmojiId)
@@ -376,11 +500,6 @@ class ServerPlayerSession(
         return ServerHandshakeTransition.UNSUPPORTED
     }
 
-    private fun negotiatedFeaturesContain(feature: me.whish.emotify.domain.ProtocolFeature): Boolean {
-        val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
-        return supported.negotiated.features.contains(feature)
-    }
-
     private fun negotiatedFeaturesSupportAnimatedCustomEmojiSharing(): Boolean {
         val supported = handshakeState as? ServerHandshakeState.Supported ?: return false
         return EmotifyProtocolFeatures.supportsAnimatedCustomEmojiSharing(supported.negotiated.features)
@@ -409,21 +528,51 @@ class ServerPlayerSession(
         else -> null
     }
 
-    private fun finishCustomUpload() {
-        customUploadAdmitted = false
-        customUploadLease?.close()
-        customUploadLease = null
+    private fun resetCollectingCustomUpload() {
+        customAssetAssembler.reset()
+        val collecting = customUploadState as? CustomUploadState.Collecting ?: return
+        customUploadState = null
+        collecting.lease.close()
     }
 
-    private fun resetCustomUpload() {
+    private fun expireCustomUpload(generation: Long) {
+        val active = customUploadState ?: return
+        if (active.generation != generation) {
+            return
+        }
         customAssetAssembler.reset()
-        finishCustomUpload()
+        customUploadState = null
     }
 
-    private fun expireCustomUpload() {
-        customAssetAssembler.reset()
-        customUploadAdmitted = false
-        customUploadLease = null
+    private fun uploadAdmissionRejection(
+        policy: ServerSelectionPolicy,
+        permittedToUpload: Boolean,
+    ): Pair<CustomAssetUploadRejection, SelectionRejectionReason>? = when {
+        !permittedToUpload -> CustomAssetUploadRejection.PERMISSION_DENIED to SelectionRejectionReason.PLAYER_STATE
+        !policy.enabled -> CustomAssetUploadRejection.SERVER_DISABLED to SelectionRejectionReason.SERVER_DISABLED
+        !policy.customEmojisEnabled ->
+            CustomAssetUploadRejection.CUSTOM_EMOJIS_DISABLED to SelectionRejectionReason.CUSTOM_EMOJIS_DISABLED
+        !negotiatedFeaturesSupportLosslessCustomEmojiSharing() ->
+            CustomAssetUploadRejection.PROTOCOL_UNSUPPORTED to SelectionRejectionReason.EMOTION_DISABLED
+        else -> null
+    }
+
+    private sealed interface CustomUploadState {
+        val generation: Long
+
+        data class Collecting(
+            override val generation: Long,
+            val customEmojiId: CustomEmojiId,
+            val lease: CustomAssetIngressBudget.Lease,
+        ) : CustomUploadState
+
+        class Verifying(
+            val ticket: SessionCustomAssetVerificationTicket,
+            var deferredSelection: CustomEmotionSelection? = null,
+        ) : CustomUploadState {
+            override val generation: Long
+                get() = ticket.generation
+        }
     }
 
     companion object {

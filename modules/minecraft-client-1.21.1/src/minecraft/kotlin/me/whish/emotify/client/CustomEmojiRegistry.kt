@@ -10,17 +10,26 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.custom.CustomEmojiFile
+import me.whish.emotify.client.custom.CustomEmojiDiagnostic
+import me.whish.emotify.client.custom.CustomEmojiDiagnosticReason
+import me.whish.emotify.client.custom.CustomEmojiDirectoryEntry
 import me.whish.emotify.client.custom.CustomEmojiFileScanner
 import me.whish.emotify.client.custom.CustomEmojiDirectoryFingerprint
+import me.whish.emotify.client.custom.CustomEmojiFileScan
 import me.whish.emotify.client.custom.CustomEmojiLibraryAdmission
 import me.whish.emotify.client.custom.CustomEmojiLibraryBudget
+import me.whish.emotify.client.custom.CustomEmojiReferenceIndex
 import me.whish.emotify.client.custom.CustomEmojiReloadCompletion
 import me.whish.emotify.client.custom.CustomEmojiReloadCoordinator
-import me.whish.emotify.client.custom.canRemoveMissingCustomQuickSlots
+import me.whish.emotify.client.custom.CustomEmojiSourceCacheEntry
+import me.whish.emotify.client.custom.customEmojiTextureIdsToRelease
+import me.whish.emotify.client.custom.planCustomEmojiSourceReuse
+import me.whish.emotify.client.custom.reconcileCustomEmojiReferences
 import me.whish.emotify.client.presentation.EmotionPresentation
 import me.whish.emotify.client.presentation.EmotionPresentationCatalog
 import me.whish.emotify.client.presentation.EmotionTextureAnimation
 import me.whish.emotify.client.presentation.EmotionTextureFrame
+import me.whish.emotify.client.settings.ClientConfigurationSnapshot
 import me.whish.emotify.domain.EmotionId
 import me.whish.emotify.domain.CustomEmojiAsset
 import me.whish.emotify.domain.CustomEmojiDescriptor
@@ -52,6 +61,8 @@ object CustomEmojiRegistry {
 
     fun presentations(): List<EmotionPresentation> = snapshot.presentations
 
+    fun diagnostics(): List<CustomEmojiDiagnostic> = snapshot.diagnostics
+
     fun find(emotionId: EmotionId): EmotionPresentation? = snapshot.byEmotionId[emotionId]
 
     fun contains(emotionId: EmotionId): Boolean = emotionId in snapshot.byEmotionId
@@ -70,51 +81,93 @@ object CustomEmojiRegistry {
         if (!reloadCoordinator.request(onComplete)) {
             return
         }
-        startReload(minecraft)
+        scheduleReload(minecraft)
+    }
+
+    fun reloadWithResult(minecraft: Minecraft, onComplete: (Boolean) -> Unit) {
+        if (!reloadCoordinator.requestWithResult(onComplete)) {
+            return
+        }
+        scheduleReload(minecraft)
+    }
+
+    private fun scheduleReload(minecraft: Minecraft) {
+        try {
+            startReload(minecraft)
+        } catch (failure: RuntimeException) {
+            if (shouldLogFailure(reloadFailureLogNanos)) {
+                logger.error("Failed to schedule custom emoji reload from {}", directory(minecraft), failure)
+            }
+            finishReload(minecraft, success = false)
+        }
     }
 
     private fun startReload(minecraft: Minecraft) {
+        val previous = snapshot
         CompletableFuture.supplyAsync(
-            { load(directory(minecraft)) },
+            { load(directory(minecraft), previous) },
             Util.ioPool(),
         ).whenComplete { loaded, failure ->
-            minecraft.execute {
-                if (failure != null) {
-                    if (shouldLogFailure(reloadFailureLogNanos)) {
-                        logger.error("Failed to load custom emojis from {}", directory(minecraft), failure)
+            try {
+                minecraft.execute {
+                    if (failure != null) {
+                        if (shouldLogFailure(reloadFailureLogNanos)) {
+                            logger.error("Failed to load custom emojis from {}", directory(minecraft), failure)
+                        }
+                        finishReload(minecraft, success = false)
+                        return@execute
                     }
-                    finishReload(minecraft, success = false)
-                    return@execute
-                }
-                val completedLoad = checkNotNull(loaded)
-                if (!completedLoad.stable) {
-                    completedLoad.close()
-                    nextRefreshCheckNanos.set(0L)
-                    finishReload(minecraft, success = false, retry = true)
-                    return@execute
-                }
-                try {
-                    apply(minecraft, completedLoad)
-                } catch (failure: Exception) {
-                    if (shouldLogFailure(reloadFailureLogNanos)) {
-                        logger.error("Failed to publish custom emojis from {}", directory(minecraft), failure)
+                    val completedLoad = checkNotNull(loaded)
+                    if (!completedLoad.stable) {
+                        completedLoad.close()
+                        nextRefreshCheckNanos.set(0L)
+                        finishReload(minecraft, success = false, retry = true)
+                        return@execute
                     }
-                    finishReload(minecraft, success = false)
-                    return@execute
+                    try {
+                        apply(minecraft, completedLoad)
+                    } catch (failure: Exception) {
+                        if (shouldLogFailure(reloadFailureLogNanos)) {
+                            logger.error("Failed to publish custom emojis from {}", directory(minecraft), failure)
+                        }
+                        finishReload(minecraft, success = false)
+                        return@execute
+                    }
+                    if (completedLoad.references.removalSafe) {
+                        reconcileCustomReferences(completedLoad.references.presentEmotionIds)
+                    }
+                    reloadFailureLogNanos.set(0L)
+                    finishReload(minecraft, success = true)
                 }
-                if (completedLoad.reconciliationSafe) {
-                    reconcileQuickSlots()
+            } catch (schedulingFailure: RuntimeException) {
+                loaded?.close()
+                if (shouldLogFailure(reloadFailureLogNanos)) {
+                    logger.error("Failed to schedule custom emoji publication from {}", directory(minecraft), schedulingFailure)
                 }
-                reloadFailureLogNanos.set(0L)
-                finishReload(minecraft, success = true)
+                finishReload(minecraft, success = false)
             }
         }
     }
 
     private fun finishReload(minecraft: Minecraft, success: Boolean, retry: Boolean = false) {
         when (val completion = reloadCoordinator.complete(success, retry)) {
-            CustomEmojiReloadCompletion.FollowUp -> startReload(minecraft)
-            is CustomEmojiReloadCompletion.Finished -> completion.callbacks.forEach { callback -> callback() }
+            CustomEmojiReloadCompletion.FollowUp -> scheduleReload(minecraft)
+            is CustomEmojiReloadCompletion.Finished -> {
+                completion.resultCallbacks.forEach { callback ->
+                    try {
+                        callback(completion.success)
+                    } catch (failure: RuntimeException) {
+                        logger.error("Custom emoji reload result callback failed", failure)
+                    }
+                }
+                completion.callbacks.forEach { callback ->
+                    try {
+                        callback()
+                    } catch (failure: RuntimeException) {
+                        logger.error("Custom emoji reload callback failed", failure)
+                    }
+                }
+            }
         }
     }
 
@@ -166,31 +219,68 @@ object CustomEmojiRegistry {
         }
     }
 
-    private fun load(directory: Path): LoadedCustomEmojiLibrary {
-        val scan = CustomEmojiFileScanner.scan(directory)
+    private fun load(
+        directory: Path,
+        previous: CustomEmojiSnapshot,
+    ): LoadedCustomEmojiLibrary {
+        val scan = CustomEmojiFileScanner.scan(directory, previous.fileScan)
         val entries = ArrayList<LoadedCustomEmoji>(scan.accepted.size)
+        val diagnostics = ArrayList<CustomEmojiDiagnostic>(scan.rejected.size)
+        scan.rejected.mapTo(diagnostics, CustomEmojiDiagnostic::from)
+        val decodedSourceEmotionIds = LinkedHashMap<Path, EmotionId>(scan.accepted.size)
+        val unavailableSourcePaths = scan.rejected.mapTo(HashSet(scan.rejected.size)) { rejection -> rejection.path }
         val budget = CustomEmojiLibraryBudget()
         var decodeFailures = 0
         var firstDecodeFailure: Pair<Path, Throwable>? = null
         var capacityRejections = 0
         try {
-            scan.accepted.forEach { file ->
-                val entry = try {
-                    load(file)
-                } catch (failure: Exception) {
-                    decodeFailures++
-                    if (firstDecodeFailure == null) {
-                        firstDecodeFailure = file.path to failure
-                    }
-                    null
-                }
+            val reusePlan = planCustomEmojiSourceReuse(scan.accepted, scan.fingerprint, previous.sourceEntries)
+            reusePlan.forEach { source ->
+                val file = source.file
+                val entry = source.resolve(
+                    reuse = { cached -> LoadedCustomEmoji(file.path.normalize(), source.fingerprint, cached, null) },
+                    load = { changedFile, sourceFingerprint ->
+                        try {
+                            load(changedFile, sourceFingerprint)
+                        } catch (failure: Exception) {
+                            decodeFailures++
+                            unavailableSourcePaths.add(changedFile.path)
+                            diagnostics += CustomEmojiDiagnostic(
+                                changedFile.displayName,
+                                changedFile.format,
+                                if (failure is CustomEmojiFrameLimitExceededException) {
+                                    CustomEmojiDiagnosticReason.TOO_MANY_FRAMES
+                                } else {
+                                    CustomEmojiDiagnosticReason.DECODE_FAILED
+                                },
+                            )
+                            if (firstDecodeFailure == null) {
+                                firstDecodeFailure = changedFile.path to failure
+                            }
+                            null
+                        }
+                    },
+                )
                 if (entry != null) {
+                    decodedSourceEmotionIds[file.path] = entry.presentation.emotionId
                     when (budget.admit(entry.asset.id, entry.retainedByteLength)) {
                         CustomEmojiLibraryAdmission.ACCEPTED -> entries += entry
-                        CustomEmojiLibraryAdmission.DUPLICATE -> entry.image.close()
+                        CustomEmojiLibraryAdmission.DUPLICATE -> {
+                            diagnostics += CustomEmojiDiagnostic(
+                                file.displayName,
+                                file.format,
+                                CustomEmojiDiagnosticReason.DUPLICATE,
+                            )
+                            entry.closeImage()
+                        }
                         CustomEmojiLibraryAdmission.CAPACITY_REACHED -> {
                             capacityRejections++
-                            entry.image.close()
+                            diagnostics += CustomEmojiDiagnostic(
+                                file.displayName,
+                                file.format,
+                                CustomEmojiDiagnosticReason.CAPACITY_REACHED,
+                            )
+                            entry.closeImage()
                         }
                     }
                 }
@@ -208,20 +298,23 @@ object CustomEmojiRegistry {
                 logger.warn("Custom emoji directory limit reached in {}; loading at most {} files", directory, CustomEmojiFileScanner.MAXIMUM_FILES)
             }
             val stable = CustomEmojiFileScanner.fingerprint(directory) == scan.fingerprint
-            val reconciliationSafe = canRemoveMissingCustomQuickSlots(
-                decodeFailures,
-                scan.rejected.size,
-                capacityRejections,
+            val references = reconcileCustomEmojiReferences(
+                previous.sourceEmotionIds,
+                decodedSourceEmotionIds,
+                unavailableSourcePaths,
                 scan.fingerprint.directoryLimitReached,
             )
-            return LoadedCustomEmojiLibrary(entries, scan.fingerprint, stable, reconciliationSafe)
+            return LoadedCustomEmojiLibrary(entries, diagnostics, scan, stable, references)
         } catch (failure: Throwable) {
-            entries.forEach { entry -> entry.image.close() }
+            entries.forEach(LoadedCustomEmoji::closeImage)
             throw failure
         }
     }
 
-    private fun load(file: CustomEmojiFile): LoadedCustomEmoji {
+    private fun load(
+        file: CustomEmojiFile,
+        sourceFingerprint: CustomEmojiDirectoryEntry,
+    ): LoadedCustomEmoji {
         require(Files.isRegularFile(file.path, LinkOption.NOFOLLOW_LINKS)) {
             "Custom emoji is no longer a regular file: ${file.path}"
         }
@@ -284,7 +377,12 @@ object CustomEmojiRegistry {
                     descriptor.displayName,
                     textureAnimation,
                 )
-                return LoadedCustomEmoji(presentation, texture, atlas, asset, descriptor, transferChunks)
+                return LoadedCustomEmoji(
+                    file.path.normalize(),
+                    sourceFingerprint,
+                    CachedCustomEmoji(presentation, texture, asset, descriptor, transferChunks),
+                    atlas,
+                )
             } catch (failure: Throwable) {
                 atlas.close()
                 throw failure
@@ -327,30 +425,31 @@ object CustomEmojiRegistry {
     private fun apply(minecraft: Minecraft, loaded: LoadedCustomEmojiLibrary) {
         val previous = snapshot
         val pendingImages = java.util.Collections.newSetFromMap(IdentityHashMap<NativeImage, Boolean>())
-        loaded.entries.mapTo(pendingImages, LoadedCustomEmoji::image)
+        loaded.entries.mapNotNullTo(pendingImages, LoadedCustomEmoji::image)
         val registeredTextures = ArrayList<ResourceLocation>(loaded.entries.size)
         val publication = try {
             val retainedEntries = LinkedHashMap<EmotionId, LoadedCustomEmoji>(loaded.entries.size)
             loaded.entries.forEach { entry ->
                 val replaced = retainedEntries.putIfAbsent(entry.presentation.emotionId, entry)
                 if (replaced != null) {
-                    entry.image.close()
-                    pendingImages.remove(entry.image)
+                    entry.closeImage()
+                    entry.image?.let(pendingImages::remove)
                 }
             }
             val nextTextureIds = retainedEntries.values.mapTo(HashSet()) { entry -> entry.presentation.textureId }
             retainedEntries.values.forEach { entry ->
+                val image = entry.image ?: return@forEach
                 val unchanged = previous.assetByEmotionId.containsKey(entry.presentation.emotionId) &&
                     previous.textureById[entry.presentation.textureId] == entry.texture
                 if (unchanged) {
-                    entry.image.close()
-                    pendingImages.remove(entry.image)
+                    entry.closeImage()
+                    pendingImages.remove(image)
                     return@forEach
                 }
                 val texture = try {
-                    DynamicTexture(entry.image)
+                    DynamicTexture(image)
                 } catch (failure: Throwable) {
-                    closePendingImage(entry.image, pendingImages, failure)
+                    closePendingImage(image, pendingImages, failure)
                     throw failure
                 }
                 registeredTextures += entry.texture
@@ -360,16 +459,21 @@ object CustomEmojiRegistry {
                     registeredTextures.removeAt(registeredTextures.lastIndex)
                     try {
                         texture.close()
-                        pendingImages.remove(entry.image)
+                        pendingImages.remove(image)
                     } catch (cleanupFailure: Exception) {
                         failure.addSuppressed(cleanupFailure)
                     }
                     throw failure
                 }
-                pendingImages.remove(entry.image)
+                pendingImages.remove(image)
             }
             CustomEmojiPublication(
-                CustomEmojiSnapshot.from(retainedEntries.values, loaded.fingerprint),
+                CustomEmojiSnapshot.from(
+                    retainedEntries.values,
+                    loaded.diagnostics,
+                    loaded.fileScan,
+                    loaded.references.sourceEmotionIds,
+                ),
                 nextTextureIds,
             )
         } catch (failure: Throwable) {
@@ -379,13 +483,24 @@ object CustomEmojiRegistry {
         cleanupPublishedSnapshot(minecraft, previous, publication.textureIds)
     }
 
-    private fun reconcileQuickSlots() {
+    private fun reconcileCustomReferences(availableCustomEmotionIds: Set<EmotionId>) {
         try {
-            EmotifyClientConfig.retainAvailableCustomQuickSlots(snapshot.byEmotionId.keys)
+            val configured = ClientConfigurationSnapshot.create(
+                EmotifyClientConfig.settings(),
+                EmotifyClientConfig.loadFavorites(),
+                EmotifyClientConfig.loadQuickSlots(),
+            )
+            val reconciled = configured.retainAvailableCustomReferences(availableCustomEmotionIds)
+            if (reconciled.favorites != configured.favorites) {
+                EmotifyClientConfig.saveFavorites(reconciled.favorites)
+            }
+            if (reconciled.quickSlots != configured.quickSlots) {
+                EmotifyClientConfig.saveQuickSlots(reconciled.quickSlots)
+            }
             configurationFailureLogNanos.set(0L)
         } catch (failure: Exception) {
             if (shouldLogFailure(configurationFailureLogNanos)) {
-                logger.error("Failed to reconcile custom emoji quick slots", failure)
+                logger.error("Failed to reconcile custom emoji favorites and quick slots", failure)
             }
         }
     }
@@ -437,17 +552,16 @@ object CustomEmojiRegistry {
         } catch (failure: Exception) {
             firstFailure = failure
         }
-        previous.textureById.values.forEach { texture ->
-            if (texture.toString() !in nextTextureIds) {
-                try {
-                    minecraft.textureManager.release(texture)
-                } catch (failure: Exception) {
-                    val existingFailure = firstFailure
-                    if (existingFailure == null) {
-                        firstFailure = failure
-                    } else {
-                        existingFailure.addSuppressed(failure)
-                    }
+        customEmojiTextureIdsToRelease(previous.textureById.keys, nextTextureIds).forEach { textureId ->
+            val texture = checkNotNull(previous.textureById[textureId])
+            try {
+                minecraft.textureManager.release(texture)
+            } catch (failure: Exception) {
+                val existingFailure = firstFailure
+                if (existingFailure == null) {
+                    firstFailure = failure
+                } else {
+                    existingFailure.addSuppressed(failure)
                 }
             }
         }
@@ -496,16 +610,23 @@ object EmotionPresentationRegistry {
 
 private data class CustomEmojiSnapshot(
     val presentations: List<EmotionPresentation>,
+    val diagnostics: List<CustomEmojiDiagnostic>,
     val byEmotionId: Map<EmotionId, EmotionPresentation>,
     val textureById: Map<String, ResourceLocation>,
     val assetByEmotionId: Map<EmotionId, CustomEmojiAsset>,
     val descriptorByEmotionId: Map<EmotionId, CustomEmojiDescriptor>,
     val origins: Set<CustomEmojiId>,
     val chunksByEmotionId: Map<EmotionId, List<CustomEmojiAssetChunk>>,
-    val fingerprint: CustomEmojiDirectoryFingerprint,
+    val fileScan: CustomEmojiFileScan,
+    val sourceEntries: Map<Path, CustomEmojiSourceCacheEntry<CachedCustomEmoji>>,
+    val sourceEmotionIds: Map<Path, EmotionId>,
 ) {
+    val fingerprint: CustomEmojiDirectoryFingerprint
+        get() = fileScan.fingerprint
+
     companion object {
         fun empty(): CustomEmojiSnapshot = CustomEmojiSnapshot(
+            emptyList(),
             emptyList(),
             emptyMap(),
             emptyMap(),
@@ -513,32 +634,69 @@ private data class CustomEmojiSnapshot(
             emptyMap(),
             emptySet(),
             emptyMap(),
-            CustomEmojiDirectoryFingerprint.EMPTY,
+            CustomEmojiFileScan.EMPTY,
+            emptyMap(),
+            emptyMap(),
         )
 
         fun from(
             entries: Collection<LoadedCustomEmoji>,
-            fingerprint: CustomEmojiDirectoryFingerprint,
+            diagnostics: Collection<CustomEmojiDiagnostic>,
+            fileScan: CustomEmojiFileScan,
+            sourceEmotionIds: Map<Path, EmotionId>,
         ): CustomEmojiSnapshot {
             val presentations = java.util.List.copyOf(entries.map(LoadedCustomEmoji::presentation))
             return CustomEmojiSnapshot(
                 presentations,
+                java.util.List.copyOf(diagnostics),
                 java.util.Map.copyOf(presentations.associateBy(EmotionPresentation::emotionId)),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.textureId to entry.texture }),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.asset }),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.descriptor }),
                 java.util.Set.copyOf(entries.map { entry -> entry.descriptor.originId }),
                 java.util.Map.copyOf(entries.associate { entry -> entry.presentation.emotionId to entry.transferChunks }),
-                fingerprint,
+                fileScan,
+                java.util.Map.copyOf(entries.associate { entry ->
+                    entry.sourcePath to CustomEmojiSourceCacheEntry(entry.sourceFingerprint, entry.cached)
+                }),
+                java.util.Map.copyOf(sourceEmotionIds),
             )
         }
     }
 }
 
 private data class LoadedCustomEmoji(
+    val sourcePath: Path,
+    val sourceFingerprint: CustomEmojiDirectoryEntry,
+    val cached: CachedCustomEmoji,
+    val image: NativeImage?,
+) {
+    val presentation: EmotionPresentation
+        get() = cached.presentation
+
+    val texture: ResourceLocation
+        get() = cached.texture
+
+    val asset: CustomEmojiAsset
+        get() = cached.asset
+
+    val descriptor: CustomEmojiDescriptor
+        get() = cached.descriptor
+
+    val transferChunks: List<CustomEmojiAssetChunk>
+        get() = cached.transferChunks
+
+    val retainedByteLength: Long
+        get() = cached.retainedByteLength
+
+    fun closeImage() {
+        image?.close()
+    }
+}
+
+private data class CachedCustomEmoji(
     val presentation: EmotionPresentation,
     val texture: ResourceLocation,
-    val image: NativeImage,
     val asset: CustomEmojiAsset,
     val descriptor: CustomEmojiDescriptor,
     val transferChunks: List<CustomEmojiAssetChunk>,
@@ -549,11 +707,12 @@ private data class LoadedCustomEmoji(
 
 private class LoadedCustomEmojiLibrary(
     val entries: List<LoadedCustomEmoji>,
-    val fingerprint: CustomEmojiDirectoryFingerprint,
+    val diagnostics: List<CustomEmojiDiagnostic>,
+    val fileScan: CustomEmojiFileScan,
     val stable: Boolean,
-    val reconciliationSafe: Boolean,
+    val references: CustomEmojiReferenceIndex,
 ) {
     fun close() {
-        entries.forEach { entry -> entry.image.close() }
+        entries.forEach(LoadedCustomEmoji::closeImage)
     }
 }

@@ -49,6 +49,11 @@ object PaperProtocolChannels {
             channel == ProtocolV1Channels.CUSTOM_SELECT ||
             channel == ProtocolV1Channels.CUSTOM_ASSET_CHUNK
 
+    fun requiresUsePermission(channel: String): Boolean =
+        channel == ProtocolV1Channels.SELECT ||
+            channel == ProtocolV1Channels.CUSTOM_SELECT ||
+            channel == ProtocolV1Channels.CUSTOM_ASSET_CHUNK
+
     fun requiresBukkitSubscription(channel: String): Boolean =
         channel != ProtocolV1Channels.CUSTOM_ASSET &&
             channel != ProtocolV1Channels.CUSTOM_ASSET_CHUNK &&

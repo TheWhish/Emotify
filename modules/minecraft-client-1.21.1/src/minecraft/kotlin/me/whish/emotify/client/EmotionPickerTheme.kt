@@ -36,6 +36,9 @@ internal object EmotionPickerTheme {
     val noticeHighlight = 0xFFDEDEDE.toInt()
     val noticeShadow = 0xFF858585.toInt()
     val noticeOutline = 0xFF555555.toInt()
+    val hintBackground = 0xE6CFCFCF.toInt()
+    val hintBorder = 0x99656565.toInt()
+    val hintCloseHovered = 0xD9E2E2E2.toInt()
     val searchField = 0xFFC4C4C4.toInt()
     val searchFieldFocused = 0xFFCCCCCC.toInt()
     val searchFieldShadow = 0xFF858585.toInt()
@@ -44,6 +47,10 @@ internal object EmotionPickerTheme {
     val scrollbarTrack = 0xFF777777.toInt()
     val scrollbarThumb = 0xFFBEBEBE.toInt()
     val edgeFade = 0xFF292929.toInt()
+    val unavailableCard = 0xFF777777.toInt()
+    val unavailableCardHighlight = 0xFF919191.toInt()
+    val unavailableCardShadow = 0xFF484848.toInt()
+    val unavailableText = 0xFFBEBEBE.toInt()
 
     fun renderPanel(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
         renderRaisedBox(guiGraphics, x, y, width, height, panel, panelHighlight, panelShadow, outline, 2)
@@ -113,10 +120,10 @@ internal object EmotionPickerTheme {
         y: Int,
         width: Int,
         height: Int,
-        hovered: Boolean,
+        hoverEmphasis: Double,
         targetEmphasis: Double,
     ) {
-        val baseFill = if (hovered) emptySlotHovered else emptySlot
+        val baseFill = blendColor(emptySlot, emptySlotHovered, hoverEmphasis)
         renderRaisedBox(
             guiGraphics,
             x,
@@ -133,6 +140,86 @@ internal object EmotionPickerTheme {
 
     fun renderList(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
         renderRaisedBox(guiGraphics, x, y, width, height, list, listDarkEdge, listLightEdge, outline, 1)
+    }
+
+    fun renderHint(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int, opacity: Int) {
+        if (opacity <= 0) {
+            return
+        }
+        renderRoundedFill(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            colorWithOpacity(hintBorder, opacity),
+            2,
+        )
+        renderRoundedFill(
+            guiGraphics,
+            x + 1,
+            y + 1,
+            width - 2,
+            height - 2,
+            colorWithOpacity(hintBackground, opacity),
+            1,
+        )
+    }
+
+    fun renderHintClose(guiGraphics: GuiGraphics, x: Int, y: Int, size: Int, hoverEmphasis: Double, opacity: Int) {
+        if (opacity <= 0 || size < 7) {
+            return
+        }
+        val hoverOpacity = (opacity * hoverEmphasis.coerceIn(0.0, 1.0) + 0.5).toInt()
+        if (hoverOpacity > 0) {
+            renderRoundedFill(
+                guiGraphics,
+                x,
+                y,
+                size,
+                size,
+                colorWithOpacity(hintCloseHovered, hoverOpacity),
+                2,
+            )
+        }
+        val color = colorWithOpacity(blendColor(mutedText, tabText, hoverEmphasis), opacity)
+        val glyphSize = 5
+        val inset = (size - glyphSize) / 2
+        repeat(glyphSize) { offset ->
+            guiGraphics.fill(x + inset + offset, y + inset + offset, x + inset + offset + 1, y + inset + offset + 1, color)
+            guiGraphics.fill(
+                x + size - inset - offset - 1,
+                y + inset + offset,
+                x + size - inset - offset,
+                y + inset + offset + 1,
+                color,
+            )
+        }
+    }
+
+    fun renderUnavailableCard(guiGraphics: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
+        renderRaisedBox(
+            guiGraphics,
+            x,
+            y,
+            width,
+            height,
+            unavailableCard,
+            unavailableCardHighlight,
+            unavailableCardShadow,
+            listDarkEdge,
+            1,
+        )
+    }
+
+    fun renderUnavailablePreview(guiGraphics: GuiGraphics, x: Int, y: Int, size: Int) {
+        require(size >= 8) { "Unavailable preview size is too small: $size" }
+        guiGraphics.fill(x, y, x + size, y + size, unavailableCardShadow)
+        guiGraphics.fill(x + 1, y + 1, x + size - 1, y + size - 1, list)
+        repeat(size - 4) { offset ->
+            guiGraphics.fill(x + 2 + offset, y + 2 + offset, x + 3 + offset, y + 3 + offset, errorOnList)
+            guiGraphics.fill(x + size - 3 - offset, y + 2 + offset, x + size - 2 - offset, y + 3 + offset, errorOnList)
+        }
     }
 
     fun renderSearchField(

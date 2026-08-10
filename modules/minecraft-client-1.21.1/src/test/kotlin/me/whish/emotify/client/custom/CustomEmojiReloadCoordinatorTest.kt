@@ -3,6 +3,7 @@ package me.whish.emotify.client.custom
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import me.whish.emotify.domain.CustomEmojiId
 
 @Suppress("unused")
 class CustomEmojiReloadCoordinatorTest : FunSpec({
@@ -62,6 +63,31 @@ class CustomEmojiReloadCoordinatorTest : FunSpec({
         completion.callbacks.single().invoke()
 
         completed shouldBe 20
+        coordinator.isInFlight() shouldBe false
+    }
+
+    test("a retained completion observer survives transient subscriptions and receives failure") {
+        val coordinator = CustomEmojiReloadCoordinator()
+        val gate = CustomEmojiCopyRequestGate()
+        val origin = CustomEmojiId(1L, 2L, 3L)
+        val nextOrigin = CustomEmojiId(4L, 5L, 6L)
+        var publicationResult: Boolean? = null
+
+        gate.tryBegin(origin) shouldBe true
+        coordinator.requestWithResult { success ->
+            publicationResult = success
+            gate.complete(origin) shouldBe true
+        } shouldBe true
+        repeat(20) { coordinator.subscribe {} shouldBe true }
+        gate.tryBegin(nextOrigin) shouldBe false
+
+        val completion = coordinator.complete(success = false)
+            .shouldBeInstanceOf<CustomEmojiReloadCompletion.Finished>()
+        completion.resultCallbacks.forEach { callback -> callback(completion.success) }
+        completion.callbacks.forEach { callback -> callback() }
+
+        publicationResult shouldBe false
+        gate.tryBegin(nextOrigin) shouldBe true
         coordinator.isInFlight() shouldBe false
     }
 })

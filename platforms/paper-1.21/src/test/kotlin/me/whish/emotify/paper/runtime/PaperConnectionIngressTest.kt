@@ -20,6 +20,7 @@ import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
 import me.whish.emotify.wire.v1.ProtocolV1Limits
 import me.whish.emotify.domain.CustomEmojiId
 import me.whish.emotify.protocol.CustomEmojiAssetChunk
+import me.whish.emotify.protocol.CustomEmotionSelection
 import me.whish.emotify.paper.network.PaperProtocolV1Bridge
 import me.whish.emotify.wire.v1.CustomEmojiLosslessCodec
 import me.whish.emotify.server.core.GlobalSelectionIngressBudget
@@ -121,6 +122,47 @@ class PaperConnectionIngressTest : FunSpec({
         ingress.admitCustomAssetChunk(connection, ProtocolV1Limits.CUSTOM_ASSET_CHUNK_BODY_BYTES + 1) {
             error("oversized payload must not be decoded")
         } shouldBe PaperCustomAssetChunkIngress.INVALID_SIZE
+    }
+
+    test("custom selections are byte limited before decode without reducing the chunk connection burst") {
+        val time = FakeMonotonicTimeSource()
+        val ingress = PaperConnectionIngress(catalog, time)
+        val connection = beginActive(ingress)
+        val customEmojiId = CustomEmojiId(1L, 2L, 3L)
+        val selection = CustomEmotionSelection(customEmojiId, null)
+        val chunk = CustomEmojiAssetChunk(customEmojiId, 1, 0, 1, byteArrayOf(1))
+        var selectionDecodes = 0
+        var chunkDecodes = 0
+
+        ingress.admitCustomSelection(connection, 0) {
+            error("empty payload must not be decoded")
+        } shouldBe PaperCustomSelectionIngress.INVALID_SIZE
+        ingress.admitCustomSelection(connection, ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES + 1) {
+            error("oversized payload must not be decoded")
+        } shouldBe PaperCustomSelectionIngress.INVALID_SIZE
+        ingress.admitCustomSelection(connection, ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES) {
+            selectionDecodes += 1
+            selection
+        }.shouldBeInstanceOf<PaperCustomSelectionIngress.Admitted>().lease.release()
+        ingress.admitCustomSelection(connection, ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES) {
+            selectionDecodes += 1
+            selection
+        } shouldBe PaperCustomSelectionIngress.RATE_LIMITED
+        time.advanceBy(3.seconds)
+        ingress.admitCustomSelection(connection, ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES) {
+            selectionDecodes += 1
+            selection
+        }.shouldBeInstanceOf<PaperCustomSelectionIngress.Admitted>().lease.release()
+
+        repeat(100) {
+            ingress.admitCustomAssetChunk(connection, ProtocolV1Limits.CUSTOM_ASSET_CHUNK_BODY_BYTES) {
+                chunkDecodes += 1
+                chunk
+            }
+        }
+
+        selectionDecodes shouldBe 2
+        chunkDecodes shouldBe 17
     }
 
     test("one maximum encoded custom asset fits the predecode wire budget") {

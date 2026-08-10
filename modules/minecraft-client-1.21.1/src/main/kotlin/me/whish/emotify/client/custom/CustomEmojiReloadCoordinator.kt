@@ -2,12 +2,17 @@ package me.whish.emotify.client.custom
 
 sealed interface CustomEmojiReloadCompletion {
     data object FollowUp : CustomEmojiReloadCompletion
-    data class Finished(val callbacks: List<() -> Unit>) : CustomEmojiReloadCompletion
+    data class Finished(
+        val success: Boolean,
+        val callbacks: List<() -> Unit>,
+        val resultCallbacks: List<(Boolean) -> Unit>,
+    ) : CustomEmojiReloadCompletion
 }
 
 class CustomEmojiReloadCoordinator {
     private val monitor = Any()
     private var callback: (() -> Unit)? = null
+    private val resultCallbacks = LinkedHashSet<(Boolean) -> Unit>()
     private var inFlight = false
     private var followUpRequested = false
 
@@ -23,6 +28,17 @@ class CustomEmojiReloadCoordinator {
     }
 
     fun isInFlight(): Boolean = synchronized(monitor) { inFlight }
+
+    fun requestWithResult(onComplete: (Boolean) -> Unit): Boolean = synchronized(monitor) {
+        resultCallbacks += onComplete
+        if (inFlight) {
+            followUpRequested = true
+            false
+        } else {
+            inFlight = true
+            true
+        }
+    }
 
     fun subscribe(onComplete: () -> Unit): Boolean = synchronized(monitor) {
         if (!inFlight) {
@@ -40,7 +56,9 @@ class CustomEmojiReloadCoordinator {
         }
         inFlight = false
         val completedCallbacks = if (success) listOfNotNull(callback) else emptyList()
+        val completedResultCallbacks = java.util.List.copyOf(resultCallbacks)
         callback = null
-        CustomEmojiReloadCompletion.Finished(completedCallbacks)
+        resultCallbacks.clear()
+        CustomEmojiReloadCompletion.Finished(success, completedCallbacks, completedResultCallbacks)
     }
 }

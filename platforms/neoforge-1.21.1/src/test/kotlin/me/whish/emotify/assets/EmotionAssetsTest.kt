@@ -225,6 +225,15 @@ class EmotionAssetsTest : FunSpec({
             "screen.emotify.search_footer",
             "screen.emotify.no_search_results",
             "screen.emotify.no_custom_emojis",
+            "screen.emotify.custom_hint.message",
+            "screen.emotify.custom_error.tooltip",
+            "screen.emotify.custom_error.invalid_image.detail",
+            "screen.emotify.custom_error.unsupported_dimensions.detail",
+            "screen.emotify.custom_error.file_too_large.detail",
+            "screen.emotify.custom_error.too_many_frames.detail",
+            "screen.emotify.custom_error.decode_failed.detail",
+            "screen.emotify.custom_error.duplicate.detail",
+            "screen.emotify.custom_error.capacity_reached.detail",
             "screen.emotify.add_favorite",
             "screen.emotify.remove_favorite",
             "key.emotify.open_picker",
@@ -250,6 +259,7 @@ class EmotionAssetsTest : FunSpec({
             "message.emotify.request_pending",
             "message.emotify.request_throttled",
             "message.emotify.emotion_active",
+            "message.emotify.favorite_capacity",
         )
         val expectedKeys = BuiltInEmotionManifest.definitions.map { definition -> definition.translationKey } +
             BuiltInEmotionManifest.categories.map { category -> category.translationKey } +
@@ -257,7 +267,7 @@ class EmotionAssetsTest : FunSpec({
         val english = resourceJson("/assets/emotify/lang/en_us.json")
         val russian = resourceJson("/assets/emotify/lang/ru_ru.json")
 
-        expectedKeys.size shouldBe 226
+        expectedKeys.size shouldBe 236
         english.keySet() shouldContainExactlyInAnyOrder expectedKeys
         russian.keySet() shouldContainExactlyInAnyOrder expectedKeys
         english.entrySet().all { entry -> entry.value.asString.isNotBlank() } shouldBe true

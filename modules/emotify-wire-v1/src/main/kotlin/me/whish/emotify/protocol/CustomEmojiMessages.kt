@@ -58,6 +58,8 @@ class CustomEmojiAssetChunk private constructor(
         bytes.copyInto(destination, destinationOffset)
     }
 
+    internal fun borrowedData(): ByteArray = bytes
+
     override fun equals(other: Any?): Boolean =
         this === other || other is CustomEmojiAssetChunk &&
             customEmojiId == other.customEmojiId &&

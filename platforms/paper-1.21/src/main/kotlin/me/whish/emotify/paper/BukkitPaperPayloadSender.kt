@@ -17,15 +17,13 @@ import me.whish.emotify.server.core.PreparedCustomEmotionDelivery
 import me.whish.emotify.server.core.PreparedEmotionDelivery
 import me.whish.emotify.server.core.PreparedServerHelloDelivery
 import me.whish.emotify.wire.v1.ProtocolV1Channels
-import me.whish.emotify.wire.v1.CustomEmojiAssetChunkCache
 import org.bukkit.plugin.Plugin
 
 internal class BukkitPaperOutboundTransport(
     private val plugin: Plugin,
     private val connections: PaperConnectionIngress,
+    private val customAssetChunkPayloads: PaperCustomAssetChunkPayloadCache = PaperCustomAssetChunkPayloadCache(),
 ) : OutboundTransport {
-    private val customEmojiAssets = CustomEmojiAssetChunkCache()
-
     override fun prepareServerHello(hello: ServerHello): PreparedServerHelloDelivery {
         val encoded = PaperProtocolV1Bridge.encodeServerHello(hello)
         return PreparedServerHelloDelivery { connection ->
@@ -58,9 +56,11 @@ internal class BukkitPaperOutboundTransport(
         losslessChunks: List<CustomEmojiAssetChunk>?,
     ): PreparedCustomEmojiAssetDelivery {
         if (transfer.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
+            val chunks = java.util.List.copyOf(
+                requireNotNull(losslessChunks) { "A large custom asset requires prepared lossless chunks" },
+            )
             val encodedChunks by lazy(LazyThreadSafetyMode.NONE) {
-                (losslessChunks ?: customEmojiAssets.chunks(transfer.asset))
-                    .map(PaperProtocolV1Bridge::encodeCustomAssetChunk)
+                customAssetChunkPayloads.payloads(transfer.asset.id, chunks)
             }
             return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
                 val connection = ConnectionKey(playerId, connectionId)

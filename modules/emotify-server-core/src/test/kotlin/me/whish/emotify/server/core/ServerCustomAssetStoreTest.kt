@@ -1,5 +1,6 @@
 package me.whish.emotify.server.core
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.nulls.shouldBeNull
@@ -68,6 +69,18 @@ class ServerCustomAssetStoreTest : FunSpec({
 
         (first === second) shouldBe true
         store.snapshot() shouldBe before
+    }
+
+    test("large assets cannot enter shared retention without prepared lossless chunks") {
+        val store = ServerCustomAssetStore()
+        val asset = CustomEmojiAsset.create(
+            CustomEmojiPixels.of(32, IntArray(32 * 32) { it }),
+        )
+
+        shouldThrow<IllegalArgumentException> {
+            store.put(asset, null)
+        }
+        store.snapshot() shouldBe ServerCustomAssetStoreSnapshot(0, 0L)
     }
 
     test("session authorization cannot outlive a globally evicted asset") {

@@ -134,12 +134,49 @@ class CustomEmojiDescriptor private constructor(
             require(normalized.toByteArray(StandardCharsets.UTF_8).size <= MAXIMUM_DISPLAY_NAME_UTF8_BYTES) {
                 "Custom emoji display name exceeds $MAXIMUM_DISPLAY_NAME_UTF8_BYTES UTF-8 bytes"
             }
-            require(normalized.none(Char::isISOControl)) { "Custom emoji display name contains control characters" }
+            require(CustomEmojiDisplayNamePolicy.isSafe(normalized)) {
+                "Custom emoji display name contains unsafe characters"
+            }
             return CustomEmojiDescriptor(normalized, originId)
         }
 
         fun default(contentId: CustomEmojiId): CustomEmojiDescriptor = create(DEFAULT_DISPLAY_NAME, contentId)
     }
+}
+
+object CustomEmojiDisplayNamePolicy {
+    fun isSafe(value: String): Boolean {
+        var offset = 0
+        while (offset < value.length) {
+            val codePoint = value.codePointAt(offset)
+            if (!isSafeCodePoint(codePoint)) {
+                return false
+            }
+            offset += Character.charCount(codePoint)
+        }
+        return true
+    }
+
+    fun isSafeCodePoint(codePoint: Int): Boolean {
+        val type = Character.getType(codePoint)
+        return Character.isValidCodePoint(codePoint) &&
+            !Character.isISOControl(codePoint) &&
+            type != Character.SURROGATE.toInt() &&
+            type != Character.LINE_SEPARATOR.toInt() &&
+            type != Character.PARAGRAPH_SEPARATOR.toInt() &&
+            codePoint != ARABIC_LETTER_MARK &&
+            codePoint !in LEFT_TO_RIGHT_MARK..RIGHT_TO_LEFT_MARK &&
+            codePoint !in BIDIRECTIONAL_EMBEDDING_START..BIDIRECTIONAL_EMBEDDING_END &&
+            codePoint !in BIDIRECTIONAL_ISOLATE_START..BIDIRECTIONAL_ISOLATE_END
+    }
+
+    private const val ARABIC_LETTER_MARK = 0x061C
+    private const val LEFT_TO_RIGHT_MARK = 0x200E
+    private const val RIGHT_TO_LEFT_MARK = 0x200F
+    private const val BIDIRECTIONAL_EMBEDDING_START = 0x202A
+    private const val BIDIRECTIONAL_EMBEDDING_END = 0x202E
+    private const val BIDIRECTIONAL_ISOLATE_START = 0x2066
+    private const val BIDIRECTIONAL_ISOLATE_END = 0x2069
 }
 
 class CustomEmojiPixels private constructor(

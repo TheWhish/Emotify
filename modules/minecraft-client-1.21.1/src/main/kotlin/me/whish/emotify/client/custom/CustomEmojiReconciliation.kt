@@ -1,16 +1,36 @@
 package me.whish.emotify.client.custom
 
-fun canRemoveMissingCustomQuickSlots(
-    decodeFailures: Int,
-    rejectedFiles: Int,
-    capacityRejections: Int,
+import java.nio.file.Path
+import me.whish.emotify.domain.EmotionId
+
+data class CustomEmojiReferenceIndex(
+    val sourceEmotionIds: Map<Path, EmotionId>,
+    val presentEmotionIds: Set<EmotionId>,
+    val removalSafe: Boolean,
+)
+
+fun reconcileCustomEmojiReferences(
+    previousSourceEmotionIds: Map<Path, EmotionId>,
+    decodedSourceEmotionIds: Map<Path, EmotionId>,
+    unavailableSourcePaths: Set<Path>,
     directoryLimitReached: Boolean,
-): Boolean {
-    require(decodeFailures >= 0) { "Decode failure count must be non-negative" }
-    require(rejectedFiles >= 0) { "Rejected file count must be non-negative" }
-    require(capacityRejections >= 0) { "Capacity rejection count must be non-negative" }
-    return decodeFailures == 0 &&
-        rejectedFiles == 0 &&
-        capacityRejections == 0 &&
-        !directoryLimitReached
+): CustomEmojiReferenceIndex {
+    val previous = previousSourceEmotionIds.entries.associate { (path, emotionId) -> path.normalize() to emotionId }
+    val decoded = decodedSourceEmotionIds.entries.associate { (path, emotionId) -> path.normalize() to emotionId }
+    val sourceEmotionIds = LinkedHashMap<Path, EmotionId>(
+        if (directoryLimitReached) previous.size + decoded.size else decoded.size + unavailableSourcePaths.size,
+    )
+    if (directoryLimitReached) {
+        sourceEmotionIds.putAll(previous)
+    }
+    sourceEmotionIds.putAll(decoded)
+    unavailableSourcePaths.forEach { sourcePath ->
+        val normalizedPath = sourcePath.normalize()
+        previous[normalizedPath]?.let { emotionId -> sourceEmotionIds.putIfAbsent(normalizedPath, emotionId) }
+    }
+    return CustomEmojiReferenceIndex(
+        java.util.Map.copyOf(sourceEmotionIds),
+        java.util.Set.copyOf(sourceEmotionIds.values),
+        !directoryLimitReached,
+    )
 }

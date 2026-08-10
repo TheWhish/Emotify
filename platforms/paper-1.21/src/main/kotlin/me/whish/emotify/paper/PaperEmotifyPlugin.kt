@@ -21,6 +21,7 @@ import me.whish.emotify.paper.runtime.PaperCustomSelectionIngress
 import me.whish.emotify.paper.runtime.PaperDiagnosticGate
 import me.whish.emotify.paper.runtime.PaperDimensionOrdinalRegistry
 import me.whish.emotify.paper.runtime.PaperIngressGate
+import me.whish.emotify.paper.runtime.PaperIngressLane
 import me.whish.emotify.paper.runtime.PaperIngressLease
 import me.whish.emotify.paper.runtime.PaperReloadGate
 import me.whish.emotify.paper.runtime.PaperPolicyRefreshBatchResult
@@ -30,6 +31,7 @@ import me.whish.emotify.paper.runtime.PaperServerRuntime
 import me.whish.emotify.paper.runtime.PaperSelectionIngress
 import me.whish.emotify.protocol.ClientHello
 import me.whish.emotify.protocol.CustomEmotionSelection
+import me.whish.emotify.protocol.CustomEmojiAssetChunk
 import me.whish.emotify.protocol.EmotionSelection
 import me.whish.emotify.protocol.ServerHello
 import me.whish.emotify.server.core.AudienceTraversalOutcome
@@ -46,6 +48,7 @@ import me.whish.emotify.server.core.ServerSelectionPolicy
 import me.whish.emotify.server.core.ServerSelectionResult
 import me.whish.emotify.server.core.ServerRuntimeConfiguration
 import me.whish.emotify.wire.v1.ProtocolV1Channels
+import me.whish.emotify.wire.v1.CustomEmojiAssetChunker
 import me.whish.emotify.wire.v1.WireDecodeException
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
@@ -62,6 +65,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     private val capabilities = ProtocolCapabilities(ProtocolVersion.CURRENT, EmotifyProtocolFeatures.supported)
     private lateinit var connections: PaperConnectionIngress
     private lateinit var runtime: PaperServerRuntime
+    private lateinit var customAssetChunkPayloads: PaperCustomAssetChunkPayloadCache
     private lateinit var snapshotFactory: BukkitPaperPlayerSnapshotFactory
     private lateinit var dimensions: PaperDimensionOrdinalRegistry
     private lateinit var diagnosticGate: PaperDiagnosticGate
@@ -104,13 +108,15 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
             SystemMonotonicTimeSource,
         )
+        customAssetChunkPayloads = PaperCustomAssetChunkPayloadCache()
+        snapshotFactory = BukkitPaperPlayerSnapshotFactory(server, connections, dimensions)
         val broadcastLimits = configuration.broadcast.budgetLimits
         runtime = PaperServerRuntime(
             serverConfiguration.serverHello,
             serverConfiguration.selectionPolicy,
             SystemMonotonicTimeSource,
             BukkitPaperAudiencePort(server, connections),
-            BukkitPaperOutboundTransport(this, connections),
+            BukkitPaperOutboundTransport(this, connections, customAssetChunkPayloads),
             { server.isPrimaryThread },
             globalSelectionBudget,
             AudienceBudget(
@@ -123,8 +129,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             ),
             configuration.broadcast.audience,
             EmotifyProtocolFeatures.registry,
+            snapshotFactory::create,
+            ::reportSelectionResult,
         )
-        snapshotFactory = BukkitPaperPlayerSnapshotFactory(server, connections, dimensions)
+        server.scheduler.runTaskTimer(this, Runnable { runtime.drainCustomAssetVerifications() }, 1L, 1L)
         policyRefreshDispatcher = PaperPolicyRefreshDispatcher(this, reportBatch = ::reportPolicyRefreshBatch)
         policyRefreshDispatcher.start()
         configurationApplyTransaction = PaperConfigurationApplyTransaction(
@@ -163,6 +171,9 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         server.scheduler.cancelTasks(this)
         if (::runtime.isInitialized) {
             runtime.clear()
+        }
+        if (::customAssetChunkPayloads.isInitialized) {
+            customAssetChunkPayloads.clear()
         }
         if (::dimensions.isInitialized) {
             dimensions.clear()
@@ -217,6 +228,9 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         if (!PaperProtocolChannels.acceptsIncoming(channel)) {
             return
         }
+        if (PaperProtocolChannels.requiresUsePermission(channel) && !player.hasPermission(PaperPermissions.USE)) {
+            return
+        }
         val connection = connections.current(player.uniqueId, player) ?: return
         try {
             when (channel) {
@@ -252,7 +266,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                     -> Unit
                 }
                 ProtocolV1Channels.CUSTOM_SELECT -> when (
-                    val admission = connections.admitCustomSelection(connection) {
+                    val admission = connections.admitCustomSelection(connection, message.size) {
                         PaperProtocolV1Bridge.decodeCustomSelection(message)
                     }
                 ) {
@@ -264,6 +278,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                     PaperCustomSelectionIngress.RATE_LIMITED,
                     PaperCustomSelectionIngress.PROTOCOL_INACTIVE,
                     PaperCustomSelectionIngress.STALE_CONNECTION,
+                    PaperCustomSelectionIngress.INVALID_SIZE,
                     -> Unit
                 }
                 ProtocolV1Channels.CUSTOM_ASSET_CHUNK -> when (
@@ -272,7 +287,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
                     }
                 ) {
                     is me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.Admitted ->
-                        runtime.receiveCustomAssetChunk(connection, admission.chunk)
+                        dispatchCustomAssetChunk(connection, admission.chunk)
                     me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.INVALID_SIZE,
                     me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.PROTOCOL_INACTIVE,
                     me.whish.emotify.paper.runtime.PaperCustomAssetChunkIngress.RATE_LIMITED,
@@ -382,6 +397,21 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         }
     }
 
+    private fun dispatchCustomAssetChunk(connection: ConnectionKey, chunk: CustomEmojiAssetChunk) {
+        dispatch(
+            connection,
+            lane = PaperIngressLane.CUSTOM_ASSET_CHUNK,
+            maximumForLane = CustomEmojiAssetChunker.MAXIMUM_CHUNK_COUNT,
+        ) {
+            val snapshot = snapshotFactory.create(connection)
+            runtime.enqueueCustomAssetChunk(
+                connection,
+                chunk,
+                permittedToUpload = snapshot?.permittedToPublish == true,
+            )
+        }
+    }
+
     private fun reportSelectionResult(connection: ConnectionKey, result: ServerSelectionResult) {
         when (result) {
             is ServerSelectionResult.Ignored -> Unit
@@ -437,13 +467,15 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     private fun dispatch(
         connection: ConnectionKey,
         selectionLease: GlobalSelectionIngressLease? = null,
+        lane: PaperIngressLane = PaperIngressLane.SERIAL,
+        maximumForLane: Int = 1,
         task: () -> Unit,
     ) {
         if (server.isPrimaryThread) {
             runInbound(connection, task, selectionLease, null)
             return
         }
-        val ingressLease = ingressGate.tryAcquire(connection)
+        val ingressLease = ingressGate.tryAcquire(connection, lane, maximumForLane)
         if (ingressLease == null) {
             selectionLease?.release()
             return

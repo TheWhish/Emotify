@@ -11,6 +11,11 @@ import me.whish.emotify.server.core.AudiencePort
 import me.whish.emotify.server.core.AudienceBudget
 import me.whish.emotify.server.core.AudienceBudgetLimits
 import me.whish.emotify.server.core.ConnectionKey
+import me.whish.emotify.server.core.CustomAssetUploadCommit
+import me.whish.emotify.server.core.CustomAssetUploadPreparation
+import me.whish.emotify.server.core.CustomAssetUploadRejection
+import me.whish.emotify.server.core.CustomAssetVerificationQueue
+import me.whish.emotify.server.core.CustomAssetVerificationQueueEvent
 import me.whish.emotify.server.core.EmotifyServerEngine
 import me.whish.emotify.server.core.GlobalSelectionIngressBudget
 import me.whish.emotify.server.core.OutboundAttempt
@@ -52,6 +57,8 @@ class PaperServerRuntime(
     audienceBudget: AudienceBudget = AudienceBudget(timeSource = timeSource),
     audiencePolicy: ServerAudiencePolicy = ServerAudiencePolicy.DEFAULT,
     featureRegistry: ProtocolFeatureRegistry = ProtocolFeatureRegistry.EMPTY,
+    private val playerSnapshotProvider: (ConnectionKey) -> PlayerSnapshot? = { null },
+    private val resumedSelectionConsumer: (ConnectionKey, ServerSelectionResult) -> Unit = { _, _ -> },
 ) {
     private val portableServerHello = ProtocolV1PortableProfile.requireServerHello(serverHello)
     private val engine = EmotifyServerEngine(
@@ -65,6 +72,7 @@ class PaperServerRuntime(
         audiencePolicy = audiencePolicy,
         featureRegistry = featureRegistry,
     )
+    private val customAssetVerifications = CustomAssetVerificationQueue()
 
     val activeSessionCount: Int
         get() {
@@ -105,9 +113,45 @@ class PaperServerRuntime(
         return engine.selectCustom(player, selection)
     }
 
-    fun receiveCustomAssetChunk(connection: ConnectionKey, chunk: CustomEmojiAssetChunk): Boolean {
+    fun enqueueCustomAssetChunk(
+        connection: ConnectionKey,
+        chunk: CustomEmojiAssetChunk,
+        permittedToUpload: Boolean,
+    ): CustomAssetUploadPreparation {
         requireMainThread()
-        return engine.receiveCustomAssetChunk(connection, chunk)
+        val preparation = engine.prepareCustomAssetChunk(connection, chunk, permittedToUpload)
+        if (
+            preparation is CustomAssetUploadPreparation.VerificationRequired &&
+            !customAssetVerifications.trySubmit(preparation.task)
+        ) {
+            engine.cancelCustomAssetVerification(
+                preparation.task,
+                CustomAssetUploadRejection.QUEUE_SATURATED,
+            )
+            return CustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.QUEUE_SATURATED)
+        }
+        return preparation
+    }
+
+    fun drainCustomAssetVerifications(allowPlayerSnapshots: Boolean = true) {
+        requireMainThread()
+        while (true) {
+            val event = customAssetVerifications.pollEvent() ?: return
+            when (event) {
+                is CustomAssetVerificationQueueEvent.Cancelled -> engine.cancelCustomAssetVerification(
+                    event.task,
+                    CustomAssetUploadRejection.QUEUE_SATURATED,
+                )
+                is CustomAssetVerificationQueueEvent.Completed -> {
+                    val connection = event.completion.task.connection
+                    val commit = engine.completeCustomAssetVerification(
+                        event.completion,
+                        if (allowPlayerSnapshots) playerSnapshotProvider(connection) else null,
+                    )
+                    resumedSelection(commit)?.let { result -> resumedSelectionConsumer(connection, result) }
+                }
+            }
+        }
     }
 
     fun close(connection: ConnectionKey): ServerCloseResult {
@@ -132,10 +176,18 @@ class PaperServerRuntime(
 
     fun clear(): ServerClearResult {
         requireMainThread()
+        customAssetVerifications.close()
+        drainCustomAssetVerifications(allowPlayerSnapshots = false)
         return engine.clear()
     }
 
     private fun requireMainThread() {
         check(isMainThread()) { "Paper server state must be accessed on the primary server thread" }
+    }
+
+    private fun resumedSelection(commit: CustomAssetUploadCommit): ServerSelectionResult? = when (commit) {
+        is CustomAssetUploadCommit.Accepted -> commit.resumedSelection
+        is CustomAssetUploadCommit.Rejected -> commit.resumedSelection
+        CustomAssetUploadCommit.Stale -> null
     }
 }

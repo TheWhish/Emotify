@@ -4,26 +4,31 @@ import kotlin.math.abs
 import me.whish.emotify.client.picker.EmotionLabelTruncation
 import me.whish.emotify.client.picker.EmotionPickerEdgeFade
 import me.whish.emotify.client.picker.EmotionPickerGridLayout
+import me.whish.emotify.client.picker.EmotionPickerGridItem
 import me.whish.emotify.client.picker.EmotionPickerGridMetrics
 import me.whish.emotify.client.picker.EmotionPickerHitArea
+import me.whish.emotify.client.picker.EmotionPickerHoverAnimation
 import me.whish.emotify.client.picker.EmotionPickerListMetrics
 import me.whish.emotify.client.picker.EmotionPickerQuickSlotAnimation
 import me.whish.emotify.client.picker.EmotionPickerQuickSlotBounds
 import me.whish.emotify.client.picker.EmotionPickerQuickSlotMouseDecision
 import me.whish.emotify.client.picker.EmotionPickerQuickSlotMouseRouting
 import me.whish.emotify.client.picker.EmotionPickerScrollMath
+import me.whish.emotify.client.picker.EmotionPickerScrollbarMetrics
 import me.whish.emotify.client.picker.EmotionPickerSideActionLayout
 import me.whish.emotify.client.presentation.EmotionPresentation
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.AbstractButton
+import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.ContainerObjectSelectionList
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.components.events.GuiEventListener
 import net.minecraft.client.gui.narration.NarratableEntry
 import net.minecraft.client.gui.narration.NarrationElementOutput
+import net.minecraft.client.gui.narration.NarratedElementType
 import net.minecraft.client.sounds.SoundManager
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.ResourceLocation
@@ -149,13 +154,13 @@ internal class EmotionGridList(
         setRenderHeader(true, EmotionPickerListMetrics.ROW_HEADER_HEIGHT)
     }
 
-    fun replaceEmotions(emotions: List<EmotionPresentation>, resetScroll: Boolean = true) {
+    fun replaceItems(items: List<EmotionPickerGridItem>, resetScroll: Boolean = true) {
         val retainedScroll = targetScrollAmount
         draggingScrollbar = false
         setFocused(null)
         setDragging(false)
         replaceEntries(
-            emotions.chunked(EmotionPickerGridLayout.COLUMNS).map { row ->
+            items.chunked(EmotionPickerGridLayout.COLUMNS).map { row ->
                 EmotionGridRow(
                     row,
                     cellWidthsProvider,
@@ -313,9 +318,7 @@ internal class EmotionGridList(
 
     private fun scrollbarThumbHeight(): Int {
         val trackHeight = height - EmotionPickerListMetrics.EDGE_PADDING * 2
-        return (trackHeight.toFloat() * trackHeight / getMaxPosition())
-            .toInt()
-            .coerceIn(MINIMUM_THUMB_HEIGHT, trackHeight - THUMB_VERTICAL_MARGIN)
+        return EmotionPickerScrollbarMetrics.thumbHeight(trackHeight, getMaxPosition())
     }
 
     private fun scrollbarTravel(): Int {
@@ -449,8 +452,6 @@ internal class EmotionGridList(
     }
 
     companion object {
-        private const val MINIMUM_THUMB_HEIGHT = 36
-        private const val THUMB_VERTICAL_MARGIN = 8
         private const val WHEEL_SCROLL_DISTANCE = 32.0
         private const val EXTERNAL_SCROLL_EPSILON = 0.1
         private const val MAX_FRAME_SECONDS = 0.05
@@ -460,7 +461,7 @@ internal class EmotionGridList(
 }
 
 internal class EmotionGridRow(
-    presentations: List<EmotionPresentation>,
+    items: List<EmotionPickerGridItem>,
     private val cellWidths: () -> List<Int>,
     onSelected: (EmotionPresentation) -> Unit,
     isFavorite: (EmotionPresentation) -> Boolean,
@@ -469,27 +470,42 @@ internal class EmotionGridRow(
     isDragging: (EmotionPresentation) -> Boolean,
 ) : ContainerObjectSelectionList.Entry<EmotionGridRow>() {
     private val cells: List<EmotionGridCell> = java.util.List.copyOf(
-        presentations.map { presentation ->
-            EmotionGridCell(
-                EmotionIconButton(
-                    presentation,
-                    onSelected,
-                    onPointerPressed,
-                    { isDragging(presentation) },
-                ),
-                FavoriteButton(
-                    presentation,
-                    { isFavorite(presentation) },
-                    { onFavoriteToggled(presentation) },
-                ),
-            )
+        items.map { item ->
+            when (item) {
+                is EmotionPickerGridItem.Available -> EmotionGridCell.Available(
+                    EmotionIconButton(
+                        item.presentation,
+                        onSelected,
+                        onPointerPressed,
+                        { isDragging(item.presentation) },
+                    ),
+                    FavoriteButton(
+                        item.presentation,
+                        { isFavorite(item.presentation) },
+                        { onFavoriteToggled(item.presentation) },
+                    ),
+                )
+                is EmotionPickerGridItem.UnavailableCustom -> EmotionGridCell.Unavailable(
+                    UnavailableCustomEmojiWidget(item),
+                )
+            }
         },
     )
     private val children: List<GuiEventListener> = java.util.List.copyOf(
-        cells.flatMap { cell -> listOf(cell.favoriteButton, cell.emotionButton) },
+        cells.flatMap { cell ->
+            when (cell) {
+                is EmotionGridCell.Available -> listOf(cell.favoriteButton, cell.emotionButton)
+                is EmotionGridCell.Unavailable -> listOf(cell.widget)
+            }
+        },
     )
     private val narratables: List<NarratableEntry> = java.util.List.copyOf(
-        cells.flatMap { cell -> listOf(cell.favoriteButton, cell.emotionButton) },
+        cells.flatMap { cell ->
+            when (cell) {
+                is EmotionGridCell.Available -> listOf(cell.favoriteButton, cell.emotionButton)
+                is EmotionGridCell.Unavailable -> listOf(cell.widget)
+            }
+        },
     )
 
     override fun children(): List<GuiEventListener> = children
@@ -512,14 +528,25 @@ internal class EmotionGridRow(
         val currentCellWidths = cellWidths()
         cells.forEachIndexed { column, cell ->
             val cellWidth = currentCellWidths[column]
-            cell.emotionButton.x = cellX
-            cell.emotionButton.y = top
-            cell.emotionButton.width = cellWidth
-            cell.emotionButton.height = EmotionPickerGridLayout.CELL_HEIGHT
-            cell.favoriteButton.x = cellX + cellWidth - FavoriteButton.SIZE - FAVORITE_RIGHT_INSET
-            cell.favoriteButton.y = top + FAVORITE_TOP_INSET
-            cell.emotionButton.render(guiGraphics, mouseX, mouseY, partialTick)
-            cell.favoriteButton.render(guiGraphics, mouseX, mouseY, partialTick)
+            when (cell) {
+                is EmotionGridCell.Available -> {
+                    cell.emotionButton.x = cellX
+                    cell.emotionButton.y = top
+                    cell.emotionButton.width = cellWidth
+                    cell.emotionButton.height = EmotionPickerGridLayout.CELL_HEIGHT
+                    cell.favoriteButton.x = cellX + cellWidth - FavoriteButton.SIZE - FAVORITE_RIGHT_INSET
+                    cell.favoriteButton.y = top + FAVORITE_TOP_INSET
+                    cell.emotionButton.render(guiGraphics, mouseX, mouseY, partialTick)
+                    cell.favoriteButton.render(guiGraphics, mouseX, mouseY, partialTick)
+                }
+                is EmotionGridCell.Unavailable -> {
+                    cell.widget.x = cellX
+                    cell.widget.y = top
+                    cell.widget.width = cellWidth
+                    cell.widget.height = EmotionPickerGridLayout.CELL_HEIGHT
+                    cell.widget.render(guiGraphics, mouseX, mouseY, partialTick)
+                }
+            }
             cellX += cellWidth + EmotionPickerListMetrics.CELL_GAP
         }
     }
@@ -530,10 +557,84 @@ internal class EmotionGridRow(
     }
 }
 
-private data class EmotionGridCell(
-    val emotionButton: EmotionIconButton,
-    val favoriteButton: FavoriteButton,
-)
+private sealed interface EmotionGridCell {
+    data class Available(
+        val emotionButton: EmotionIconButton,
+        val favoriteButton: FavoriteButton,
+    ) : EmotionGridCell
+
+    data class Unavailable(val widget: UnavailableCustomEmojiWidget) : EmotionGridCell
+}
+
+private object EmotionGridCardMetrics {
+    const val ICON_SIZE = 16
+    const val ICON_Y_OFFSET = 4
+    const val LABEL_Y_OFFSET = 23
+    const val LABEL_PADDING = 4
+}
+
+private class UnavailableCustomEmojiWidget(
+    item: EmotionPickerGridItem.UnavailableCustom,
+) : AbstractWidget(
+    0,
+    0,
+    1,
+    EmotionPickerGridLayout.CELL_HEIGHT,
+    Component.translatable(
+        "screen.emotify.custom_error.tooltip",
+        item.diagnostic.displayName,
+        Component.translatable(item.diagnostic.reason.translationKey),
+    ),
+) {
+    private val displayName = item.diagnostic.displayName
+
+    init {
+        tooltip = Tooltip.create(message)
+    }
+
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean = false
+
+    override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean = false
+
+    override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        EmotionPickerTheme.renderUnavailableCard(guiGraphics, x, y, width, height)
+        EmotionPickerTheme.renderUnavailablePreview(
+            guiGraphics,
+            x + (width - EmotionGridCardMetrics.ICON_SIZE) / 2,
+            y + EmotionGridCardMetrics.ICON_Y_OFFSET,
+            EmotionGridCardMetrics.ICON_SIZE,
+        )
+        val font = Minecraft.getInstance().font
+        val label = fittedText(
+            font,
+            displayName,
+            (width - EmotionGridCardMetrics.LABEL_PADDING * 2).coerceAtLeast(0),
+        )
+        guiGraphics.drawString(
+            font,
+            label,
+            x + (width - font.width(label)) / 2,
+            y + EmotionGridCardMetrics.LABEL_Y_OFFSET,
+            EmotionPickerTheme.unavailableText,
+            false,
+        )
+    }
+
+    override fun updateWidgetNarration(narrationElementOutput: NarrationElementOutput) {
+        narrationElementOutput.add(NarratedElementType.TITLE, message)
+    }
+}
+
+private fun fittedText(font: Font, value: String, availableWidth: Int): String {
+    if (font.width(value) <= availableWidth) {
+        return value
+    }
+    val shortenedWidth = (availableWidth - font.width(DIAGNOSTIC_TRUNCATION_MARK)).coerceAtLeast(0)
+    val shortened = font.plainSubstrByWidth(value, shortenedWidth)
+    return EmotionLabelTruncation.completePrefix(value, shortened) + DIAGNOSTIC_TRUNCATION_MARK
+}
+
+private const val DIAGNOSTIC_TRUNCATION_MARK = ".."
 
 private class EmotionIconButton(
     private val presentation: EmotionPresentation,
@@ -553,6 +654,7 @@ private class EmotionIconButton(
     private var cachedLabelWidth = -1
     private var cachedLabel = ""
     private var cachedLabelPixelWidth = 0
+    private val hoverMotion = EmotionPickerHoverAnimation.Motion()
 
     init {
         tooltip = titleTooltip
@@ -568,7 +670,7 @@ private class EmotionIconButton(
             mouseX,
             mouseY,
             x + width / 2.0,
-            y + ICON_Y_OFFSET + ICON_SIZE / 2.0,
+            y + EmotionGridCardMetrics.ICON_Y_OFFSET + EmotionGridCardMetrics.ICON_SIZE / 2.0,
         )
     }
 
@@ -580,6 +682,7 @@ private class EmotionIconButton(
         tooltip = if (overFavorite) null else titleTooltip
         val hovered = isHoveredOrFocused && !overFavorite
         val dragging = isDragging()
+        val hoverEmphasis = hoverMotion.advance(hovered, System.nanoTime())
         EmotionPickerTheme.renderButton(
             guiGraphics,
             x,
@@ -588,8 +691,11 @@ private class EmotionIconButton(
             height,
             when {
                 dragging -> EmotionPickerTheme.buttonSelected
-                hovered -> EmotionPickerTheme.buttonHovered
-                else -> EmotionPickerTheme.button
+                else -> EmotionPickerTheme.blendColor(
+                    EmotionPickerTheme.button,
+                    EmotionPickerTheme.buttonHovered,
+                    hoverEmphasis,
+                )
             },
             if (dragging) EmotionPickerTheme.selectedOutline else EmotionPickerTheme.buttonOutline,
             dragging,
@@ -597,10 +703,10 @@ private class EmotionIconButton(
         val region = presentation.regionAt(System.nanoTime() / 1_000_000L)
         guiGraphics.blit(
             texture,
-            x + (width - ICON_SIZE) / 2,
-            y + ICON_Y_OFFSET,
-            ICON_SIZE,
-            ICON_SIZE,
+            x + (width - EmotionGridCardMetrics.ICON_SIZE) / 2,
+            y + EmotionGridCardMetrics.ICON_Y_OFFSET,
+            EmotionGridCardMetrics.ICON_SIZE,
+            EmotionGridCardMetrics.ICON_SIZE,
             region.x.toFloat(),
             region.y.toFloat(),
             region.width,
@@ -609,13 +715,13 @@ private class EmotionIconButton(
             region.textureHeight,
         )
         val font = Minecraft.getInstance().font
-        val availableLabelWidth = width - LABEL_PADDING * 2
+        val availableLabelWidth = width - EmotionGridCardMetrics.LABEL_PADDING * 2
         updateFittedLabel(font, availableLabelWidth)
         guiGraphics.drawString(
             font,
             cachedLabel,
             x + (width - cachedLabelPixelWidth) / 2,
-            y + LABEL_Y_OFFSET,
+            y + EmotionGridCardMetrics.LABEL_Y_OFFSET,
             EmotionPickerTheme.labelText,
             false,
         )
@@ -651,10 +757,6 @@ private class EmotionIconButton(
     }
 
     companion object {
-        private const val ICON_SIZE = 16
-        private const val ICON_Y_OFFSET = 4
-        private const val LABEL_Y_OFFSET = 23
-        private const val LABEL_PADDING = 4
         private const val FAVORITE_RIGHT_INSET = 2
         private const val FAVORITE_TOP_INSET = 2
         private const val TRUNCATION_MARK = ".."
@@ -683,6 +785,7 @@ internal class EmotionQuickSlotButton(
     private var landingStartedNanos = Long.MIN_VALUE
     private var targetEmphasis = 0.0
     private var lastTargetFrameNanos = Long.MIN_VALUE
+    private val hoverMotion = EmotionPickerHoverAnimation.Motion()
     private var tooltipAssigned: Boolean? = null
     private var tooltipPresentation: EmotionPresentation? = null
 
@@ -728,6 +831,7 @@ internal class EmotionQuickSlotButton(
         updateTooltip(assignedNow, presentationNow)
         val targeted = dropTarget()
         updateTargetEmphasis(targeted, now)
+        val hoverEmphasis = hoverMotion.advance(isHoveredOrFocused, now)
         if (!assignedNow) {
             EmotionPickerTheme.renderEmptySlot(
                 guiGraphics,
@@ -735,7 +839,7 @@ internal class EmotionQuickSlotButton(
                 y,
                 width,
                 height,
-                isHoveredOrFocused,
+                hoverEmphasis,
                 targetEmphasis,
             )
             renderEmptyLabel(guiGraphics)
@@ -755,7 +859,11 @@ internal class EmotionQuickSlotButton(
         } else {
             0.0
         }
-        val baseFill = if (isHoveredOrFocused) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button
+        val baseFill = EmotionPickerTheme.blendColor(
+            EmotionPickerTheme.button,
+            EmotionPickerTheme.buttonHovered,
+            hoverEmphasis,
+        )
         val landingFill = EmotionPickerTheme.blendColor(
             baseFill,
             EmotionPickerTheme.buttonSelected,
@@ -910,6 +1018,7 @@ internal class EmotionTabButton(
     private var cachedLabelWidth = -1
     private var cachedLabel = ""
     private var cachedLabelPixelWidth = 0
+    private val hoverMotion = EmotionPickerHoverAnimation.Motion()
 
     init {
         if (icon != EmotionTabIcon.NONE) {
@@ -923,10 +1032,14 @@ internal class EmotionTabButton(
 
     override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         val selectedNow = selected()
+        val hoverEmphasis = hoverMotion.advance(isHoveredOrFocused, System.nanoTime())
         val background = when {
             selectedNow -> EmotionPickerTheme.buttonSelected
-            isHoveredOrFocused -> EmotionPickerTheme.buttonHovered
-            else -> EmotionPickerTheme.button
+            else -> EmotionPickerTheme.blendColor(
+                EmotionPickerTheme.button,
+                EmotionPickerTheme.buttonHovered,
+                hoverEmphasis,
+            )
         }
         EmotionPickerTheme.renderButton(
             guiGraphics,
@@ -1018,6 +1131,8 @@ internal class EmotionPickerSideActionButton(
     EmotionPickerSideActionLayout.SIZE,
     message,
 ) {
+    private val hoverMotion = EmotionPickerHoverAnimation.Motion()
+
     init {
         tooltip = Tooltip.create(message)
     }
@@ -1027,13 +1142,18 @@ internal class EmotionPickerSideActionButton(
     }
 
     override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        val hoverEmphasis = hoverMotion.advance(isHoveredOrFocused, System.nanoTime())
         EmotionPickerTheme.renderButton(
             guiGraphics,
             x,
             y,
             width,
             height,
-            if (isHoveredOrFocused) EmotionPickerTheme.buttonHovered else EmotionPickerTheme.button,
+            EmotionPickerTheme.blendColor(
+                EmotionPickerTheme.button,
+                EmotionPickerTheme.buttonHovered,
+                hoverEmphasis,
+            ),
             EmotionPickerTheme.buttonOutline,
             false,
         )
@@ -1085,6 +1205,7 @@ private class FavoriteButton(
     private val onToggled: () -> Unit,
 ) : AbstractButton(0, 0, SIZE, SIZE, Component.empty()) {
     private var favorite = isFavorite()
+    private val hoverMotion = EmotionPickerHoverAnimation.Motion()
 
     init {
         updateAction()
@@ -1097,8 +1218,18 @@ private class FavoriteButton(
 
     override fun renderWidget(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         synchronizeState()
-        if (isHovered) {
-            guiGraphics.fill(x, y, right, bottom, HOVER_BACKGROUND_COLOR)
+        val hoverEmphasis = hoverMotion.advance(isHovered, System.nanoTime())
+        if (hoverEmphasis > 0.0) {
+            guiGraphics.fill(
+                x,
+                y,
+                right,
+                bottom,
+                EmotionPickerTheme.colorWithOpacity(
+                    HOVER_BACKGROUND_COLOR,
+                    (hoverEmphasis * 255.0 + 0.5).toInt(),
+                ),
+            )
         }
         val font = Minecraft.getInstance().font
         val symbol = if (favorite) FILLED_STAR else EMPTY_STAR

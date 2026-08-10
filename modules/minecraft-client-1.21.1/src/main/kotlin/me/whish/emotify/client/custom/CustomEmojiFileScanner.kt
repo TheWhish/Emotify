@@ -11,6 +11,7 @@ import java.text.Normalizer
 import java.util.Locale
 import me.whish.emotify.domain.CustomEmojiAsset
 import me.whish.emotify.domain.CustomEmojiDescriptor
+import me.whish.emotify.domain.CustomEmojiDisplayNamePolicy
 import me.whish.emotify.domain.CustomEmojiPixels
 
 enum class CustomEmojiFileFormat {
@@ -34,6 +35,8 @@ enum class CustomEmojiFileRejectionReason {
 
 data class CustomEmojiFileRejection(
     val path: Path,
+    val displayName: String,
+    val format: CustomEmojiFileFormat,
     val reason: CustomEmojiFileRejectionReason,
 )
 
@@ -56,7 +59,11 @@ data class CustomEmojiFileScan(
     val accepted: List<CustomEmojiFile>,
     val rejected: List<CustomEmojiFileRejection>,
     val fingerprint: CustomEmojiDirectoryFingerprint,
-)
+) {
+    companion object {
+        val EMPTY = CustomEmojiFileScan(emptyList(), emptyList(), CustomEmojiDirectoryFingerprint.EMPTY)
+    }
+}
 
 object CustomEmojiFileScanner {
     const val MAXIMUM_FILES = 128
@@ -94,16 +101,30 @@ object CustomEmojiFileScanner {
         0xCF,
     )
 
-    fun scan(directory: Path): CustomEmojiFileScan {
+    fun scan(directory: Path, previous: CustomEmojiFileScan = CustomEmojiFileScan.EMPTY): CustomEmojiFileScan {
+        require(previous.accepted.size + previous.rejected.size <= MAXIMUM_FILES) {
+            "Previous custom emoji scan exceeds the file limit"
+        }
+        require(previous.fingerprint.entries.size <= MAXIMUM_FILES) {
+            "Previous custom emoji fingerprint exceeds the file limit"
+        }
         val candidates = candidates(directory)
-        val accepted = ArrayList<CustomEmojiFile>(candidates.paths.size)
+        val previousInspections = previous.inspectionsByPath()
+        val accepted = ArrayList<CustomEmojiFile>(candidates.entries.size)
         val rejected = ArrayList<CustomEmojiFileRejection>()
-        candidates.paths.forEach { path ->
-            val inspection = try {
-                inspect(path)
-            } catch (_: Exception) {
-                Inspection.rejected(path, CustomEmojiFileRejectionReason.INVALID_IMAGE)
-            }
+        candidates.entries.forEach { candidate ->
+            val inspection = previousInspections[candidate.path.normalize()]
+                ?.takeIf { cached -> cached.fingerprint == candidate.fingerprint }
+                ?.inspection
+                ?: try {
+                    inspect(candidate.path)
+                } catch (_: Exception) {
+                    Inspection.rejected(
+                        candidate.path,
+                        supportedFormat(candidate.path),
+                        CustomEmojiFileRejectionReason.INVALID_IMAGE,
+                    )
+                }
             inspection.fold(accepted::add, rejected::add)
         }
         return CustomEmojiFileScan(
@@ -144,58 +165,82 @@ object CustomEmojiFileScanner {
         if (supported.size > MAXIMUM_FILES) {
             directoryLimitReached = true
         }
-        val bounded = supported.take(MAXIMUM_FILES)
-        val fingerprints = bounded.map { path ->
+        val bounded = supported.take(MAXIMUM_FILES).map { path ->
             val attributes = Files.readAttributes(
                 path,
                 BasicFileAttributes::class.java,
                 LinkOption.NOFOLLOW_LINKS,
             )
-            CustomEmojiDirectoryEntry(
-                path.fileName.toString(),
-                attributes.size(),
-                attributes.lastModifiedTime().toMillis(),
+            Candidate(
+                path,
+                CustomEmojiDirectoryEntry(
+                    path.fileName.toString(),
+                    attributes.size(),
+                    attributes.lastModifiedTime().toMillis(),
+                ),
             )
         }
         return Candidates(
             bounded,
-            CustomEmojiDirectoryFingerprint(java.util.List.copyOf(fingerprints), directoryLimitReached),
+            CustomEmojiDirectoryFingerprint(
+                java.util.List.copyOf(bounded.map(Candidate::fingerprint)),
+                directoryLimitReached,
+            ),
         )
+    }
+
+    private fun CustomEmojiFileScan.inspectionsByPath(): Map<Path, CachedInspection> {
+        if (this == CustomEmojiFileScan.EMPTY) {
+            return emptyMap()
+        }
+        val fingerprintsByName = fingerprint.entries.associateBy(CustomEmojiDirectoryEntry::fileName)
+        val inspections = LinkedHashMap<Path, CachedInspection>(accepted.size + rejected.size)
+        accepted.forEach { file ->
+            fingerprintsByName[file.path.fileName.toString()]?.let { entry ->
+                inspections[file.path.normalize()] = CachedInspection(entry, Inspection.accepted(file))
+            }
+        }
+        rejected.forEach { rejection ->
+            fingerprintsByName[rejection.path.fileName.toString()]?.let { entry ->
+                inspections[rejection.path.normalize()] = CachedInspection(entry, Inspection.Rejected(rejection))
+            }
+        }
+        return inspections
     }
 
     private fun isSupportedImageFile(path: Path): Boolean =
         Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) && format(path) != null
 
     private fun inspect(path: Path): Inspection<CustomEmojiFile, CustomEmojiFileRejection> {
-        val format = format(path) ?: return Inspection.rejected(path, CustomEmojiFileRejectionReason.INVALID_IMAGE)
+        val format = supportedFormat(path)
         val size = Files.size(path)
         if (size > MAXIMUM_FILE_BYTES) {
-            return Inspection.rejected(path, CustomEmojiFileRejectionReason.FILE_TOO_LARGE)
+            return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.FILE_TOO_LARGE)
         }
         if (size <= 0L) {
-            return Inspection.rejected(path, CustomEmojiFileRejectionReason.INVALID_IMAGE)
+            return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.INVALID_IMAGE)
         }
 
         val bytes = Files.newInputStream(path).use { input ->
             input.readNBytes(MAXIMUM_FILE_BYTES + 1)
         }
         if (bytes.size > MAXIMUM_FILE_BYTES) {
-            return Inspection.rejected(path, CustomEmojiFileRejectionReason.FILE_TOO_LARGE)
+            return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.FILE_TOO_LARGE)
         }
         val dimensions = dimensions(format, bytes)
-            ?: return Inspection.rejected(path, CustomEmojiFileRejectionReason.INVALID_IMAGE)
+            ?: return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.INVALID_IMAGE)
         if (
             dimensions.first != dimensions.second ||
             !CustomEmojiPixels.supports(dimensions.first) ||
             format == CustomEmojiFileFormat.GIF && dimensions.first > CustomEmojiAsset.MAXIMUM_ANIMATED_SIZE
         ) {
-            return Inspection.rejected(path, CustomEmojiFileRejectionReason.UNSUPPORTED_DIMENSIONS)
+            return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.UNSUPPORTED_DIMENSIONS)
         }
 
         val fileName = path.fileName.toString()
         val displayName = fileName.substring(0, fileName.lastIndexOf('.')).trim()
         if (displayName.isEmpty()) {
-            return Inspection.rejected(path, CustomEmojiFileRejectionReason.INVALID_IMAGE)
+            return Inspection.rejected(path, format, CustomEmojiFileRejectionReason.INVALID_IMAGE)
         }
         return Inspection.accepted(
             CustomEmojiFile(
@@ -216,7 +261,7 @@ object CustomEmojiFileScanner {
             val codePoint = normalized.codePointAt(offset)
             val characterCount = Character.charCount(codePoint)
             offset += characterCount
-            if (Character.isISOControl(codePoint)) {
+            if (!CustomEmojiDisplayNamePolicy.isSafeCodePoint(codePoint)) {
                 continue
             }
             if (result.length + characterCount > CustomEmojiDescriptor.MAXIMUM_DISPLAY_NAME_LENGTH) {
@@ -316,11 +361,24 @@ object CustomEmojiFileScanner {
             else -> null
         }
 
+    private fun supportedFormat(path: Path): CustomEmojiFileFormat =
+        checkNotNull(format(path)) { "Unsupported custom emoji file reached inspection: $path" }
+
     private fun unsigned(value: Byte): Int = value.toInt() and 0xFF
 
     private data class Candidates(
-        val paths: List<Path>,
+        val entries: List<Candidate>,
         val fingerprint: CustomEmojiDirectoryFingerprint,
+    )
+
+    private data class Candidate(
+        val path: Path,
+        val fingerprint: CustomEmojiDirectoryEntry,
+    )
+
+    private data class CachedInspection(
+        val fingerprint: CustomEmojiDirectoryEntry,
+        val inspection: Inspection<CustomEmojiFile, CustomEmojiFileRejection>,
     )
 
     private sealed interface Inspection<out A, out R> {
@@ -339,9 +397,17 @@ object CustomEmojiFileScanner {
 
             fun rejected(
                 path: Path,
+                format: CustomEmojiFileFormat,
                 reason: CustomEmojiFileRejectionReason,
             ): Inspection<CustomEmojiFile, CustomEmojiFileRejection> =
-                Rejected(CustomEmojiFileRejection(path, reason))
+                Rejected(
+                    CustomEmojiFileRejection(
+                        path,
+                        descriptorSafeDisplayName(path.fileName.toString().substringBeforeLast('.')),
+                        format,
+                        reason,
+                    ),
+                )
         }
     }
 

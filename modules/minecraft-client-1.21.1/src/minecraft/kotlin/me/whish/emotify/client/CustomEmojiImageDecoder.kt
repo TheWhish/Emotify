@@ -10,6 +10,10 @@ import org.lwjgl.stb.STBImage
 import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
 
+internal class CustomEmojiFrameLimitExceededException(maximumFrameCount: Int) : IllegalArgumentException(
+    "GIF contains more than $maximumFrameCount source frames",
+)
+
 class DecodedCustomEmoji private constructor(
     frames: List<NativeImage>,
     durationsMillis: IntArray,
@@ -247,8 +251,8 @@ private data class GifStructure(
                         position++
                         position = bytes.skipSubBlocks(position)
                         frames++
-                        require(frames <= GifTimelineNormalizer.MAXIMUM_SOURCE_FRAME_COUNT) {
-                            "GIF contains more than ${GifTimelineNormalizer.MAXIMUM_SOURCE_FRAME_COUNT} source frames"
+                        if (frames > GifTimelineNormalizer.MAXIMUM_SOURCE_FRAME_COUNT) {
+                            throw CustomEmojiFrameLimitExceededException(GifTimelineNormalizer.MAXIMUM_SOURCE_FRAME_COUNT)
                         }
                     }
                     EXTENSION_INTRODUCER -> {

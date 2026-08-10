@@ -152,6 +152,20 @@ object EmotionPickerScrollMath {
     private const val SNAP_VELOCITY = 0.25
 }
 
+object EmotionPickerScrollbarMetrics {
+    fun thumbHeight(trackHeight: Int, contentHeight: Int): Int {
+        require(trackHeight > 0) { "Scrollbar track height must be positive: $trackHeight" }
+        require(contentHeight > 0) { "Scrollbar content height must be positive: $contentHeight" }
+        val maximum = (trackHeight - THUMB_VERTICAL_MARGIN).coerceAtLeast(1)
+        val minimum = minOf(MINIMUM_THUMB_HEIGHT, maximum)
+        val ideal = (trackHeight.toDouble() * trackHeight / contentHeight).toInt()
+        return ideal.coerceIn(minimum, maximum)
+    }
+
+    private const val MINIMUM_THUMB_HEIGHT = 36
+    private const val THUMB_VERTICAL_MARGIN = 8
+}
+
 object EmotionPickerListMetrics {
     const val SIDE_PADDING = EmotionPickerVisualMetrics.GAP + EmotionPickerVisualMetrics.FRAME_THICKNESS
     const val CELL_GAP = EmotionPickerVisualMetrics.GAP
@@ -221,6 +235,11 @@ object EmotionPickerLayoutMetrics {
     const val SEARCH_LIST_Y_OFFSET = SEARCH_FIELD_Y_OFFSET + SEARCH_FIELD_HEIGHT + CONTROL_GAP
 }
 
+enum class EmotionPickerViewportMode {
+    NORMAL,
+    SEARCH,
+}
+
 object EmotionPickerSideActionLayout {
     const val SIZE = 20
     const val GAP = EmotionPickerVisualMetrics.GAP
@@ -254,9 +273,15 @@ data class EmotionPickerGeometry(
     val rowWidth: Int,
     val cellWidths: List<Int>,
 ) {
-    fun listY(searching: Boolean): Int = if (searching) searchListY else normalListY
+    fun listY(mode: EmotionPickerViewportMode): Int = when (mode) {
+        EmotionPickerViewportMode.NORMAL -> normalListY
+        EmotionPickerViewportMode.SEARCH -> searchListY
+    }
 
-    fun listHeight(searching: Boolean): Int = if (searching) searchListHeight else normalListHeight
+    fun listHeight(mode: EmotionPickerViewportMode): Int = when (mode) {
+        EmotionPickerViewportMode.NORMAL -> normalListHeight
+        EmotionPickerViewportMode.SEARCH -> searchListHeight
+    }
 
     fun quickSlotAt(mouseX: Double, mouseY: Double): Int =
         quickSlotBounds.indexOfFirst { bounds -> bounds.contains(mouseX, mouseY) }

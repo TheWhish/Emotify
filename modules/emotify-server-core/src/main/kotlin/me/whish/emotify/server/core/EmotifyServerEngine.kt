@@ -144,6 +144,7 @@ enum class SelectionIgnoreReason {
     STALE_CONNECTION,
     HANDSHAKE_INCOMPLETE,
     UNKNOWN_EMOTION,
+    CUSTOM_ASSET_VERIFYING,
 }
 
 sealed interface RejectionDispatch {
@@ -270,6 +271,8 @@ class EmotifyServerEngine(
                 preparation.descriptor,
             )
             CustomSelectionPreparation.Ignored -> ServerSelectionResult.Ignored(SelectionIgnoreReason.UNKNOWN_EMOTION)
+            CustomSelectionPreparation.Deferred ->
+                ServerSelectionResult.Ignored(SelectionIgnoreReason.CUSTOM_ASSET_VERIFYING)
             is CustomSelectionPreparation.Rejected -> reject(
                 player.connection,
                 session,
@@ -283,6 +286,94 @@ class EmotifyServerEngine(
             chunk,
             configuration.selectionPolicy,
         ) == true
+
+    fun prepareCustomAssetChunk(
+        connection: ConnectionKey,
+        chunk: CustomEmojiAssetChunk,
+        permittedToUpload: Boolean,
+    ): CustomAssetUploadPreparation {
+        val session = sessions.get(connection)
+            ?: return CustomAssetUploadPreparation.Rejected(CustomAssetUploadRejection.STALE_CONNECTION)
+        return when (
+            val preparation = session.prepareCustomAssetChunk(
+                chunk,
+                configuration.selectionPolicy,
+                permittedToUpload,
+            )
+        ) {
+            SessionCustomAssetUploadPreparation.Pending -> CustomAssetUploadPreparation.Pending
+            is SessionCustomAssetUploadPreparation.VerificationRequired ->
+                CustomAssetUploadPreparation.VerificationRequired(
+                    CustomAssetVerificationTask(connection, preparation.ticket),
+                )
+            is SessionCustomAssetUploadPreparation.Rejected ->
+                CustomAssetUploadPreparation.Rejected(preparation.reason)
+        }
+    }
+
+    fun completeCustomAssetVerification(
+        completion: CustomAssetVerificationCompletion,
+        player: PlayerSnapshot?,
+    ): CustomAssetUploadCommit {
+        val task = completion.task
+        val connection = task.connection
+        val session = sessions.get(connection)
+        if (session == null) {
+            task.ticket.lease.close()
+            return CustomAssetUploadCommit.Stale
+        }
+        if (player != null && player.connection != connection) {
+            if (!session.cancelCustomAssetVerification(task.ticket)) {
+                task.ticket.lease.close()
+            }
+            return CustomAssetUploadCommit.Stale
+        }
+        val currentPlayer = player
+        return when (
+            val commit = session.completeCustomAssetVerification(
+                task.ticket,
+                completion.result,
+                configuration.selectionPolicy,
+                currentPlayer?.permittedToPublish == true,
+            )
+        ) {
+            is SessionCustomAssetUploadCommit.Accepted -> {
+                val resumed = commit.deferredSelection?.let { deferred ->
+                    selectCustom(checkNotNull(currentPlayer), deferred)
+                }
+                CustomAssetUploadCommit.Accepted(resumed)
+            }
+            is SessionCustomAssetUploadCommit.Rejected -> {
+                val resumed = commit.deferredSelection?.let {
+                    reject(
+                        connection,
+                        session,
+                        SelectionPreparation.Rejected(commit.selectionReason, 0),
+                    )
+                }
+                CustomAssetUploadCommit.Rejected(commit.reason, resumed)
+            }
+            SessionCustomAssetUploadCommit.Stale -> CustomAssetUploadCommit.Stale
+        }
+    }
+
+    fun cancelCustomAssetVerification(
+        task: CustomAssetVerificationTask,
+        reason: CustomAssetUploadRejection,
+    ): CustomAssetUploadCancellation {
+        require(reason == CustomAssetUploadRejection.QUEUE_SATURATED) {
+            "Custom asset verification can only be cancelled before execution after queue saturation: $reason"
+        }
+        if (!task.cancelBeforeVerification()) {
+            return CustomAssetUploadCancellation.VerificationStarted
+        }
+        val session = sessions.get(task.connection)
+        if (session?.cancelCustomAssetVerification(task.ticket) == true) {
+            return CustomAssetUploadCancellation.Cancelled
+        }
+        task.ticket.lease.close()
+        return CustomAssetUploadCancellation.Stale
+    }
 
     fun close(connection: ConnectionKey): ServerCloseResult =
         if (sessions.close(connection)) ServerCloseResult.CLOSED else ServerCloseResult.STALE_OR_MISSING

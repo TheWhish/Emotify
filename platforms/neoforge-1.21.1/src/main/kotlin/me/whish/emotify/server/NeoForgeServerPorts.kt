@@ -2,6 +2,7 @@ package me.whish.emotify.server
 
 import java.util.UUID
 import me.whish.emotify.network.ConnectionAttributes
+import me.whish.emotify.network.EmotifyChannels
 import me.whish.emotify.network.payload.EmotionPlayPayload
 import me.whish.emotify.network.payload.SelectionRejectedPayload
 import me.whish.emotify.network.payload.ServerHelloPayload
@@ -26,7 +27,6 @@ import me.whish.emotify.server.core.PreparedEmotionDelivery
 import me.whish.emotify.server.core.PreparedServerHelloDelivery
 import me.whish.emotify.server.core.PreparedCustomEmojiAssetDelivery
 import me.whish.emotify.server.core.PreparedCustomEmotionDelivery
-import me.whish.emotify.wire.v1.CustomEmojiAssetChunkCache
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 
@@ -80,8 +80,6 @@ internal class NeoForgeAudiencePort(
 internal class NeoForgeOutboundTransport(
     private val server: MinecraftServer,
 ) : OutboundTransport {
-    private val customEmojiAssets = CustomEmojiAssetChunkCache()
-
     override fun prepareServerHello(hello: ServerHello): PreparedServerHelloDelivery {
         val payload = ServerHelloPayload(hello)
         return PreparedServerHelloDelivery { connection ->
@@ -120,14 +118,18 @@ internal class NeoForgeOutboundTransport(
         losslessChunks: List<CustomEmojiAssetChunk>?,
     ): PreparedCustomEmojiAssetDelivery {
         if (transfer.asset.pixels.size > LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE) {
-            val payloads = (losslessChunks ?: customEmojiAssets.chunks(transfer.asset))
-                .map(::CustomEmojiAssetChunkPayload)
+            val chunks = requireNotNull(losslessChunks) {
+                "A large custom asset requires prepared lossless chunks"
+            }
+            val payloads by lazy(LazyThreadSafetyMode.NONE) {
+                chunks.map(::CustomEmojiAssetChunkPayload)
+            }
             return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
                 payloads.fold(OutboundDeliveryStatus.SENT) { status, payload ->
                     if (status != OutboundDeliveryStatus.SENT) {
                         status
                     } else {
-                        send(playerId, connectionId, CustomEmojiAssetChunkPayload.TYPE) { player ->
+                        sendCustom(playerId, connectionId, requireLossless = true) { player ->
                             player.connection.send(payload)
                         }
                     }
@@ -136,7 +138,7 @@ internal class NeoForgeOutboundTransport(
         }
         val payload = CustomEmojiAssetPayload.prepared(transfer)
         return PreparedCustomEmojiAssetDelivery { playerId, connectionId ->
-            send(playerId, connectionId, CustomEmojiAssetPayload.TYPE) { player ->
+            sendCustom(playerId, connectionId) { player ->
                 player.connection.send(payload)
             }
         }
@@ -145,10 +147,33 @@ internal class NeoForgeOutboundTransport(
     override fun prepareCustomEmotionPlay(play: CustomEmotionPlay): PreparedCustomEmotionDelivery {
         val payload = CustomEmotionPlayPayload(play)
         return PreparedCustomEmotionDelivery { playerId, connectionId ->
-            send(playerId, connectionId, CustomEmotionPlayPayload.TYPE) { player ->
+            sendCustom(playerId, connectionId) { player ->
                 player.connection.send(payload)
             }
         }
+    }
+
+    private fun sendCustom(
+        playerId: UUID,
+        connectionId: ConnectionId,
+        requireLossless: Boolean = false,
+        delivery: (ServerPlayer) -> Unit,
+    ): OutboundDeliveryStatus {
+        val player = server.playerList.getPlayer(playerId) ?: return OutboundDeliveryStatus.UNAVAILABLE
+        val connection = player.connection.connection
+        val activeConnectionId = connection.channel()
+            .attr(ConnectionAttributes.serverConnectionId)
+            .get()
+        val supportsCustom = if (requireLossless) {
+            EmotifyChannels.clientCanReceiveLosslessCustomEmojis(player.connection::hasChannel)
+        } else {
+            EmotifyChannels.clientCanReceiveCustomEmojis(player.connection::hasChannel)
+        }
+        if (activeConnectionId != connectionId.value || !connection.isConnected || !supportsCustom) {
+            return OutboundDeliveryStatus.UNAVAILABLE
+        }
+        delivery(player)
+        return OutboundDeliveryStatus.SENT
     }
 
     private fun <TPayload : net.minecraft.network.protocol.common.custom.CustomPacketPayload> send(

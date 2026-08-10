@@ -31,6 +31,10 @@ object RemoteCustomEmojiRegistry {
         if (lookup.contains(asset.id)) {
             return true
         }
+        return register(connectionId, prepare(asset))
+    }
+
+    fun prepare(asset: CustomEmojiAsset): PreparedRemoteCustomEmoji {
         val image = NativeImage(asset.pixels.width * asset.frames.size, asset.pixels.height, true)
         val texture: ResourceLocation
         val presentation: EmotionPresentation
@@ -45,14 +49,31 @@ object RemoteCustomEmojiRegistry {
             image.close()
             throw failure
         }
+        return PreparedRemoteCustomEmoji(asset, image, presentation, texture)
+    }
+
+    fun discard(prepared: PreparedRemoteCustomEmoji) {
+        prepared.image.close()
+    }
+
+    fun register(connectionId: Long, prepared: PreparedRemoteCustomEmoji): Boolean {
+        val asset = prepared.asset
+        if (connectionId != activeConnectionId) {
+            discard(prepared)
+            return false
+        }
+        if (lookup.contains(asset.id)) {
+            discard(prepared)
+            return true
+        }
         val dynamicTexture = try {
-            DynamicTexture(image)
+            DynamicTexture(prepared.image)
         } catch (failure: Throwable) {
-            image.close()
+            prepared.image.close()
             throw failure
         }
         try {
-            Minecraft.getInstance().textureManager.register(texture, dynamicTexture)
+            Minecraft.getInstance().textureManager.register(prepared.texture, dynamicTexture)
         } catch (failure: Throwable) {
             try {
                 dynamicTexture.close()
@@ -61,12 +82,12 @@ object RemoteCustomEmojiRegistry {
             }
             throw failure
         }
-        val remote = RemoteCustomEmoji(asset, presentation, texture)
+        val remote = RemoteCustomEmoji(asset, prepared.presentation, prepared.texture)
         try {
             lookup.add(asset.id, remote.presentation.textureId, remote, remote.texture)
         } catch (failure: Throwable) {
             try {
-                Minecraft.getInstance().textureManager.release(texture)
+                Minecraft.getInstance().textureManager.release(prepared.texture)
             } catch (cleanupFailure: Exception) {
                 failure.addSuppressed(cleanupFailure)
             }
@@ -155,6 +176,13 @@ object RemoteCustomEmojiRegistry {
         val asset: CustomEmojiAsset,
         val presentation: EmotionPresentation,
         val texture: ResourceLocation,
+    )
+
+    class PreparedRemoteCustomEmoji internal constructor(
+        val asset: CustomEmojiAsset,
+        internal val image: NativeImage,
+        internal val presentation: EmotionPresentation,
+        internal val texture: ResourceLocation,
     )
 }
 

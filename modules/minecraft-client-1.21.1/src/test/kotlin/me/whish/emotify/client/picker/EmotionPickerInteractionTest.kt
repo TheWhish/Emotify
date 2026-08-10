@@ -163,6 +163,18 @@ class EmotionPickerInteractionTest : FunSpec({
         (motion.velocityY > 0.0) shouldBe true
     }
 
+    test("hover emphasis enters and leaves smoothly while recovering from a delayed frame") {
+        val motion = EmotionPickerHoverAnimation.Motion()
+        val entering = motion.advance(true, 1_000_000_000L)
+        val delayed = motion.advance(true, 1_300_000_000L)
+        val leaving = motion.advance(false, 1_316_666_667L)
+
+        (entering in 0.0..<1.0) shouldBe true
+        (delayed in entering..<1.0) shouldBe true
+        (leaving in 0.0..<delayed) shouldBe true
+        EmotionPickerHoverAnimation.nextEmphasis(0.0, true, 0.0) shouldBe 0.0
+    }
+
     test("empty quick slot consumes clicks without activating while filled slot remains interactive") {
         EmotionPickerQuickSlotMouseRouting.click(assigned = false, hovered = true, button = 0) shouldBe
             EmotionPickerQuickSlotMouseDecision.CONSUME_EMPTY

@@ -208,68 +208,90 @@ internal fun WireReader.readCustomEmojiDescriptor(): CustomEmojiDescriptor {
     return descriptor
 }
 
-internal fun customEmojiPixelsSize(pixels: CustomEmojiPixels): Int {
-    requireLegacyCustomEmojiSize(pixels.size)
-    return 1 + customEmojiFramePixelsSize(pixels)
-}
-
-internal fun customEmojiAssetSize(asset: CustomEmojiAsset): Int {
-    requireLegacyCustomEmojiSize(asset.pixels.size)
-    return if (!asset.isAnimated) {
-        customEmojiPixelsSize(asset.pixels)
-    } else {
-        3 + asset.frames.sumOf { frame ->
-            varIntSize(frame.durationMillis) + customEmojiFramePixelsSize(frame.pixels)
-        }
-    }
-}
-
-internal fun WireWriter.writeCustomEmojiPixels(pixels: CustomEmojiPixels) {
-    requireLegacyCustomEmojiSize(pixels.size)
-    writeUnsignedByte(pixels.size)
-    writeCustomEmojiFramePixels(pixels)
-}
+internal fun customEmojiAssetSize(asset: CustomEmojiAsset): Int =
+    CustomEmojiAssetEncodingPlan.create(asset).encodedSize
 
 internal fun WireWriter.writeCustomEmojiAsset(asset: CustomEmojiAsset) {
-    requireLegacyCustomEmojiSize(asset.pixels.size)
-    if (!asset.isAnimated) {
-        writeCustomEmojiPixels(asset.pixels)
-        return
+    CustomEmojiAssetEncodingPlan.create(asset).encode(this)
+}
+
+internal class CustomEmojiAssetEncodingPlan private constructor(
+    private val asset: CustomEmojiAsset,
+    private val frames: List<CustomEmojiFrameEncodingPlan>,
+    val encodedSize: Int,
+) {
+    fun encode(writer: WireWriter) {
+        if (!asset.isAnimated) {
+            writer.writeUnsignedByte(asset.pixels.size)
+            frames.single().encode(writer)
+            return
+        }
+        writer.writeUnsignedByte(ANIMATED_PIXELS)
+        writer.writeUnsignedByte(asset.pixels.size)
+        writer.writeUnsignedByte(asset.frames.size)
+        asset.frames.forEachIndexed { index, frame ->
+            writer.writeVarInt(frame.durationMillis)
+            frames[index].encode(writer)
+        }
     }
-    writeUnsignedByte(ANIMATED_PIXELS)
-    writeUnsignedByte(asset.pixels.size)
-    writeUnsignedByte(asset.frames.size)
-    asset.frames.forEach { frame ->
-        writeVarInt(frame.durationMillis)
-        writeCustomEmojiFramePixels(frame.pixels)
+
+    companion object {
+        fun create(asset: CustomEmojiAsset): CustomEmojiAssetEncodingPlan {
+            requireLegacyCustomEmojiSize(asset.pixels.size)
+            val frames = asset.frames.map { frame -> CustomEmojiFrameEncodingPlan.create(frame.pixels) }
+            val encodedSize = if (!asset.isAnimated) {
+                1 + frames.single().encodedSize
+            } else {
+                3 + asset.frames.indices.sumOf { index ->
+                    varIntSize(asset.frames[index].durationMillis) + frames[index].encodedSize
+                }
+            }
+            return CustomEmojiAssetEncodingPlan(asset, java.util.List.copyOf(frames), encodedSize)
+        }
     }
 }
 
-private fun WireWriter.writeCustomEmojiFramePixels(pixels: CustomEmojiPixels) {
-    val palette = customEmojiPalette(pixels)
-    if (palette == null) {
-        writeUnsignedByte(RAW_PIXELS)
-        repeat(pixels.pixelCount) { index -> writeInt(pixels.colorAt(index)) }
-        return
-    }
-
-    writeUnsignedByte(PALETTE_PIXELS)
-    writeUnsignedByte(palette.colors.size)
-    palette.colors.forEach(::writeInt)
-    writeUnsignedByte(palette.bitsPerIndex)
-    var accumulator = 0
-    var accumulatedBits = 0
-    palette.indices.forEach { index ->
-        accumulator = accumulator or (index shl accumulatedBits)
-        accumulatedBits += palette.bitsPerIndex
-        while (accumulatedBits >= Byte.SIZE_BITS) {
-            writeUnsignedByte(accumulator and 0xFF)
-            accumulator = accumulator ushr Byte.SIZE_BITS
-            accumulatedBits -= Byte.SIZE_BITS
+internal class CustomEmojiFrameEncodingPlan private constructor(
+    private val pixels: CustomEmojiPixels,
+    private val palette: CustomEmojiPalette?,
+    val encodedSize: Int,
+) {
+    fun encode(writer: WireWriter) {
+        val preparedPalette = palette
+        if (preparedPalette == null) {
+            writer.writeUnsignedByte(RAW_PIXELS)
+            repeat(pixels.pixelCount) { index -> writer.writeInt(pixels.colorAt(index)) }
+            return
+        }
+        writer.writeUnsignedByte(PALETTE_PIXELS)
+        writer.writeUnsignedByte(preparedPalette.colors.size)
+        preparedPalette.colors.forEach(writer::writeInt)
+        writer.writeUnsignedByte(preparedPalette.bitsPerIndex)
+        var accumulator = 0
+        var accumulatedBits = 0
+        preparedPalette.indices.forEach { index ->
+            accumulator = accumulator or (index shl accumulatedBits)
+            accumulatedBits += preparedPalette.bitsPerIndex
+            while (accumulatedBits >= Byte.SIZE_BITS) {
+                writer.writeUnsignedByte(accumulator and 0xFF)
+                accumulator = accumulator ushr Byte.SIZE_BITS
+                accumulatedBits -= Byte.SIZE_BITS
+            }
+        }
+        if (accumulatedBits > 0) {
+            writer.writeUnsignedByte(accumulator)
         }
     }
-    if (accumulatedBits > 0) {
-        writeUnsignedByte(accumulator)
+
+    companion object {
+        fun create(pixels: CustomEmojiPixels): CustomEmojiFrameEncodingPlan {
+            val palette = customEmojiPalette(pixels)
+            return CustomEmojiFrameEncodingPlan(
+                pixels,
+                palette,
+                palette?.encodedSize ?: (1 + pixels.rawByteLength),
+            )
+        }
     }
 }
 
@@ -332,9 +354,6 @@ private fun WireReader.readCustomEmojiPixels(size: Int): CustomEmojiPixels {
         )
     }
 }
-
-private fun customEmojiFramePixelsSize(pixels: CustomEmojiPixels): Int =
-    customEmojiPalette(pixels)?.encodedSize ?: (1 + pixels.rawByteLength)
 
 private fun WireReader.readPaletteCustomEmojiPixels(size: Int): CustomEmojiPixels {
     val pixelCount = size * size

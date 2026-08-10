@@ -57,6 +57,7 @@ sealed interface PaperCustomSelectionIngress {
     data object RATE_LIMITED : PaperCustomSelectionIngress
     data object PROTOCOL_INACTIVE : PaperCustomSelectionIngress
     data object STALE_CONNECTION : PaperCustomSelectionIngress
+    data object INVALID_SIZE : PaperCustomSelectionIngress
 }
 
 sealed interface PaperCustomAssetChunkIngress {
@@ -77,7 +78,7 @@ class PaperConnectionIngress(
     private val monitor = Any()
     private val entries = HashMap<UUID, Entry>()
     private var lastConnectionId = 0L
-    private val customAssetChunkBytes = TokenBucket(
+    private val customAssetBytes = TokenBucket(
         CUSTOM_ASSET_GLOBAL_BURST_BYTES,
         CUSTOM_ASSET_GLOBAL_REFILL_BYTES_PER_SECOND,
         timeSource,
@@ -96,6 +97,11 @@ class PaperConnectionIngress(
             TokenBucket(HELLO_BURST_CAPACITY, HELLO_REFILL_TOKENS_PER_SECOND, timeSource),
             ClientHelloIngressGuard(),
             SelectionIngressGuard(timeSource),
+            TokenBucket(
+                CUSTOM_SELECTION_CONNECTION_BURST_BYTES,
+                CUSTOM_SELECTION_CONNECTION_REFILL_BYTES_PER_SECOND,
+                timeSource,
+            ),
             TokenBucket(CUSTOM_ASSET_CONNECTION_BURST_BYTES, CUSTOM_ASSET_CONNECTION_REFILL_BYTES_PER_SECOND, timeSource),
             outgoingChannels.fold(0) { mask, channel -> mask or outgoingChannelBit(channel) },
         )
@@ -247,8 +253,12 @@ class PaperConnectionIngress(
 
     fun admitCustomSelection(
         connection: ConnectionKey,
+        encodedByteCount: Int,
         decode: () -> CustomEmotionSelection,
     ): PaperCustomSelectionIngress {
+        if (encodedByteCount !in 1..ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES) {
+            return PaperCustomSelectionIngress.INVALID_SIZE
+        }
         val permit = synchronized(monitor) {
             val active = entries[connection.playerId]
             if (active?.connection != connection) {
@@ -260,12 +270,20 @@ class PaperConnectionIngress(
             if (!active.selectionGuard.tryAdmit()) {
                 return PaperCustomSelectionIngress.RATE_LIMITED
             }
-            when (val admission = globalSelections.tryAcquire()) {
+            val permit = when (val admission = globalSelections.tryAcquire()) {
                 is GlobalSelectionIngressAdmission.Admitted -> SelectionPermit(active, admission.lease)
                 GlobalSelectionIngressAdmission.OutstandingLimitReached,
                 GlobalSelectionIngressAdmission.RateLimited,
                 -> return PaperCustomSelectionIngress.RATE_LIMITED
             }
+            if (
+                !active.customSelectionBytes.tryConsume(encodedByteCount) ||
+                !customAssetBytes.tryConsume(encodedByteCount)
+            ) {
+                permit.lease.release()
+                return PaperCustomSelectionIngress.RATE_LIMITED
+            }
+            permit
         }
         val selection = try {
             decode()
@@ -304,7 +322,7 @@ class PaperConnectionIngress(
             }
             if (
                 !active.customAssetChunkBytes.tryConsume(encodedByteCount) ||
-                !customAssetChunkBytes.tryConsume(encodedByteCount)
+                !customAssetBytes.tryConsume(encodedByteCount)
             ) {
                 return PaperCustomAssetChunkIngress.RATE_LIMITED
             }
@@ -332,7 +350,7 @@ class PaperConnectionIngress(
         val cleared = entries.size
         entries.clear()
         globalSelections.reset()
-        customAssetChunkBytes.reset()
+        customAssetBytes.reset()
         cleared
     }
 
@@ -342,6 +360,7 @@ class PaperConnectionIngress(
         val helloRequests: TokenBucket,
         val helloGuard: ClientHelloIngressGuard,
         val selectionGuard: SelectionIngressGuard,
+        val customSelectionBytes: TokenBucket,
         val customAssetChunkBytes: TokenBucket,
         var outgoingChannelsMask: Int,
     ) {
@@ -362,6 +381,9 @@ class PaperConnectionIngress(
     private companion object {
         const val HELLO_BURST_CAPACITY = 2
         const val HELLO_REFILL_TOKENS_PER_SECOND = 1
+        const val CUSTOM_SELECTION_CONNECTION_BURST_BYTES = ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES
+        const val CUSTOM_SELECTION_CONNECTION_REFILL_BYTES_PER_SECOND =
+            (ProtocolV1Limits.CUSTOM_SELECT_BODY_BYTES + 2) / 3
         const val CUSTOM_ASSET_MAXIMUM_CHUNKS =
             (CustomEmojiLosslessCodec.MAXIMUM_ENCODED_BYTES + CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES - 1) /
                 CustomEmojiAssetChunker.MAXIMUM_CHUNK_DATA_BYTES
