@@ -15,7 +15,7 @@
 
 Emotify adds animated emotions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
-Version **0.6.0** completes the Minecraft 1.21.1 feature set with the new Echo Bloom animation, unobtrusive Shift + right-click guidance, clear diagnostics for invalid custom emoji files, corrected cross-loader GIF sharing, and extensive client, server, traffic, and lifecycle hardening.
+Version **0.6.1** is a focused stability patch that synchronizes multi-sprite exit motion, hardens custom-emoji transfer retries, releases stale client and server caches, and strengthens release validation.
 
 ---
 
@@ -57,9 +57,9 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-neoforge-1.21.1-0.6.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric | `emotify-fabric-1.21.1-0.6.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur | `emotify-paper-1.21-0.6.0.jar` | `plugins`; has no additional server dependencies |
+| NeoForge | `emotify-neoforge-1.21.1-0.6.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric | `emotify-fabric-1.21.1-0.6.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur | `emotify-paper-1.21-0.6.1.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 

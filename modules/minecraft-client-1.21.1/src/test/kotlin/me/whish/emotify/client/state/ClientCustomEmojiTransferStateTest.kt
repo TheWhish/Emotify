@@ -1,5 +1,6 @@
 package me.whish.emotify.client.state
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -27,6 +28,21 @@ class ClientCustomEmojiTransferStateTest : FunSpec({
 
         tracker.disconnect(1L)
         tracker.prepare(1L, asset, descriptor).shouldBeNull()
+    }
+
+    test("failed lossless selection publication rolls back its provisional upload marker") {
+        val tracker = ClientCustomEmojiUploadTracker()
+        tracker.begin(1L)
+
+        shouldThrow<IllegalStateException> {
+            tracker.commitProvisionalUpload(1L, asset.id) {
+                error("selection send failed")
+            }
+        }
+
+        tracker.requiresUpload(1L, asset.id) shouldBe true
+        tracker.commitProvisionalUpload(1L, asset.id) { "sent" } shouldBe "sent"
+        tracker.requiresUpload(1L, asset.id) shouldBe false
     }
 
     test("asset ingress guard is connection scoped and bounded") {

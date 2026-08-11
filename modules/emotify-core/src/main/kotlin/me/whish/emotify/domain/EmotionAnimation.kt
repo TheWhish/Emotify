@@ -187,6 +187,22 @@ object EmotionAnimation {
         target: EmotionAnimationFrameBuffer,
     ) {
         target.prepare(3)
+        val exitVertical = multiSpriteExitDisplacement(
+            elapsed,
+            RIBBON_EXIT_START,
+            RIBBON_EXIT_DISTANCE,
+        )
+        val exitHorizontal = multiSpriteExitCurve(
+            elapsed,
+            RIBBON_EXIT_START,
+            RIBBON_EXIT_CURVE,
+            RIBBON_EXIT_PHASE,
+        )
+        val exitDeformation = multiSpriteExitDeformation(
+            elapsed,
+            RIBBON_EXIT_START,
+            RIBBON_EXIT_DISTANCE,
+        )
         sampleRibbonSprite(
             target = target,
             spriteIndex = 0,
@@ -201,6 +217,9 @@ object EmotionAnimation {
             enterStart = 0.0,
             enterEnd = 300.0,
             exitStart = 1_540.0 + HOLD_EXTENSION_MILLIS,
+            exitHorizontal = exitHorizontal,
+            exitVertical = exitVertical,
+            exitDeformation = exitDeformation,
         )
         sampleRibbonSprite(
             target = target,
@@ -216,6 +235,9 @@ object EmotionAnimation {
             enterStart = 180.0,
             enterEnd = 480.0,
             exitStart = 1_580.0 + HOLD_EXTENSION_MILLIS,
+            exitHorizontal = exitHorizontal,
+            exitVertical = exitVertical,
+            exitDeformation = exitDeformation,
         )
         sampleRibbonSprite(
             target = target,
@@ -231,6 +253,9 @@ object EmotionAnimation {
             enterStart = 360.0,
             enterEnd = 660.0,
             exitStart = 1_620.0 + HOLD_EXTENSION_MILLIS,
+            exitHorizontal = exitHorizontal,
+            exitVertical = exitVertical,
+            exitDeformation = exitDeformation,
         )
     }
 
@@ -248,22 +273,29 @@ object EmotionAnimation {
         enterStart: Double,
         enterEnd: Double,
         exitStart: Double,
+        exitHorizontal: Double,
+        exitVertical: Double,
+        exitDeformation: Double,
     ) {
-        val localSeconds = positiveSeconds(elapsed - motionStart)
+        val motionElapsed = minOf(elapsed, RIBBON_EXIT_START)
+        val localSeconds = positiveSeconds(motionElapsed - motionStart)
         val spring = springResponse(localSeconds, RIBBON_DAMPING_RATIO, RIBBON_SPRING_FREQUENCY)
-        val living = livingWeight(elapsed, motionStart + 620.0, exitStart)
+        val living = livingWeight(elapsed, motionStart + 620.0, RIBBON_EXIT_START - LIVING_BLEND_MILLIS)
         val horizontal = restingX +
-            weaveAmplitude * LIVING_OSCILLATION_SCALE * sin(RIBBON_FREQUENCY * localSeconds + phase)
+            weaveAmplitude * LIVING_OSCILLATION_SCALE * sin(RIBBON_FREQUENCY * localSeconds + phase) +
+            exitHorizontal
         val vertical = restingY - RIBBON_ENTRY_DISTANCE + RIBBON_ENTRY_DISTANCE * spring +
             RIBBON_BOB_AMPLITUDE * LIVING_OSCILLATION_SCALE * living *
             sin(RIBBON_BOB_FREQUENCY * localSeconds + phase) +
-            RIBBON_EXIT_DISTANCE * acceleratedExit((elapsed - exitStart) / (DURATION_MILLIS - exitStart))
+            exitVertical
         target.set(
             spriteIndex = spriteIndex,
             horizontalOffset = direction * horizontal,
             verticalOffset = vertical,
             diameter = springDiameter(diameter, elapsed, enterStart, exitStart),
             alpha = fadeAlpha(elapsed, enterStart, enterEnd, exitStart),
+            horizontalScale = 1.0 - MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE * exitDeformation,
+            verticalScale = 1.0 + MULTI_SPRITE_EXIT_VERTICAL_RESPONSE * exitDeformation,
         )
     }
 
@@ -273,27 +305,45 @@ object EmotionAnimation {
         target: EmotionAnimationFrameBuffer,
     ) {
         target.prepare(2)
-        sampleLanternAnchor(elapsed, direction, target)
-        sampleLanternLight(elapsed, direction, target)
+        val exitVertical = multiSpriteExitDisplacement(
+            elapsed,
+            LANTERN_EXIT_START,
+            LANTERN_EXIT_DISTANCE,
+        )
+        val exitHorizontal = multiSpriteExitCurve(
+            elapsed,
+            LANTERN_EXIT_START,
+            LANTERN_EXIT_CURVE,
+            LANTERN_EXIT_PHASE,
+        )
+        val exitDeformation = multiSpriteExitDeformation(
+            elapsed,
+            LANTERN_EXIT_START,
+            LANTERN_EXIT_DISTANCE,
+        )
+        sampleLanternAnchor(elapsed, direction, target, exitHorizontal, exitVertical, exitDeformation)
+        sampleLanternLight(elapsed, direction, target, exitHorizontal, exitVertical, exitDeformation)
     }
 
     private fun sampleLanternAnchor(
         elapsed: Double,
         direction: Double,
         target: EmotionAnimationFrameBuffer,
+        exitHorizontal: Double,
+        exitVertical: Double,
+        exitDeformation: Double,
     ) {
-        val seconds = positiveSeconds(elapsed)
+        val motionElapsed = minOf(elapsed, LANTERN_EXIT_START)
+        val seconds = positiveSeconds(motionElapsed)
         val spring = springResponse(seconds, 0.72, 8.5)
-        val living = livingWeight(elapsed, 500.0, LANTERN_ANCHOR_LIFT_START)
-        val exit = smoothFlightProgress(
-            (elapsed - LANTERN_ANCHOR_LIFT_START) / (DURATION_MILLIS - LANTERN_ANCHOR_LIFT_START),
-        )
+        val living = livingWeight(elapsed, 500.0, LANTERN_EXIT_START - LIVING_BLEND_MILLIS)
         val horizontal = -0.04 +
             0.025 * exp(-2.6 * seconds) * sin(5.6 * seconds) +
-            0.014 * LIVING_OSCILLATION_SCALE * living * sin(2.2 * seconds + 0.2)
+            0.014 * LIVING_OSCILLATION_SCALE * living * sin(2.2 * seconds + 0.2) +
+            exitHorizontal
         val vertical = -0.10 + 0.34 * spring +
             0.012 * LIVING_OSCILLATION_SCALE * living * sin(2.7 * seconds + 0.5) +
-            LANTERN_ANCHOR_EXIT_DISTANCE * exit
+            exitVertical
         val pulse = 1.0 + 0.035 * smoothPulse(elapsed, 720.0, 1_120.0)
         target.set(
             spriteIndex = 0,
@@ -301,6 +351,8 @@ object EmotionAnimation {
             verticalOffset = vertical,
             diameter = springDiameter(0.275, elapsed, 0.0, LANTERN_ANCHOR_FADE_START) * pulse,
             alpha = fadeAlpha(elapsed, 0.0, 320.0, LANTERN_ANCHOR_FADE_START),
+            horizontalScale = 1.0 - MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE * exitDeformation,
+            verticalScale = 1.0 + MULTI_SPRITE_EXIT_VERTICAL_RESPONSE * exitDeformation,
         )
     }
 
@@ -308,26 +360,30 @@ object EmotionAnimation {
         elapsed: Double,
         direction: Double,
         target: EmotionAnimationFrameBuffer,
+        exitHorizontal: Double,
+        exitVertical: Double,
+        exitDeformation: Double,
     ) {
-        val localSeconds = positiveSeconds(elapsed - LANTERN_LIGHT_MOTION_START)
+        val motionElapsed = minOf(elapsed, LANTERN_EXIT_START)
+        val localSeconds = positiveSeconds(motionElapsed - LANTERN_LIGHT_MOTION_START)
         val spring = springResponse(localSeconds, 0.66, 8.8)
-        val living = livingWeight(elapsed, 1_120.0, LANTERN_LIGHT_EXIT_START)
+        val living = livingWeight(elapsed, 1_120.0, LANTERN_EXIT_START - LIVING_BLEND_MILLIS)
         val horizontal = 0.09 +
             0.025 * exp(-2.5 * localSeconds) * sin(6.0 * localSeconds) +
-            0.010 * LIVING_OSCILLATION_SCALE * living * sin(2.5 * localSeconds + 1.4)
+            0.010 * LIVING_OSCILLATION_SCALE * living * sin(2.5 * localSeconds + 1.4) +
+            exitHorizontal
         val vertical = 0.393 + 0.19 * spring +
-            0.015 * smootherStep((elapsed - 760.0) / 500.0) +
+            0.015 * smootherStep((motionElapsed - 760.0) / 500.0) +
             0.010 * LIVING_OSCILLATION_SCALE * living * sin(3.0 * localSeconds + 0.8) +
-            0.32 * smoothFlightProgress(
-                (elapsed - LANTERN_LIGHT_EXIT_START) /
-                    (DURATION_MILLIS - LANTERN_LIGHT_EXIT_START),
-            )
+            exitVertical
         target.set(
             spriteIndex = 1,
             horizontalOffset = direction * horizontal,
             verticalOffset = vertical,
-            diameter = springDiameter(0.20, elapsed, 210.0, LANTERN_LIGHT_EXIT_START),
-            alpha = fadeAlpha(elapsed, 210.0, 490.0, LANTERN_LIGHT_EXIT_START),
+            diameter = springDiameter(0.20, elapsed, 210.0, LANTERN_LIGHT_FADE_START),
+            alpha = fadeAlpha(elapsed, 210.0, 490.0, LANTERN_LIGHT_FADE_START),
+            horizontalScale = 1.0 - MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE * exitDeformation,
+            verticalScale = 1.0 + MULTI_SPRITE_EXIT_VERTICAL_RESPONSE * exitDeformation,
         )
     }
 
@@ -337,7 +393,30 @@ object EmotionAnimation {
         target: EmotionAnimationFrameBuffer,
     ) {
         target.prepare(3)
-        sampleEchoCore(elapsed, direction, target)
+        val exitVertical = multiSpriteExitDisplacement(
+            elapsed,
+            ECHO_EXIT_START,
+            ECHO_EXIT_DISTANCE,
+        )
+        val exitHorizontal = multiSpriteExitCurve(
+            elapsed,
+            ECHO_EXIT_START,
+            ECHO_EXIT_CURVE,
+            ECHO_EXIT_PHASE,
+        )
+        val exitDeformation = multiSpriteExitDeformation(
+            elapsed,
+            ECHO_EXIT_START,
+            ECHO_EXIT_DISTANCE,
+        )
+        sampleEchoCore(
+            elapsed,
+            direction,
+            target,
+            exitHorizontal,
+            exitVertical,
+            exitDeformation,
+        )
         sampleEchoPetal(
             elapsed,
             direction,
@@ -347,6 +426,9 @@ object EmotionAnimation {
             ECHO_LEFT_START,
             ECHO_LEFT_LIFT_START,
             ECHO_LEFT_FADE_START,
+            exitHorizontal,
+            exitVertical,
+            exitDeformation,
         )
         sampleEchoPetal(
             elapsed,
@@ -357,6 +439,9 @@ object EmotionAnimation {
             ECHO_RIGHT_START,
             ECHO_RIGHT_LIFT_START,
             ECHO_RIGHT_FADE_START,
+            exitHorizontal,
+            exitVertical,
+            exitDeformation,
         )
     }
 
@@ -364,30 +449,37 @@ object EmotionAnimation {
         elapsed: Double,
         direction: Double,
         target: EmotionAnimationFrameBuffer,
+        exitHorizontal: Double,
+        exitVertical: Double,
+        exitDeformation: Double,
     ) {
-        val seconds = positiveSeconds(elapsed)
+        val motionElapsed = minOf(elapsed, ECHO_EXIT_START)
+        val seconds = positiveSeconds(motionElapsed)
         val spring = springResponse(seconds, ECHO_CORE_DAMPING_RATIO, ECHO_CORE_SPRING_FREQUENCY)
-        val living = livingWeight(elapsed, ECHO_CORE_LIVING_START, ECHO_CORE_LIFT_START)
+        val verticalLiving = livingWeight(
+            elapsed,
+            ECHO_CORE_LIVING_START,
+            ECHO_EXIT_START - LIVING_BLEND_MILLIS,
+        )
+        val appearanceLiving = livingWeight(elapsed, ECHO_CORE_LIVING_START, ECHO_CORE_LIFT_START)
         val horizontalLiving = livingWeight(
             elapsed,
             ECHO_CORE_LIVING_START,
-            ECHO_CORE_LIFT_START - LIVING_BLEND_MILLIS,
+            ECHO_EXIT_START - LIVING_BLEND_MILLIS,
         )
         val phase = ECHO_LIVING_FREQUENCY * seconds + ECHO_LIVING_PHASE
-        val exit = smoothFlightProgress(
-            (elapsed - ECHO_CORE_LIFT_START) / (DURATION_MILLIS - ECHO_CORE_LIFT_START),
-        )
         val pulse = 1.0 + ECHO_CORE_PULSE_SCALE * smoothPulse(
             elapsed,
             ECHO_CORE_PULSE_START,
             ECHO_CORE_PULSE_END,
         )
-        val breathing = 1.0 + ECHO_CORE_BREATHING_SCALE * living * sin(phase)
-        val horizontal = ECHO_CORE_SWAY * LIVING_OSCILLATION_SCALE * horizontalLiving * sin(phase)
+        val breathing = 1.0 + ECHO_CORE_BREATHING_SCALE * appearanceLiving * sin(phase)
+        val horizontal = ECHO_CORE_SWAY * LIVING_OSCILLATION_SCALE * horizontalLiving * sin(phase) +
+            exitHorizontal
         val vertical = ELASTIC_START_Y + ELASTIC_ENTRY_DISTANCE * spring +
-            ECHO_CORE_RISE * smootherStep((elapsed - ECHO_CORE_RISE_START) / ECHO_CORE_RISE_DURATION) +
-            ECHO_CORE_BOB * LIVING_OSCILLATION_SCALE * living * cos(phase) +
-            ECHO_CORE_EXIT_DISTANCE * exit
+            ECHO_CORE_RISE * smootherStep((motionElapsed - ECHO_CORE_RISE_START) / ECHO_CORE_RISE_DURATION) +
+            ECHO_CORE_BOB * LIVING_OSCILLATION_SCALE * verticalLiving * cos(phase) +
+            exitVertical
         target.set(
             spriteIndex = 0,
             horizontalOffset = direction * horizontal,
@@ -401,6 +493,8 @@ object EmotionAnimation {
                 ECHO_CORE_ENTRY_SCALE,
             ) * pulse * breathing,
             alpha = fadeAlpha(elapsed, 0.0, ECHO_CORE_FADE_IN_END, ECHO_CORE_FADE_START),
+            horizontalScale = 1.0 - MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE * exitDeformation,
+            verticalScale = 1.0 + MULTI_SPRITE_EXIT_VERTICAL_RESPONSE * exitDeformation,
         )
     }
 
@@ -413,30 +507,40 @@ object EmotionAnimation {
         enterStart: Double,
         liftStart: Double,
         fadeStart: Double,
+        exitHorizontal: Double,
+        exitVertical: Double,
+        exitDeformation: Double,
     ) {
         val motionStart = enterStart - ECHO_PETAL_MOTION_LEAD
-        val localSeconds = positiveSeconds(elapsed - motionStart)
-        val seconds = positiveSeconds(elapsed)
+        val motionElapsed = minOf(elapsed, ECHO_EXIT_START)
+        val localSeconds = positiveSeconds(motionElapsed - motionStart)
+        val seconds = positiveSeconds(motionElapsed)
         val spring = springResponse(localSeconds, ECHO_PETAL_DAMPING_RATIO, ECHO_PETAL_SPRING_FREQUENCY)
-        val living = livingWeight(elapsed, enterStart + ECHO_PETAL_LIVING_DELAY, liftStart)
+        val verticalLiving = livingWeight(
+            elapsed,
+            enterStart + ECHO_PETAL_LIVING_DELAY,
+            ECHO_EXIT_START - LIVING_BLEND_MILLIS,
+        )
+        val appearanceLiving = livingWeight(
+            elapsed,
+            enterStart + ECHO_PETAL_LIVING_DELAY,
+            liftStart,
+        )
         val horizontalLiving = livingWeight(
             elapsed,
             enterStart + ECHO_PETAL_LIVING_DELAY,
-            liftStart - LIVING_BLEND_MILLIS,
+            ECHO_EXIT_START - LIVING_BLEND_MILLIS,
         )
         val phase = ECHO_LIVING_FREQUENCY * seconds + ECHO_LIVING_PHASE
-        val exit = smoothFlightProgress(
-            (elapsed - liftStart) / (DURATION_MILLIS - liftStart),
-        )
-        val breathing = 1.0 - ECHO_PETAL_BREATHING_SCALE * living * sin(phase)
+        val breathing = 1.0 - ECHO_PETAL_BREATHING_SCALE * appearanceLiving * sin(phase)
         val radius = ECHO_PETAL_X * spring +
             ECHO_PETAL_SWAY * LIVING_OSCILLATION_SCALE * horizontalLiving * sin(phase)
         val vertical = ECHO_PETAL_START_Y + ECHO_PETAL_ENTRY_Y * spring +
-            ECHO_PETAL_BOB * LIVING_OSCILLATION_SCALE * living * cos(phase) +
-            ECHO_PETAL_EXIT_Y * exit
+            ECHO_PETAL_BOB * LIVING_OSCILLATION_SCALE * verticalLiving * cos(phase) +
+            exitVertical
         target.set(
             spriteIndex = spriteIndex,
-            horizontalOffset = direction * side * radius,
+            horizontalOffset = direction * (side * radius + exitHorizontal),
             verticalOffset = vertical,
             diameter = echoDiameter(
                 ECHO_PETAL_DIAMETER,
@@ -452,6 +556,8 @@ object EmotionAnimation {
                 enterStart + ECHO_PETAL_FADE_DURATION,
                 fadeStart,
             ),
+            horizontalScale = 1.0 - MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE * exitDeformation,
+            verticalScale = 1.0 + MULTI_SPRITE_EXIT_VERTICAL_RESPONSE * exitDeformation,
         )
     }
 
@@ -575,9 +681,39 @@ object EmotionAnimation {
         return bounded * bounded * bounded
     }
 
-    private fun smoothFlightProgress(progress: Double): Double {
-        val bounded = boundedProgress(progress)
-        return bounded * bounded * (2.0 - bounded)
+    private fun multiSpriteExitDisplacement(
+        elapsed: Double,
+        start: Double,
+        distance: Double,
+    ): Double = distance * acceleratedExit(
+        (elapsed - start) / (DURATION_MILLIS - start),
+    )
+
+    private fun multiSpriteExitCurve(
+        elapsed: Double,
+        start: Double,
+        amplitude: Double,
+        phase: Double,
+    ): Double {
+        val progress = boundedProgress((elapsed - start) / (DURATION_MILLIS - start))
+        val arc = smoothPulse(elapsed, start, DURATION_MILLIS)
+        val livingCurve = MULTI_SPRITE_EXIT_CURVE_BASE +
+            MULTI_SPRITE_EXIT_CURVE_WAVE * sin(MULTI_SPRITE_EXIT_CURVE_FREQUENCY * progress + phase)
+        return amplitude * arc * livingCurve
+    }
+
+    private fun multiSpriteExitDeformation(
+        elapsed: Double,
+        start: Double,
+        distance: Double,
+    ): Double {
+        val progress = boundedProgress((elapsed - start) / (DURATION_MILLIS - start))
+        val durationSeconds = (DURATION_MILLIS - start) / MILLISECONDS_PER_SECOND
+        val velocity = 3.0 * distance * progress * progress / durationSeconds
+        return (velocity / MULTI_SPRITE_EXIT_DEFORMATION_VELOCITY).coerceIn(
+            0.0,
+            1.0,
+        )
     }
 
     private fun smootherStep(progress: Double): Double {
@@ -641,12 +777,17 @@ object EmotionAnimation {
     private const val RIBBON_ENTRY_DISTANCE = 0.19
     private const val RIBBON_BOB_AMPLITUDE = 0.006
     private const val RIBBON_BOB_FREQUENCY = 1.9
-    private const val RIBBON_EXIT_DISTANCE = 0.30
+    private const val RIBBON_EXIT_START = 1_540.0 + HOLD_EXTENSION_MILLIS
+    private const val RIBBON_EXIT_DISTANCE = 0.38
+    private const val RIBBON_EXIT_CURVE = 0.026
+    private const val RIBBON_EXIT_PHASE = 0.25
     private const val LANTERN_LIGHT_MOTION_START = 30.0
-    private const val LANTERN_ANCHOR_LIFT_START = 1_250.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_EXIT_START = 1_250.0 + HOLD_EXTENSION_MILLIS
     private const val LANTERN_ANCHOR_FADE_START = 1_450.0 + HOLD_EXTENSION_MILLIS
-    private const val LANTERN_ANCHOR_EXIT_DISTANCE = 0.28
-    private const val LANTERN_LIGHT_EXIT_START = 1_480.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_LIGHT_FADE_START = 1_480.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_EXIT_DISTANCE = 0.45
+    private const val LANTERN_EXIT_CURVE = -0.025
+    private const val LANTERN_EXIT_PHASE = 0.85
     private const val ECHO_CORE_DAMPING_RATIO = 0.76
     private const val ECHO_CORE_SPRING_FREQUENCY = 7.0
     private const val ECHO_CORE_LIVING_START = 760.0
@@ -657,7 +798,6 @@ object EmotionAnimation {
     private const val ECHO_CORE_RISE = 0.015
     private const val ECHO_CORE_RISE_START = 760.0
     private const val ECHO_CORE_RISE_DURATION = 650.0
-    private const val ECHO_CORE_EXIT_DISTANCE = 0.68
     private const val ECHO_CORE_DIAMETER = 0.282
     private const val ECHO_CORE_FADE_IN_END = 520.0
     private const val ECHO_CORE_ENTRY_SCALE = 0.72
@@ -681,12 +821,21 @@ object EmotionAnimation {
     private const val ECHO_PETAL_X = 0.18
     private const val ECHO_PETAL_SWAY = 0.018
     private const val ECHO_PETAL_BOB = 0.012
-    private const val ECHO_PETAL_EXIT_Y = 0.56
     private const val ECHO_PETAL_DIAMETER = 0.17
     private const val ECHO_PETAL_ENTRY_SCALE = 0.62
     private const val ECHO_PETAL_BREATHING_SCALE = 0.015
+    private const val ECHO_EXIT_START = ECHO_LEFT_LIFT_START
+    private const val ECHO_EXIT_DISTANCE = 0.50
+    private const val ECHO_EXIT_CURVE = 0.025
+    private const val ECHO_EXIT_PHASE = 1.35
     private const val ECHO_LIVING_FREQUENCY = 2.2
     private const val ECHO_LIVING_PHASE = 0.4
+    private const val MULTI_SPRITE_EXIT_DEFORMATION_VELOCITY = 0.60
+    private const val MULTI_SPRITE_EXIT_CURVE_BASE = 0.88
+    private const val MULTI_SPRITE_EXIT_CURVE_WAVE = 0.12
+    private const val MULTI_SPRITE_EXIT_CURVE_FREQUENCY = 5.2
+    private const val MULTI_SPRITE_EXIT_HORIZONTAL_RESPONSE = 0.08
+    private const val MULTI_SPRITE_EXIT_VERTICAL_RESPONSE = 0.11
     private const val LIVING_BLEND_MILLIS = 260.0
     private const val MILLISECONDS_PER_SECOND = 1_000.0
     private const val NANOSECONDS_PER_MILLISECOND = 1_000_000.0

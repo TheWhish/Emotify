@@ -271,9 +271,12 @@ object ClientHandshakeController {
                 transferChunks.forEach { chunk ->
                     ClientPlayNetworking.send(FabricCustomEmojiAssetChunkPayload(chunk))
                 }
-                customUploads.markUploaded(activeConnectionId, asset.id)
+                customUploads.commitProvisionalUpload(activeConnectionId, asset.id) {
+                    ClientPlayNetworking.send(FabricCustomEmotionSelectionPayload(selection))
+                }
+            } else {
+                ClientPlayNetworking.send(FabricCustomEmotionSelectionPayload(selection))
             }
-            ClientPlayNetworking.send(FabricCustomEmotionSelectionPayload(selection))
         } catch (error: RuntimeException) {
             selectionResponseGate.cancelReservation()
             selectionAttemptGate.refund()

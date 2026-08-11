@@ -39,6 +39,21 @@ class ClientCustomEmojiUploadTracker {
     fun markUploaded(connectionId: Long, customEmojiId: CustomEmojiId): Boolean =
         connectionId == activeConnectionId && uploaded.add(customEmojiId)
 
+    fun <T> commitProvisionalUpload(
+        connectionId: Long,
+        customEmojiId: CustomEmojiId,
+        publishSelection: () -> T,
+    ): T {
+        check(connectionId == activeConnectionId) { "Cannot commit a custom emoji upload for an inactive connection" }
+        check(uploaded.add(customEmojiId)) { "Custom emoji upload is already committed: $customEmojiId" }
+        return try {
+            publishSelection()
+        } catch (failure: RuntimeException) {
+            uploaded.remove(customEmojiId)
+            throw failure
+        }
+    }
+
     fun forget(connectionId: Long, customEmojiId: CustomEmojiId): Boolean =
         connectionId == activeConnectionId && uploaded.remove(customEmojiId)
 

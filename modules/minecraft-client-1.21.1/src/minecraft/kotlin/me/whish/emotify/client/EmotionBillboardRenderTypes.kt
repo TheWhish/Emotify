@@ -43,8 +43,12 @@ object EmotionBillboardRenderTypes {
     }
 
     fun retainLocalCustomTextures(textureIds: Set<String>) {
-        val stale = compositedByTextureId.keys.filter { textureId ->
-            isLocalCustomTexture(textureId) && textureId !in textureIds
+        val stale = HashSet<String>()
+        compositedByTextureId.keys.filterTo(stale) { textureId ->
+            isStaleLocalCustomTexture(textureId, textureIds)
+        }
+        finalDirectByTextureId.keys.filterTo(stale) { textureId ->
+            isStaleLocalCustomTexture(textureId, textureIds)
         }
         stale.forEach(::releaseCustomTexture)
     }
@@ -62,6 +66,9 @@ object EmotionBillboardRenderTypes {
 
     private fun isLocalCustomTexture(textureId: String): Boolean =
         textureId.startsWith(LOCAL_CUSTOM_TEXTURE_PREFIX) && !textureId.startsWith(REMOTE_CUSTOM_TEXTURE_PREFIX)
+
+    private fun isStaleLocalCustomTexture(textureId: String, retainedTextureIds: Set<String>): Boolean =
+        isLocalCustomTexture(textureId) && textureId !in retainedTextureIds
 
     private fun createRenderTypes(pass: EmotionBillboardRenderPass): Map<String, RenderType> = java.util.Map.copyOf(
         EmotionPresentationCatalog.ordered

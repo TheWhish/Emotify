@@ -539,9 +539,12 @@ object ClientHandshakeController {
                 transferChunks.forEach { chunk ->
                     listener.send(CustomEmojiAssetChunkPayload(chunk))
                 }
-                customUploads.markUploaded(activeConnectionId, asset.id)
+                customUploads.commitProvisionalUpload(activeConnectionId, asset.id) {
+                    listener.send(CustomEmotionSelectionPayload(selection))
+                }
+            } else {
+                listener.send(CustomEmotionSelectionPayload(selection))
             }
-            listener.send(CustomEmotionSelectionPayload(selection))
         } catch (error: RuntimeException) {
             selectionResponseGate.cancelReservation()
             selectionAttemptGate.refund()

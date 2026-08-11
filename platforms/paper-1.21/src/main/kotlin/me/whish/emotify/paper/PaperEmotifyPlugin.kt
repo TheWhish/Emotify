@@ -58,6 +58,7 @@ import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerRegisterChannelEvent
 import org.bukkit.event.player.PlayerUnregisterChannelEvent
+import org.bukkit.event.world.WorldUnloadEvent
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.plugin.messaging.PluginMessageListener
 
@@ -199,6 +200,11 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         val connection = connections.current(event.player.uniqueId, event.player) ?: return
         connections.close(connection)
         runtime.close(connection)
+    }
+
+    @EventHandler
+    fun onWorldUnload(event: WorldUnloadEvent) {
+        dimensions.remove(event.world.uid)
     }
 
     @EventHandler

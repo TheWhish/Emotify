@@ -78,4 +78,19 @@ class EmotionBillboardRenderTypesTest : FunSpec({
         EmotionBillboardRenderTypes.releaseCustomTexture(retainedLocal)
         EmotionBillboardRenderTypes.releaseCustomTexture(remote)
     }
+
+    test("local texture retention evicts render types created only for final direct rendering") {
+        val staleLocal = "emotify_custom:final_direct_stale"
+        fun resolve() = EmotionBillboardRenderTypes.resolve(
+            staleLocal,
+            ResourceLocation.fromNamespaceAndPath("emotify", "test/final_direct_stale"),
+            EmotionBillboardRenderPass.FINAL_DIRECT,
+        )
+        val staleRenderType = resolve()
+
+        EmotionBillboardRenderTypes.retainLocalCustomTextures(emptySet())
+
+        (resolve() === staleRenderType) shouldBe false
+        EmotionBillboardRenderTypes.releaseCustomTexture(staleLocal)
+    }
 })

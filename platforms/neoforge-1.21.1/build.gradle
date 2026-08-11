@@ -233,10 +233,17 @@ def projectClassPrefix = 'me/whish/emotify/'
 def clientClassPrefix = "${projectClassPrefix}client/"
 def requiredReleaseMetadata = [
     'modLoader = "kotlinforforge"',
+    "loaderVersion = \"${modMetadataProperties.loader_version_range}\"".toString(),
+    "license = \"${modMetadataProperties.mod_license}\"".toString(),
     "modId = \"${modMetadataProperties.mod_id}\"".toString(),
     "version = \"${modMetadataProperties.mod_version}\"".toString(),
+    "displayName = \"${modMetadataProperties.mod_name}\"".toString(),
+    "authors = \"${modMetadataProperties.mod_authors}\"".toString(),
     'logoFile = "assets/emotify/icon.png"',
-    "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString()
+    'modId = "neoforge"',
+    "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString(),
+    'modId = "minecraft"',
+    "versionRange = \"${modMetadataProperties.minecraft_version_range}\"".toString()
 ]
 def nestedLibrarySpecifications = [
     [

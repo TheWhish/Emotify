@@ -16,6 +16,8 @@ class PaperDimensionOrdinalRegistry {
         ordinal
     }
 
+    fun remove(worldId: UUID): Boolean = ordinals.removeInt(worldId) != 0
+
     fun clear() {
         ordinals.clear()
         nextOrdinal = 1
