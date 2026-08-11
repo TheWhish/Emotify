@@ -15,6 +15,7 @@ enum class EmotionAnimationVariant {
     ELASTIC_POP,
     RIBBON_WEAVE,
     LANTERN_RELEASE,
+    ECHO_BLOOM,
 }
 
 class EmotionAnimationFrameBuffer {
@@ -106,7 +107,8 @@ object EmotionAnimation {
     fun variantFor(seed: Long): EmotionAnimationVariant = when ((seed ushr 1) % VARIANT_COUNT) {
         0L -> EmotionAnimationVariant.ELASTIC_POP
         1L -> EmotionAnimationVariant.RIBBON_WEAVE
-        else -> EmotionAnimationVariant.LANTERN_RELEASE
+        2L -> EmotionAnimationVariant.LANTERN_RELEASE
+        else -> EmotionAnimationVariant.ECHO_BLOOM
     }
 
     fun isMirrored(seed: Long): Boolean = seed and MIRROR_BIT != 0L
@@ -122,12 +124,13 @@ object EmotionAnimation {
         val direction = if (isMirrored(seed)) -1.0 else 1.0
         if (motion == AnimationMotion.REDUCED) {
             sampleReduced(elapsed, variant, direction, target)
-        } else if (variant == EmotionAnimationVariant.ELASTIC_POP) {
-            sampleElasticPop(elapsed, direction, target)
-        } else if (variant == EmotionAnimationVariant.RIBBON_WEAVE) {
-            sampleRibbonWeave(elapsed, direction, target)
-        } else {
-            sampleLanternRelease(elapsed, direction, target)
+            return
+        }
+        when (variant) {
+            EmotionAnimationVariant.ELASTIC_POP -> sampleElasticPop(elapsed, direction, target)
+            EmotionAnimationVariant.RIBBON_WEAVE -> sampleRibbonWeave(elapsed, direction, target)
+            EmotionAnimationVariant.LANTERN_RELEASE -> sampleLanternRelease(elapsed, direction, target)
+            EmotionAnimationVariant.ECHO_BLOOM -> sampleEchoBloom(elapsed, direction, target)
         }
     }
 
@@ -281,21 +284,23 @@ object EmotionAnimation {
     ) {
         val seconds = positiveSeconds(elapsed)
         val spring = springResponse(seconds, 0.72, 8.5)
-        val living = livingWeight(elapsed, 500.0, 1_450.0 + HOLD_EXTENSION_MILLIS)
-        val release = smootherStep((elapsed - LANTERN_ANCHOR_RELEASE_START) / LANTERN_ANCHOR_RELEASE_DURATION)
+        val living = livingWeight(elapsed, 500.0, LANTERN_ANCHOR_LIFT_START)
+        val exit = smoothFlightProgress(
+            (elapsed - LANTERN_ANCHOR_LIFT_START) / (DURATION_MILLIS - LANTERN_ANCHOR_LIFT_START),
+        )
         val horizontal = -0.04 +
             0.025 * exp(-2.6 * seconds) * sin(5.6 * seconds) +
             0.014 * LIVING_OSCILLATION_SCALE * living * sin(2.2 * seconds + 0.2)
         val vertical = -0.10 + 0.34 * spring +
-            0.012 * LIVING_OSCILLATION_SCALE * living * sin(2.7 * seconds + 0.5) -
-            0.11 * release
+            0.012 * LIVING_OSCILLATION_SCALE * living * sin(2.7 * seconds + 0.5) +
+            LANTERN_ANCHOR_EXIT_DISTANCE * exit
         val pulse = 1.0 + 0.035 * smoothPulse(elapsed, 720.0, 1_120.0)
         target.set(
             spriteIndex = 0,
             horizontalOffset = direction * horizontal,
             verticalOffset = vertical,
-            diameter = springDiameter(0.275, elapsed, 0.0, 1_450.0 + HOLD_EXTENSION_MILLIS) * pulse,
-            alpha = fadeAlpha(elapsed, 0.0, 320.0, 1_450.0 + HOLD_EXTENSION_MILLIS),
+            diameter = springDiameter(0.275, elapsed, 0.0, LANTERN_ANCHOR_FADE_START) * pulse,
+            alpha = fadeAlpha(elapsed, 0.0, 320.0, LANTERN_ANCHOR_FADE_START),
         )
     }
 
@@ -313,7 +318,7 @@ object EmotionAnimation {
         val vertical = 0.393 + 0.19 * spring +
             0.015 * smootherStep((elapsed - 760.0) / 500.0) +
             0.010 * LIVING_OSCILLATION_SCALE * living * sin(3.0 * localSeconds + 0.8) +
-            0.32 * acceleratedExit(
+            0.32 * smoothFlightProgress(
                 (elapsed - LANTERN_LIGHT_EXIT_START) /
                     (DURATION_MILLIS - LANTERN_LIGHT_EXIT_START),
             )
@@ -326,6 +331,130 @@ object EmotionAnimation {
         )
     }
 
+    private fun sampleEchoBloom(
+        elapsed: Double,
+        direction: Double,
+        target: EmotionAnimationFrameBuffer,
+    ) {
+        target.prepare(3)
+        sampleEchoCore(elapsed, direction, target)
+        sampleEchoPetal(
+            elapsed,
+            direction,
+            target,
+            1,
+            -1.0,
+            ECHO_LEFT_START,
+            ECHO_LEFT_LIFT_START,
+            ECHO_LEFT_FADE_START,
+        )
+        sampleEchoPetal(
+            elapsed,
+            direction,
+            target,
+            2,
+            1.0,
+            ECHO_RIGHT_START,
+            ECHO_RIGHT_LIFT_START,
+            ECHO_RIGHT_FADE_START,
+        )
+    }
+
+    private fun sampleEchoCore(
+        elapsed: Double,
+        direction: Double,
+        target: EmotionAnimationFrameBuffer,
+    ) {
+        val seconds = positiveSeconds(elapsed)
+        val spring = springResponse(seconds, ECHO_CORE_DAMPING_RATIO, ECHO_CORE_SPRING_FREQUENCY)
+        val living = livingWeight(elapsed, ECHO_CORE_LIVING_START, ECHO_CORE_LIFT_START)
+        val horizontalLiving = livingWeight(
+            elapsed,
+            ECHO_CORE_LIVING_START,
+            ECHO_CORE_LIFT_START - LIVING_BLEND_MILLIS,
+        )
+        val phase = ECHO_LIVING_FREQUENCY * seconds + ECHO_LIVING_PHASE
+        val exit = smoothFlightProgress(
+            (elapsed - ECHO_CORE_LIFT_START) / (DURATION_MILLIS - ECHO_CORE_LIFT_START),
+        )
+        val pulse = 1.0 + ECHO_CORE_PULSE_SCALE * smoothPulse(
+            elapsed,
+            ECHO_CORE_PULSE_START,
+            ECHO_CORE_PULSE_END,
+        )
+        val breathing = 1.0 + ECHO_CORE_BREATHING_SCALE * living * sin(phase)
+        val horizontal = ECHO_CORE_SWAY * LIVING_OSCILLATION_SCALE * horizontalLiving * sin(phase)
+        val vertical = ELASTIC_START_Y + ELASTIC_ENTRY_DISTANCE * spring +
+            ECHO_CORE_RISE * smootherStep((elapsed - ECHO_CORE_RISE_START) / ECHO_CORE_RISE_DURATION) +
+            ECHO_CORE_BOB * LIVING_OSCILLATION_SCALE * living * cos(phase) +
+            ECHO_CORE_EXIT_DISTANCE * exit
+        target.set(
+            spriteIndex = 0,
+            horizontalOffset = direction * horizontal,
+            verticalOffset = vertical,
+            diameter = echoDiameter(
+                ECHO_CORE_DIAMETER,
+                elapsed,
+                0.0,
+                ECHO_CORE_FADE_IN_END,
+                ECHO_CORE_FADE_START,
+                ECHO_CORE_ENTRY_SCALE,
+            ) * pulse * breathing,
+            alpha = fadeAlpha(elapsed, 0.0, ECHO_CORE_FADE_IN_END, ECHO_CORE_FADE_START),
+        )
+    }
+
+    private fun sampleEchoPetal(
+        elapsed: Double,
+        direction: Double,
+        target: EmotionAnimationFrameBuffer,
+        spriteIndex: Int,
+        side: Double,
+        enterStart: Double,
+        liftStart: Double,
+        fadeStart: Double,
+    ) {
+        val motionStart = enterStart - ECHO_PETAL_MOTION_LEAD
+        val localSeconds = positiveSeconds(elapsed - motionStart)
+        val seconds = positiveSeconds(elapsed)
+        val spring = springResponse(localSeconds, ECHO_PETAL_DAMPING_RATIO, ECHO_PETAL_SPRING_FREQUENCY)
+        val living = livingWeight(elapsed, enterStart + ECHO_PETAL_LIVING_DELAY, liftStart)
+        val horizontalLiving = livingWeight(
+            elapsed,
+            enterStart + ECHO_PETAL_LIVING_DELAY,
+            liftStart - LIVING_BLEND_MILLIS,
+        )
+        val phase = ECHO_LIVING_FREQUENCY * seconds + ECHO_LIVING_PHASE
+        val exit = smoothFlightProgress(
+            (elapsed - liftStart) / (DURATION_MILLIS - liftStart),
+        )
+        val breathing = 1.0 - ECHO_PETAL_BREATHING_SCALE * living * sin(phase)
+        val radius = ECHO_PETAL_X * spring +
+            ECHO_PETAL_SWAY * LIVING_OSCILLATION_SCALE * horizontalLiving * sin(phase)
+        val vertical = ECHO_PETAL_START_Y + ECHO_PETAL_ENTRY_Y * spring +
+            ECHO_PETAL_BOB * LIVING_OSCILLATION_SCALE * living * cos(phase) +
+            ECHO_PETAL_EXIT_Y * exit
+        target.set(
+            spriteIndex = spriteIndex,
+            horizontalOffset = direction * side * radius,
+            verticalOffset = vertical,
+            diameter = echoDiameter(
+                ECHO_PETAL_DIAMETER,
+                elapsed,
+                enterStart,
+                enterStart + ECHO_PETAL_FADE_DURATION,
+                fadeStart,
+                ECHO_PETAL_ENTRY_SCALE,
+            ) * breathing,
+            alpha = fadeAlpha(
+                elapsed,
+                enterStart,
+                enterStart + ECHO_PETAL_FADE_DURATION,
+                fadeStart,
+            ),
+        )
+    }
+
     private fun sampleReduced(
         elapsed: Double,
         variant: EmotionAnimationVariant,
@@ -333,18 +462,28 @@ object EmotionAnimation {
         target: EmotionAnimationFrameBuffer,
     ) {
         val alpha = fadeAlpha(elapsed, 0.0, 360.0, 1_700.0 + HOLD_EXTENSION_MILLIS)
-        if (variant == EmotionAnimationVariant.ELASTIC_POP) {
-            target.prepare(1)
-            target.set(0, 0.0, 0.24, 0.285, alpha)
-        } else if (variant == EmotionAnimationVariant.RIBBON_WEAVE) {
-            target.prepare(3)
-            target.set(0, direction * -0.16, 0.10, 0.27, alpha)
-            target.set(1, direction * 0.13, 0.39, 0.21, alpha)
-            target.set(2, direction * -0.055, 0.64, 0.16, alpha)
-        } else {
-            target.prepare(2)
-            target.set(0, direction * -0.04, 0.20, 0.275, alpha)
-            target.set(1, direction * 0.09, 0.55, 0.20, alpha)
+        when (variant) {
+            EmotionAnimationVariant.ELASTIC_POP -> {
+                target.prepare(1)
+                target.set(0, 0.0, 0.24, 0.285, alpha)
+            }
+            EmotionAnimationVariant.RIBBON_WEAVE -> {
+                target.prepare(3)
+                target.set(0, direction * -0.16, 0.10, 0.27, alpha)
+                target.set(1, direction * 0.13, 0.39, 0.21, alpha)
+                target.set(2, direction * -0.055, 0.64, 0.16, alpha)
+            }
+            EmotionAnimationVariant.LANTERN_RELEASE -> {
+                target.prepare(2)
+                target.set(0, direction * -0.04, 0.20, 0.275, alpha)
+                target.set(1, direction * 0.09, 0.55, 0.20, alpha)
+            }
+            EmotionAnimationVariant.ECHO_BLOOM -> {
+                target.prepare(3)
+                target.set(0, 0.0, 0.255, ECHO_CORE_DIAMETER, alpha)
+                target.set(1, direction * -ECHO_PETAL_X, 0.535, ECHO_PETAL_DIAMETER, alpha)
+                target.set(2, direction * ECHO_PETAL_X, 0.535, ECHO_PETAL_DIAMETER, alpha)
+            }
         }
     }
 
@@ -357,6 +496,19 @@ object EmotionAnimation {
         val entry = springResponse(positiveSeconds(elapsed - enterStart), 0.74, 11.0).coerceIn(0.0, 1.06)
         val exit = smootherStep((elapsed - exitStart) / (DURATION_MILLIS - exitStart))
         return baseDiameter * lerp(0.84, 1.0, entry) * lerp(1.0, 0.92, exit)
+    }
+
+    private fun echoDiameter(
+        baseDiameter: Double,
+        elapsed: Double,
+        enterStart: Double,
+        enterEnd: Double,
+        exitStart: Double,
+        entryScale: Double,
+    ): Double {
+        val entry = smootherStep((elapsed - enterStart) / (enterEnd - enterStart))
+        val exit = smootherStep((elapsed - exitStart) / (DURATION_MILLIS - exitStart))
+        return baseDiameter * lerp(entryScale, 1.0, entry) * lerp(1.0, 0.92, exit)
     }
 
     private fun fadeAlpha(
@@ -423,6 +575,11 @@ object EmotionAnimation {
         return bounded * bounded * bounded
     }
 
+    private fun smoothFlightProgress(progress: Double): Double {
+        val bounded = boundedProgress(progress)
+        return bounded * bounded * (2.0 - bounded)
+    }
+
     private fun smootherStep(progress: Double): Double {
         val bounded = boundedProgress(progress)
         return bounded * bounded * bounded * (bounded * (bounded * 6.0 - 15.0) + 10.0)
@@ -459,7 +616,7 @@ object EmotionAnimation {
         return mixed xor (mixed ushr 31)
     }
 
-    private const val VARIANT_COUNT = 3L
+    private const val VARIANT_COUNT = 4L
     private const val MIRROR_BIT = 1L
     private const val ELASTIC_DAMPING_RATIO = 0.58
     private const val ELASTIC_SPRING_FREQUENCY = 8.3
@@ -486,9 +643,50 @@ object EmotionAnimation {
     private const val RIBBON_BOB_FREQUENCY = 1.9
     private const val RIBBON_EXIT_DISTANCE = 0.30
     private const val LANTERN_LIGHT_MOTION_START = 30.0
-    private const val LANTERN_ANCHOR_RELEASE_START = 950.0 + HOLD_EXTENSION_MILLIS
-    private const val LANTERN_ANCHOR_RELEASE_DURATION = 850.0
+    private const val LANTERN_ANCHOR_LIFT_START = 1_250.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_ANCHOR_FADE_START = 1_450.0 + HOLD_EXTENSION_MILLIS
+    private const val LANTERN_ANCHOR_EXIT_DISTANCE = 0.28
     private const val LANTERN_LIGHT_EXIT_START = 1_480.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_CORE_DAMPING_RATIO = 0.76
+    private const val ECHO_CORE_SPRING_FREQUENCY = 7.0
+    private const val ECHO_CORE_LIVING_START = 760.0
+    private const val ECHO_CORE_LIFT_START = 1_450.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_CORE_FADE_START = 1_700.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_CORE_SWAY = 0.012
+    private const val ECHO_CORE_BOB = 0.009
+    private const val ECHO_CORE_RISE = 0.015
+    private const val ECHO_CORE_RISE_START = 760.0
+    private const val ECHO_CORE_RISE_DURATION = 650.0
+    private const val ECHO_CORE_EXIT_DISTANCE = 0.68
+    private const val ECHO_CORE_DIAMETER = 0.282
+    private const val ECHO_CORE_FADE_IN_END = 520.0
+    private const val ECHO_CORE_ENTRY_SCALE = 0.72
+    private const val ECHO_CORE_PULSE_SCALE = 0.038
+    private const val ECHO_CORE_BREATHING_SCALE = 0.012
+    private const val ECHO_CORE_PULSE_START = 650.0
+    private const val ECHO_CORE_PULSE_END = 1_050.0
+    private const val ECHO_LEFT_START = 380.0
+    private const val ECHO_RIGHT_START = 540.0
+    private const val ECHO_LEFT_LIFT_START = 950.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_LEFT_FADE_START = 1_200.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_RIGHT_LIFT_START = 1_200.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_RIGHT_FADE_START = 1_450.0 + HOLD_EXTENSION_MILLIS
+    private const val ECHO_PETAL_DAMPING_RATIO = 0.74
+    private const val ECHO_PETAL_SPRING_FREQUENCY = 7.4
+    private const val ECHO_PETAL_MOTION_LEAD = 195.0
+    private const val ECHO_PETAL_LIVING_DELAY = 520.0
+    private const val ECHO_PETAL_FADE_DURATION = 520.0
+    private const val ECHO_PETAL_START_Y = 0.235
+    private const val ECHO_PETAL_ENTRY_Y = 0.30
+    private const val ECHO_PETAL_X = 0.18
+    private const val ECHO_PETAL_SWAY = 0.018
+    private const val ECHO_PETAL_BOB = 0.012
+    private const val ECHO_PETAL_EXIT_Y = 0.56
+    private const val ECHO_PETAL_DIAMETER = 0.17
+    private const val ECHO_PETAL_ENTRY_SCALE = 0.62
+    private const val ECHO_PETAL_BREATHING_SCALE = 0.015
+    private const val ECHO_LIVING_FREQUENCY = 2.2
+    private const val ECHO_LIVING_PHASE = 0.4
     private const val LIVING_BLEND_MILLIS = 260.0
     private const val MILLISECONDS_PER_SECOND = 1_000.0
     private const val NANOSECONDS_PER_MILLISECOND = 1_000_000.0

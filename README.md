@@ -15,20 +15,21 @@
 
 Emotify adds animated emotions above players: a fast, quiet alternative to another chat message or a full-body emote.
 
-Version **0.6.0-beta.1** adds unobtrusive Shift + right-click guidance, clear in-picker diagnostics for invalid custom emoji files, and extensive client, server, traffic, and lifecycle hardening ahead of the stable `0.6.0` release.
+Version **0.6.0** completes the Minecraft 1.21.1 feature set with the new Echo Bloom animation, unobtrusive Shift + right-click guidance, clear diagnostics for invalid custom emoji files, corrected cross-loader GIF sharing, and extensive client, server, traffic, and lifecycle hardening.
 
 ---
 
 ## ✨ Features
 
 - **162 built-in emojis** with persistent favorites, localized search, and complete English and Russian translations.
-- **Three signature presentations** — Elastic Pop, Ribbon Weave, and Lantern Release — selected evenly for varied but restrained animation.
+- **Four signature presentations** — Elastic Pop, Ribbon Weave, Lantern Release, and Echo Bloom — selected evenly for varied but restrained animation.
 - **World-aware rendering** that follows player poses, stays behind blocks, and respects first-person and visibility rules.
 - **Movement-friendly picker** that does not take control away from the player while it is open.
 - **Nine quick slots** assigned by drag and drop, activated with the top-row or Numpad `1–9` keys while the picker is open, and saved independently from favorites for both built-in and custom emojis.
 - **Reduced Motion** mode with a static fade-only presentation.
 - **Server-authoritative multiplayer** with cooldowns, permissions, visibility filtering, bounded payloads, and abuse protection.
 - **Custom emojis shared in multiplayer** from local PNG, JPG, JPEG, and animated GIF files, with lossless decoded-frame transfer and connection-local caching.
+- **In-picker custom file diagnostics** that keep invalid files visible as passive cards and explain the exact problem on hover.
 - **Local saving of shared custom emojis** with Shift and right-click, readable filenames, duplicate-lineage protection, and no additional network transfer.
 - **Versioned client and server configuration** with bounded backups, legacy migration, and protection against overwriting future schemas.
 
@@ -56,9 +57,9 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge | `emotify-neoforge-1.21.1-0.6.0-beta.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric | `emotify-fabric-1.21.1-0.6.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur | `emotify-paper-1.21-0.6.0-beta.1.jar` | `plugins`; has no additional server dependencies |
+| NeoForge | `emotify-neoforge-1.21.1-0.6.0.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric | `emotify-fabric-1.21.1-0.6.0.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur | `emotify-paper-1.21-0.6.0.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 

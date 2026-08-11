@@ -15,17 +15,18 @@ import kotlin.math.max
 
 @Suppress("unused")
 class EmotionAnimationTest : FunSpec({
-    val variantSeeds = listOf(0L, 2L, 4L)
+    val variantSeeds = listOf(0L, 2L, 4L, 6L)
 
-    test("three conceptually distinct variants split deterministic selection equally") {
+    test("four conceptually distinct variants split deterministic selection equally") {
         EmotionAnimationVariant.entries shouldBe listOf(
             EmotionAnimationVariant.ELASTIC_POP,
             EmotionAnimationVariant.RIBBON_WEAVE,
             EmotionAnimationVariant.LANTERN_RELEASE,
+            EmotionAnimationVariant.ECHO_BLOOM,
         )
 
         val distribution = EmotionAnimationVariant.entries.associateWith { 0 }.toMutableMap()
-        repeat(300) { bucket ->
+        repeat(400) { bucket ->
             val variant = EmotionAnimation.variantFor(bucket.toLong() shl 1)
             distribution[variant] = distribution.getValue(variant) + 1
         }
@@ -33,8 +34,8 @@ class EmotionAnimationTest : FunSpec({
         distribution.values.toSet() shouldBe setOf(100)
     }
 
-    test("choreographies use one three and two sprite silhouettes") {
-        val expectedCounts = listOf(1, 3, 2)
+    test("choreographies use one three two and three sprite silhouettes") {
+        val expectedCounts = listOf(1, 3, 2, 3)
         val signatures = variantSeeds.mapIndexed { variantIndex, seed ->
             val frame = EmotionAnimationFrameBuffer()
             EmotionAnimation.sampleInto(1_200.0, AnimationMotion.FULL, seed, frame)
@@ -73,6 +74,9 @@ class EmotionAnimationTest : FunSpec({
             Triple(2L, 2, 2_710.0),
             Triple(4L, 0, 2_625.0),
             Triple(4L, 1, 2_640.0),
+            Triple(6L, 0, 2_750.0),
+            Triple(6L, 1, 2_500.0),
+            Triple(6L, 2, 2_625.0),
         ).forEach { (seed, spriteIndex, elapsed) ->
             val midpoint = EmotionAnimationFrameBuffer()
             EmotionAnimation.sampleInto(elapsed, AnimationMotion.FULL, seed, midpoint)
@@ -219,7 +223,7 @@ class EmotionAnimationTest : FunSpec({
         }
     }
 
-    test("lantern release hands motion from a sinking anchor to one rising light") {
+    test("lantern release hands motion from its lower anchor to one rising light") {
         val earlyHandoff = EmotionAnimationFrameBuffer()
         val handoff = EmotionAnimationFrameBuffer()
         val separation = EmotionAnimationFrameBuffer()
@@ -239,7 +243,7 @@ class EmotionAnimationTest : FunSpec({
             verticalSeparation,
         ) shouldBeLessThanOrEqual 0.40
         (verticalSeparation in 0.345..0.355) shouldBe true
-        (separation.verticalOffsetAt(0) < handoff.verticalOffsetAt(0) - 0.045) shouldBe true
+        (separation.verticalOffsetAt(0) > handoff.verticalOffsetAt(0) + 0.20) shouldBe true
         (separation.verticalOffsetAt(1) > handoff.verticalOffsetAt(1) + 0.14) shouldBe true
         (separation.opacityByteAt(0) > 0) shouldBe true
         (separation.opacityByteAt(1) > 0) shouldBe true
@@ -251,6 +255,209 @@ class EmotionAnimationTest : FunSpec({
         val handoffDelay = lightVisibleAt - anchorVisibleAt
 
         handoffDelay shouldBe 200
+    }
+
+    test("both lantern elements keep rising while they fade") {
+        val earlyFade = EmotionAnimationFrameBuffer()
+        val middleFade = EmotionAnimationFrameBuffer()
+        val lateFade = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(2_500.0, AnimationMotion.FULL, 4L, earlyFade)
+        EmotionAnimation.sampleInto(2_700.0, AnimationMotion.FULL, 4L, middleFade)
+        EmotionAnimation.sampleInto(2_900.0, AnimationMotion.FULL, 4L, lateFade)
+
+        repeat(2) { spriteIndex ->
+            (middleFade.verticalOffsetAt(spriteIndex) > earlyFade.verticalOffsetAt(spriteIndex) + 0.035) shouldBe true
+            (lateFade.verticalOffsetAt(spriteIndex) > middleFade.verticalOffsetAt(spriteIndex) + 0.035) shouldBe true
+            (middleFade.alphaAt(spriteIndex) < earlyFade.alphaAt(spriteIndex)) shouldBe true
+            (lateFade.alphaAt(spriteIndex) < middleFade.alphaAt(spriteIndex)) shouldBe true
+        }
+    }
+
+    test("echo bloom unfolds two smaller echoes into a symmetric living fan") {
+        val forming = EmotionAnimationFrameBuffer()
+        val unfolding = EmotionAnimationFrameBuffer()
+        val bloomed = EmotionAnimationFrameBuffer()
+        val exitStart = EmotionAnimationFrameBuffer()
+        val exitEnd = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(500.0, AnimationMotion.FULL, 6L, forming)
+        EmotionAnimation.sampleInto(700.0, AnimationMotion.FULL, 6L, unfolding)
+        EmotionAnimation.sampleInto(1_200.0, AnimationMotion.FULL, 6L, bloomed)
+        EmotionAnimation.sampleInto(2_100.0, AnimationMotion.FULL, 6L, exitStart)
+        EmotionAnimation.sampleInto(2_900.0, AnimationMotion.FULL, 6L, exitEnd)
+
+        forming.spriteCount shouldBe 3
+        (forming.opacityByteAt(0) > forming.opacityByteAt(1)) shouldBe true
+        (forming.opacityByteAt(1) > forming.opacityByteAt(2)) shouldBe true
+        (unfolding.alphaAt(1) in 0.50..0.75) shouldBe true
+        (unfolding.alphaAt(2) in 0.15..0.40) shouldBe true
+        (bloomed.horizontalOffsetAt(1) < -0.14) shouldBe true
+        (bloomed.horizontalOffsetAt(2) > 0.14) shouldBe true
+        (abs(bloomed.horizontalOffsetAt(1) + bloomed.horizontalOffsetAt(2)) <= 0.01) shouldBe true
+        (abs(bloomed.verticalOffsetAt(1) - bloomed.verticalOffsetAt(2)) <= 0.01) shouldBe true
+        (bloomed.verticalOffsetAt(1) > bloomed.verticalOffsetAt(0) + 0.11) shouldBe true
+        (bloomed.diameterAt(0) >= 0.275) shouldBe true
+        (bloomed.diameterAt(1) / bloomed.diameterAt(0) in 0.57..0.64) shouldBe true
+        (bloomed.diameterAt(2) / bloomed.diameterAt(0) in 0.57..0.64) shouldBe true
+        (abs(exitEnd.horizontalOffsetAt(1) - exitStart.horizontalOffsetAt(1)) <= 0.025) shouldBe true
+        (abs(exitEnd.horizontalOffsetAt(2) - exitStart.horizontalOffsetAt(2)) <= 0.025) shouldBe true
+        (exitEnd.verticalOffsetAt(0) > exitStart.verticalOffsetAt(0) + 0.40) shouldBe true
+        (exitEnd.verticalOffsetAt(1) > exitStart.verticalOffsetAt(1) + 0.35) shouldBe true
+        (exitEnd.verticalOffsetAt(2) > exitStart.verticalOffsetAt(2) + 0.35) shouldBe true
+
+        val firstEchoVisibleAt = firstVisibleAt(seed = 6L, spriteIndex = 1)
+        val secondEchoVisibleAt = firstVisibleAt(seed = 6L, spriteIndex = 2)
+        (firstEchoVisibleAt in 500..520) shouldBe true
+        (secondEchoVisibleAt - firstEchoVisibleAt in 140..180) shouldBe true
+    }
+
+    test("echo bloom exits in a readable first echo second echo and core sequence") {
+        val firstLeaving = EmotionAnimationFrameBuffer()
+        val secondLeaving = EmotionAnimationFrameBuffer()
+        val coreLeaving = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(2_175.0, AnimationMotion.FULL, 6L, firstLeaving)
+        EmotionAnimation.sampleInto(2_325.0, AnimationMotion.FULL, 6L, secondLeaving)
+        EmotionAnimation.sampleInto(2_575.0, AnimationMotion.FULL, 6L, coreLeaving)
+
+        (firstLeaving.alphaAt(1) < 1.0) shouldBe true
+        firstLeaving.alphaAt(2) shouldBe 1.0
+        firstLeaving.alphaAt(0) shouldBe 1.0
+        (secondLeaving.alphaAt(1) < secondLeaving.alphaAt(2)) shouldBe true
+        (secondLeaving.alphaAt(2) < 1.0) shouldBe true
+        secondLeaving.alphaAt(0) shouldBe 1.0
+        (coreLeaving.alphaAt(1) < coreLeaving.alphaAt(2)) shouldBe true
+        (coreLeaving.alphaAt(2) < coreLeaving.alphaAt(0)) shouldBe true
+        (coreLeaving.alphaAt(0) < 1.0) shouldBe true
+    }
+
+    test("echo bloom begins each lift before its staggered fade") {
+        val firstLiftStart = EmotionAnimationFrameBuffer()
+        val firstFadeStart = EmotionAnimationFrameBuffer()
+        val secondLiftStart = EmotionAnimationFrameBuffer()
+        val secondFadeStart = EmotionAnimationFrameBuffer()
+        val coreLiftStart = EmotionAnimationFrameBuffer()
+        val coreFadeStart = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(1_750.0, AnimationMotion.FULL, 6L, firstLiftStart)
+        EmotionAnimation.sampleInto(2_000.0, AnimationMotion.FULL, 6L, firstFadeStart)
+        EmotionAnimation.sampleInto(2_000.0, AnimationMotion.FULL, 6L, secondLiftStart)
+        EmotionAnimation.sampleInto(2_250.0, AnimationMotion.FULL, 6L, secondFadeStart)
+        EmotionAnimation.sampleInto(2_250.0, AnimationMotion.FULL, 6L, coreLiftStart)
+        EmotionAnimation.sampleInto(2_500.0, AnimationMotion.FULL, 6L, coreFadeStart)
+
+        (firstFadeStart.verticalOffsetAt(1) > firstLiftStart.verticalOffsetAt(1) + 0.025) shouldBe true
+        (secondFadeStart.verticalOffsetAt(2) > secondLiftStart.verticalOffsetAt(2) + 0.045) shouldBe true
+        (coreFadeStart.verticalOffsetAt(0) > coreLiftStart.verticalOffsetAt(0) + 0.08) shouldBe true
+        firstFadeStart.alphaAt(1) shouldBe 1.0
+        secondFadeStart.alphaAt(2) shouldBe 1.0
+        coreFadeStart.alphaAt(0) shouldBe 1.0
+    }
+
+    test("echo bloom settles every lateral position before upward flight") {
+        listOf(
+            Triple(1, 1_750, 2_900),
+            Triple(2, 2_000, 2_900),
+            Triple(0, 2_250, 2_900),
+        ).forEach { (spriteIndex, liftStart, sampleEnd) ->
+            val reference = EmotionAnimationFrameBuffer()
+            val frame = EmotionAnimationFrameBuffer()
+            EmotionAnimation.sampleInto(liftStart.toDouble(), AnimationMotion.FULL, 6L, reference)
+            var elapsed = liftStart + 25
+            while (elapsed <= sampleEnd) {
+                EmotionAnimation.sampleInto(elapsed.toDouble(), AnimationMotion.FULL, 6L, frame)
+                (abs(frame.horizontalOffsetAt(spriteIndex) - reference.horizontalOffsetAt(spriteIndex)) <= 0.002) shouldBe true
+                elapsed += 25
+            }
+        }
+    }
+
+    test("echo bloom keeps a subtle breathing size cycle after opening") {
+        val earlier = EmotionAnimationFrameBuffer()
+        val later = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(1_200.0, AnimationMotion.FULL, 6L, earlier)
+        EmotionAnimation.sampleInto(1_650.0, AnimationMotion.FULL, 6L, later)
+
+        (abs(earlier.diameterAt(0) - later.diameterAt(0)) > 0.002) shouldBe true
+        (abs(earlier.diameterAt(1) - later.diameterAt(1)) > 0.001) shouldBe true
+        (abs(earlier.diameterAt(2) - later.diameterAt(2)) > 0.001) shouldBe true
+    }
+
+    test("echo bloom enters with a softer per frame pace than the global motion envelope") {
+        var previous = EmotionAnimationFrameBuffer()
+        var current = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(0.0, AnimationMotion.FULL, 6L, previous)
+        var maximumTranslation = 0.0
+        var maximumAlphaChange = 0.0
+        var elapsed = 5
+        while (elapsed <= 1_100) {
+            EmotionAnimation.sampleInto(elapsed.toDouble(), AnimationMotion.FULL, 6L, current)
+            repeat(current.spriteCount) { spriteIndex ->
+                maximumTranslation = maxOf(
+                    maximumTranslation,
+                    hypot(
+                        current.horizontalOffsetAt(spriteIndex) - previous.horizontalOffsetAt(spriteIndex),
+                        current.verticalOffsetAt(spriteIndex) - previous.verticalOffsetAt(spriteIndex),
+                    ),
+                )
+                maximumAlphaChange = maxOf(
+                    maximumAlphaChange,
+                    abs(current.alphaAt(spriteIndex) - previous.alphaAt(spriteIndex)),
+                )
+            }
+            val swap = previous
+            previous = current
+            current = swap
+            elapsed += 5
+        }
+
+        maximumTranslation shouldBeLessThanOrEqual 0.007
+        maximumAlphaChange shouldBeLessThanOrEqual 0.019
+    }
+
+    test("echo bloom keeps its longer staggered exit smooth at render sized samples") {
+        var previous = EmotionAnimationFrameBuffer()
+        var current = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(1_700.0, AnimationMotion.FULL, 6L, previous)
+        var maximumTranslation = 0.0
+        var maximumAlphaChange = 0.0
+        var elapsed = 1_705
+        while (elapsed <= 3_000) {
+            EmotionAnimation.sampleInto(elapsed.toDouble(), AnimationMotion.FULL, 6L, current)
+            repeat(current.spriteCount) { spriteIndex ->
+                maximumTranslation = maxOf(
+                    maximumTranslation,
+                    hypot(
+                        current.horizontalOffsetAt(spriteIndex) - previous.horizontalOffsetAt(spriteIndex),
+                        current.verticalOffsetAt(spriteIndex) - previous.verticalOffsetAt(spriteIndex),
+                    ),
+                )
+                maximumAlphaChange = maxOf(
+                    maximumAlphaChange,
+                    abs(current.alphaAt(spriteIndex) - previous.alphaAt(spriteIndex)),
+                )
+            }
+            val swap = previous
+            previous = current
+            current = swap
+            elapsed += 5
+        }
+
+        maximumTranslation shouldBeLessThanOrEqual 0.007
+        maximumAlphaChange shouldBeLessThanOrEqual 0.019
+    }
+
+    test("echo bloom keeps climbing throughout the visible fade") {
+        val earlyFade = EmotionAnimationFrameBuffer()
+        val middleFade = EmotionAnimationFrameBuffer()
+        val lateFade = EmotionAnimationFrameBuffer()
+        EmotionAnimation.sampleInto(2_700.0, AnimationMotion.FULL, 6L, earlyFade)
+        EmotionAnimation.sampleInto(2_800.0, AnimationMotion.FULL, 6L, middleFade)
+        EmotionAnimation.sampleInto(2_900.0, AnimationMotion.FULL, 6L, lateFade)
+
+        repeat(3) { spriteIndex ->
+            (middleFade.verticalOffsetAt(spriteIndex) - earlyFade.verticalOffsetAt(spriteIndex) > 0.045) shouldBe true
+            (lateFade.verticalOffsetAt(spriteIndex) - middleFade.verticalOffsetAt(spriteIndex) > 0.045) shouldBe true
+            (middleFade.alphaAt(spriteIndex) < earlyFade.alphaAt(spriteIndex)) shouldBe true
+            (lateFade.alphaAt(spriteIndex) < middleFade.alphaAt(spriteIndex)) shouldBe true
+        }
     }
 
     test("visible motion stays predominantly vertical without broad lateral travel") {
@@ -434,7 +641,7 @@ class EmotionAnimationTest : FunSpec({
     }
 
     test("reduced motion keeps each distinct composition readable and still") {
-        val expectedCounts = listOf(1, 3, 2)
+        val expectedCounts = listOf(1, 3, 2, 3)
         variantSeeds.forEachIndexed { variantIndex, seed ->
             val earlier = EmotionAnimationFrameBuffer()
             val later = EmotionAnimationFrameBuffer()
@@ -525,7 +732,7 @@ class EmotionAnimationTest : FunSpec({
             listOf(1L, 2L, 1L, -7_107_885_269_632_063_644L) to
                 Triple(EmotionId.of("emotify:happy"), EmotionAnimationVariant.LANTERN_RELEASE, false),
             listOf(-1L, -2L, 128L, 508_363_006_929_072_852L) to
-                Triple(EmotionId.of("emotify:sad"), EmotionAnimationVariant.ELASTIC_POP, false),
+                Triple(EmotionId.of("emotify:sad"), EmotionAnimationVariant.LANTERN_RELEASE, false),
         )
 
         fixtures.forEach { (values, expected) ->
