@@ -1,0 +1,755 @@
+import groovy.json.JsonSlurper
+import java.io.ByteArrayInputStream
+import java.nio.charset.StandardCharsets
+import java.util.Arrays
+import java.util.jar.Manifest
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'java-library'
+    id 'idea'
+    id 'net.neoforged.moddev'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = mod_version
+group = mod_group_id
+
+evaluationDependsOn(':emotify-core')
+evaluationDependsOn(':emotify-wire-v1')
+evaluationDependsOn(':emotify-server-core')
+evaluationDependsOn(':emotify-catalog-builtin')
+evaluationDependsOn(':minecraft-client-1.21.8')
+
+def targetMinecraftVersionRange = providers.gradleProperty('minecraft_version_range_1_21_8').get()
+def targetNeoVersion = providers.gradleProperty('neo_version_1_21_8').get()
+def targetNeoVersionRange = providers.gradleProperty('neo_version_range_1_21_8').get()
+
+base {
+    archivesName = 'emotify-neoforge-1.21.8'
+}
+
+repositories {
+    maven {
+        name = 'KotlinForForge'
+        url = uri('https://thedarkcolour.github.io/KotlinForForge/')
+        content {
+            includeGroup 'thedarkcolour'
+        }
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+neoForge {
+    version = targetNeoVersion
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+            sourceSet project(':emotify-core').sourceSets.main
+            sourceSet project(':emotify-wire-v1').sourceSets.main
+            sourceSet project(':emotify-server-core').sourceSets.main
+            sourceSet project(':emotify-catalog-builtin').sourceSets.main
+            sourceSet project(':minecraft-client-1.21.8').sourceSets.main
+        }
+
+        emotifyUnitTest {
+            sourceSet sourceSets.main
+        }
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = rootProject.layout.projectDirectory.dir('run-neoforge-client-1.21.8')
+        }
+
+        server {
+            server()
+            gameDirectory = rootProject.layout.projectDirectory.dir('run-neoforge-server-1.21.8')
+            programArgument '--nogui'
+        }
+
+        configureEach {
+            logLevel = org.slf4j.event.Level.INFO
+            loadedMods = [mods.named(mod_id).get()]
+        }
+    }
+
+    unitTest {
+        def unitTestMod = mods.named('emotifyUnitTest')
+        testedMod = unitTestMod
+        loadedMods = [unitTestMod.get()]
+        enable()
+    }
+}
+
+dependencies {
+    implementation "thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version}"
+    compileOnly project(':emotify-core')
+    compileOnly project(':emotify-wire-v1')
+    compileOnly project(':emotify-server-core')
+    compileOnly project(':emotify-catalog-builtin')
+    compileOnly project(':minecraft-client-1.21.8')
+
+    jarJar(project(':emotify-core')) {
+        transitive = false
+    }
+    jarJar(project(':emotify-wire-v1')) {
+        transitive = false
+    }
+    jarJar(project(':emotify-server-core')) {
+        transitive = false
+    }
+    jarJar(project(':emotify-catalog-builtin')) {
+        transitive = false
+    }
+    jarJar(project(':minecraft-client-1.21.8')) {
+        transitive = false
+    }
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation "io.kotest:kotest-property:${kotest_version}"
+    testImplementation project(':emotify-core')
+    testImplementation project(':emotify-wire-v1')
+    testImplementation project(':emotify-server-core')
+    testImplementation project(':emotify-catalog-builtin')
+    testImplementation project(':minecraft-client-1.21.8')
+    testImplementation testFixtures(project(':emotify-core'))
+    testImplementation testFixtures(project(':emotify-wire-v1'))
+    testImplementation testFixtures(project(':emotify-server-core'))
+}
+
+def modMetadataProperties = [
+    minecraft_version_range: targetMinecraftVersionRange,
+    neo_version_range: targetNeoVersionRange,
+    loader_version_range: loader_version_range,
+    mod_id: mod_id,
+    mod_name: mod_name,
+    mod_license: mod_license,
+    mod_version: mod_version,
+    mod_authors: mod_authors,
+    mod_description: mod_description
+]
+
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    inputs.properties modMetadataProperties
+    expand modMetadataProperties
+    from 'src/main/templates'
+    rename 'neoforge[.]mods[.]toml[.]template', 'neoforge.mods.toml'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+
+sourceSets.main.resources {
+    srcDir generateModMetadata
+    exclude '**/*.bbmodel', '**/.cache/**'
+}
+
+sourceSets.main.kotlin.srcDir project(':minecraft-client-1.21.8')
+    .layout.projectDirectory.dir('src/minecraft/kotlin')
+sourceSets.main.java.srcDir project(':minecraft-client-1.21.8')
+    .layout.projectDirectory.dir('src/minecraft/java')
+
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+    includeEmptyDirs = false
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def embeddedLicenseName = "LICENSE_${mod_id}"
+
+tasks.named('jar', Jar) {
+    from(rootProject.layout.projectDirectory.file('LICENSE')) {
+        rename { embeddedLicenseName }
+    }
+    from(project(':emotify-catalog-builtin').layout.projectDirectory.file('src/main/resources/assets/emotify/emotions.json')) {
+        into 'assets/emotify'
+    }
+    from(project(':emotify-catalog-builtin').layout.projectDirectory.dir('src/main/resources/META-INF/licenses')) {
+        into 'META-INF/licenses'
+    }
+    from(project(':minecraft-client-1.21.1').layout.projectDirectory.dir('src/main/resources/assets/emotify')) {
+        into 'assets/emotify'
+    }
+}
+
+def releaseJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
+def neoForgeDevRuntime = configurations.named('additionalRuntimeClasspath')
+def neoForgeLaunchRuntime = configurations.named('runtimeClasspath')
+def projectGroup = project.group.toString()
+def projectVersion = project.version.toString()
+def expectedJarJarVersionRange = "[${projectVersion},)".toString()
+def embeddedProjectPaths = [
+    ':emotify-core',
+    ':emotify-wire-v1',
+    ':emotify-server-core',
+    ':emotify-catalog-builtin',
+    ':minecraft-client-1.21.8'
+] as Set
+def embeddedProjectJarNames = embeddedProjectPaths.collect { projectPath ->
+    "${projectPath.substring(1)}-${projectVersion}.jar".toString()
+} as Set
+def embeddedProjectRuntime = configurations.named('runtimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedProjectPaths
+    }
+}.files
+def projectClassPrefix = 'me/whish/emotify/'
+def clientClassPrefix = "${projectClassPrefix}client/"
+def clientMixinClassPrefix = "${projectClassPrefix}neoforge/mixin/client/"
+def requiredReleaseMetadata = [
+    'modLoader = "kotlinforforge"',
+    "loaderVersion = \"${modMetadataProperties.loader_version_range}\"".toString(),
+    "license = \"${modMetadataProperties.mod_license}\"".toString(),
+    "modId = \"${modMetadataProperties.mod_id}\"".toString(),
+    "version = \"${modMetadataProperties.mod_version}\"".toString(),
+    "displayName = \"${modMetadataProperties.mod_name}\"".toString(),
+    "authors = \"${modMetadataProperties.mod_authors}\"".toString(),
+    'logoFile = "assets/emotify/icon.png"',
+    '[[mixins]]',
+    'config = "emotify.neoforge.client.mixins.json"',
+    'modId = "neoforge"',
+    "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString(),
+    'modId = "minecraft"',
+    "versionRange = \"${modMetadataProperties.minecraft_version_range}\"".toString()
+]
+def nestedLibrarySpecifications = [
+    [
+        group: projectGroup,
+        artifact: 'emotify-core',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.emotify-core-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.core',
+        requiredClass: 'me/whish/emotify/domain/EmotionId.class',
+        requiredEntries: ['me/whish/emotify/domain/CustomEmojiAsset.class']
+    ],
+    [
+        group: projectGroup,
+        artifact: 'emotify-wire-v1',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.emotify-wire-v1-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.wire.v1',
+        requiredClass: 'me/whish/emotify/wire/v1/ProtocolV1Codecs.class',
+        requiredEntries: ['me/whish/emotify/wire/v1/CustomEmojiLosslessCodec.class']
+    ],
+    [
+        group: projectGroup,
+        artifact: 'emotify-server-core',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.emotify-server-core-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.server.core',
+        requiredClass: 'me/whish/emotify/server/core/EmotifyServerEngine.class',
+        requiredEntries: [
+            'me/whish/emotify/server/core/CustomAssetEgressBudget.class',
+            'me/whish/emotify/server/core/ServerCustomAssetStore.class'
+        ]
+    ],
+    [
+        group: projectGroup,
+        artifact: 'emotify-catalog-builtin',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.emotify-catalog-builtin-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.catalog.builtin',
+        requiredClass: 'me/whish/emotify/catalog/builtin/BuiltInEmotionManifest.class',
+        requiredEntries: ['assets/emotify/emotions.json'],
+        allowedReferences: ['com/google/gson', 'com.google.gson']
+    ],
+    [
+        group: projectGroup,
+        artifact: 'minecraft-client-1.21.8',
+        artifactVersion: projectVersion,
+        range: expectedJarJarVersionRange,
+        path: "META-INF/jarjar/${projectGroup}.minecraft-client-1.21.8-${projectVersion}.jar".toString(),
+        moduleName: 'me.whish.emotify.minecraft.client.v1_21_8',
+        requiredClass: 'me/whish/emotify/client/state/ClientHandshakeSession.class',
+        requiredEntries: [
+            'me/whish/emotify/client/state/ClientEmotionPlayCoordinator.class',
+            'me/whish/emotify/client/settings/ClientSettingsSnapshot.class',
+            'me/whish/emotify/client/sound/EmotionSoundPlayback.class',
+            'assets/emotify/icon.png',
+            'assets/emotify/lang/en_us.json',
+            'assets/emotify/lang/ru_ru.json',
+            'assets/emotify/textures/emotions/animals.png',
+            'assets/emotify/textures/emotions/faces.png'
+        ]
+    ]
+]
+def forbiddenPureModuleReferences = [
+    'net/minecraft',
+    'net.minecraft',
+    'net/neoforged',
+    'net.neoforged',
+    'net/fabricmc',
+    'net.fabricmc',
+    'org/bukkit',
+    'org.bukkit',
+    'io/netty',
+    'io.netty',
+    'com/mojang',
+    'com.mojang',
+    'org/lwjgl',
+    'org.lwjgl',
+    'thedarkcolour',
+    'thedarkcolour.',
+    'com/google/gson',
+    'com.google.gson'
+]
+
+def verifyDevRuntimeClasspath = tasks.register('verifyDevRuntimeClasspath') {
+    group = 'verification'
+    description = 'Verifies NeoForge dev runtime project, Kotlin and Gson bootstrap dependencies.'
+    inputs.files(neoForgeDevRuntime, neoForgeLaunchRuntime, embeddedProjectRuntime)
+
+    doLast {
+        def standaloneKotlinRuntimeJars = neoForgeDevRuntime.get().files.findAll { runtimeFile ->
+            runtimeFile.name ==~ /kotlin-stdlib(?:-jdk[78])?-[0-9].*\.jar/
+        }
+        if (!standaloneKotlinRuntimeJars.isEmpty()) {
+            throw new GradleException(
+                "NeoForge dev runtime contains standalone Kotlin modules already provided by Kotlin for Forge: " +
+                    standaloneKotlinRuntimeJars.collect { runtimeFile -> runtimeFile.name }.join(', ')
+            )
+        }
+
+        def gsonRuntimeJars = neoForgeDevRuntime.get().files.findAll { runtimeFile ->
+            runtimeFile.name ==~ /gson-[0-9].*\.jar/
+        }
+        if (gsonRuntimeJars.size() != 1) {
+            throw new GradleException(
+                "NeoForge dev bootstrap requires exactly one Gson runtime JAR: " +
+                    gsonRuntimeJars.collect { runtimeFile -> runtimeFile.name }.join(', ')
+            )
+        }
+        new ZipFile(gsonRuntimeJars.first()).withCloseable { gsonArchive ->
+            def requiredGsonClasses = [
+                'com/google/gson/GsonBuilder.class',
+                'com/google/gson/stream/JsonReader.class'
+            ]
+            def missingGsonClasses = requiredGsonClasses.findAll { entry -> gsonArchive.getEntry(entry) == null }
+            if (!missingGsonClasses.isEmpty()) {
+                throw new GradleException(
+                    "NeoForge dev bootstrap Gson is incomplete: ${missingGsonClasses.join(', ')}"
+                )
+            }
+        }
+
+        def filenameFallbackArtifacts = neoForgeLaunchRuntime.get().files.findAll { runtimeFile ->
+            runtimeFile.name in embeddedProjectJarNames
+        }
+        def duplicateProjectModuleArtifacts = (
+            embeddedProjectRuntime.files + filenameFallbackArtifacts
+        ).unique()
+        if (!duplicateProjectModuleArtifacts.isEmpty()) {
+            throw new GradleException(
+                "NeoForge launch runtime duplicates merged local mod source sets: " +
+                    duplicateProjectModuleArtifacts.collect { runtimeFile -> runtimeFile.name }.join(', ')
+            )
+        }
+    }
+}
+
+def verifyReleaseJar = tasks.register('verifyReleaseJar') {
+    group = 'verification'
+    description = 'Verifies the Emotify release JAR contents and metadata.'
+    dependsOn tasks.named('jar')
+    dependsOn ':minecraft-client-1.21.8:verifyLoaderNeutralClientBoundary'
+    dependsOn ':minecraft-client-1.21.8:verifyClientLibraryJar'
+    inputs.file(releaseJar)
+
+    doLast {
+        def archiveFile = releaseJar.get().asFile
+        def requiredEntries = [
+            'META-INF/MANIFEST.MF',
+            'META-INF/neoforge.mods.toml',
+            'emotify.neoforge.client.mixins.json',
+            'META-INF/jarjar/metadata.json',
+            embeddedLicenseName.toString(),
+            'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
+            'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
+            'assets/emotify/emotions.json',
+            'assets/emotify/icon.png',
+            'assets/emotify/lang/en_us.json',
+            'assets/emotify/lang/ru_ru.json',
+            'assets/emotify/textures/emotions/animals.png',
+            'assets/emotify/textures/emotions/faces.png',
+            'me/whish/emotify/Emotify.class',
+            'me/whish/emotify/client/EmotifyClient.class',
+            'me/whish/emotify/client/EmotifySettingsScreen.class',
+            'me/whish/emotify/neoforge/mixin/client/EditBoxHintMixin1218.class',
+            'me/whish/emotify/network/payload/CustomEmojiAssetChunkPayload.class',
+            'me/whish/emotify/server/EmotifyServerConfig.class'
+        ]
+
+        new ZipFile(archiveFile).withCloseable { archive ->
+            def entryNames = archive.entries().collect { entry -> entry.name }
+            def missingEntries = requiredEntries.findAll { entry -> entry !in entryNames }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException("Release JAR is missing required entries: ${missingEntries.join(', ')}")
+            }
+
+            def duplicateEntries = entryNames.groupBy { entry -> entry }
+                .findAll { entry, occurrences -> occurrences.size() > 1 }
+                .keySet()
+            if (!duplicateEntries.isEmpty()) {
+                throw new GradleException("Release JAR contains duplicate entries: ${duplicateEntries.join(', ')}")
+            }
+
+            def nestedJarEntries = entryNames.findAll { entry ->
+                entry.startsWith('META-INF/jarjar/') && entry.endsWith('.jar')
+            }
+            def expectedNestedJarEntries = nestedLibrarySpecifications.collect { specification -> specification.path }
+            if (nestedJarEntries.toSet() != expectedNestedJarEntries.toSet()) {
+                throw new GradleException(
+                    "Release JAR must contain exactly the expected libraries: ${expectedNestedJarEntries.join(', ')}"
+                )
+            }
+
+            def jarJarMetadataEntry = archive.getEntry('META-INF/jarjar/metadata.json')
+            def jarJarMetadata = archive.getInputStream(jarJarMetadataEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream)
+            }
+            def metadataJars = jarJarMetadata.jars instanceof Collection ? jarJarMetadata.jars : []
+            def metadataNestedJarEntries = metadataJars.collect { nestedJar -> nestedJar.path }.toSet()
+            def metadataByPath = metadataJars.collectEntries { nestedJar -> [(nestedJar.path): nestedJar] }
+            def metadataViolations = nestedLibrarySpecifications.collectMany { specification ->
+                def nestedJar = metadataByPath[specification.path]
+                if (nestedJar == null) {
+                    return ["${specification.path}:missing".toString()]
+                }
+                [
+                    nestedJar.identifier?.group == specification.group ? null :
+                        "${specification.path}:group=${nestedJar.identifier?.group}".toString(),
+                    nestedJar.identifier?.artifact == specification.artifact ? null :
+                        "${specification.path}:artifact=${nestedJar.identifier?.artifact}".toString(),
+                    nestedJar.version?.artifactVersion == specification.artifactVersion ? null :
+                        "${specification.path}:artifactVersion=${nestedJar.version?.artifactVersion}".toString(),
+                    nestedJar.version?.range == specification.range ? null :
+                        "${specification.path}:range=${nestedJar.version?.range}".toString(),
+                    nestedJar.isObfuscated == false ? null :
+                        "${specification.path}:isObfuscated=${nestedJar.isObfuscated}".toString()
+                ].findAll { violation -> violation != null }
+            }
+            if (metadataJars.size() != nestedLibrarySpecifications.size() ||
+                metadataNestedJarEntries != expectedNestedJarEntries.toSet() ||
+                !metadataViolations.isEmpty()) {
+                throw new GradleException(
+                    "JarJar metadata does not match embedded libraries: paths=" +
+                        "${metadataNestedJarEntries.join(', ')}, violations=${metadataViolations.join(', ')}"
+                )
+            }
+
+            def nestedArchives = nestedLibrarySpecifications.collectEntries { specification ->
+                def nestedBytes = archive.getInputStream(archive.getEntry(specification.path)).withCloseable { stream ->
+                    stream.readAllBytes()
+                }
+                def nestedEntryNames = []
+                def nestedEntries = [:]
+                new ZipInputStream(new ByteArrayInputStream(nestedBytes)).withCloseable { nestedArchive ->
+                    for (def nestedEntry = nestedArchive.nextEntry; nestedEntry != null; nestedEntry = nestedArchive.nextEntry) {
+                        nestedEntryNames.add(nestedEntry.name)
+                        if (!nestedEntry.directory) {
+                            nestedEntries[nestedEntry.name] = nestedArchive.readAllBytes()
+                        }
+                    }
+                }
+                def duplicateNestedEntries = nestedEntryNames.groupBy { entry -> entry }
+                    .findAll { entry, occurrences -> occurrences.size() > 1 }
+                    .keySet()
+                if (!duplicateNestedEntries.isEmpty()) {
+                    throw new GradleException(
+                        "Embedded library ${specification.path} contains duplicate entries: " +
+                            duplicateNestedEntries.join(', ')
+                    )
+                }
+                if (!nestedEntries.containsKey(specification.requiredClass)) {
+                    throw new GradleException(
+                        "Embedded library ${specification.path} is missing ${specification.requiredClass}"
+                    )
+                }
+                def missingNestedEntries = (specification.requiredEntries ?: []).findAll { requiredEntry ->
+                    !nestedEntries.containsKey(requiredEntry)
+                }
+                if (!missingNestedEntries.isEmpty()) {
+                    throw new GradleException(
+                        "Embedded library ${specification.path} is missing required entries: " +
+                            missingNestedEntries.join(', ')
+                    )
+                }
+                def manifestBytes = nestedEntries['META-INF/MANIFEST.MF']
+                if (manifestBytes == null) {
+                    throw new GradleException("Embedded library ${specification.path} has no manifest")
+                }
+                def manifest = new Manifest(new ByteArrayInputStream(manifestBytes))
+                def attributes = manifest.mainAttributes
+                if (attributes.getValue('Automatic-Module-Name') != specification.moduleName) {
+                    throw new GradleException(
+                        "Embedded library ${specification.path} has an invalid Automatic-Module-Name"
+                    )
+                }
+                if (attributes.getValue('FMLModType') != 'LIBRARY') {
+                    throw new GradleException("Embedded library ${specification.path} is not a LIBRARY")
+                }
+                [(specification.moduleName): nestedEntries]
+            }
+
+            def forbiddenFixtureEntries = nestedArchives.collectMany { moduleName, entries ->
+                entries.keySet().findAll { entry ->
+                    entry.contains('FakeMonotonicTimeSource') ||
+                        entry.contains('ProtocolV1MaliciousCorpus') ||
+                        entry.contains('ProtocolV1MaliciousInput') ||
+                        entry.contains('ProtocolV1PayloadKind') ||
+                        entry.contains('testFixtures')
+                }.collect { entry -> "${moduleName}:${entry}" }
+            }
+            if (!forbiddenFixtureEntries.isEmpty()) {
+                throw new GradleException(
+                    "Release JAR contains test fixtures: ${forbiddenFixtureEntries.join(', ')}"
+                )
+            }
+
+            def forbiddenEmbeddedRuntimePrefixes = [
+                'kotlin/',
+                'it/unimi/dsi/fastutil/',
+                'org/jetbrains/annotations/',
+                'com/google/gson/'
+            ]
+            def embeddedRuntimeEntries = nestedArchives.collectMany { moduleName, entries ->
+                entries.keySet().findAll { entry ->
+                    forbiddenEmbeddedRuntimePrefixes.any { prefix -> entry.startsWith(prefix) }
+                }
+                    .collect { entry -> "${moduleName}:${entry}" }
+            }
+            if (!embeddedRuntimeEntries.isEmpty()) {
+                throw new GradleException(
+                    "Release JAR embeds runtime classes: ${embeddedRuntimeEntries.join(', ')}"
+                )
+            }
+
+            def catalogManifestBytes = nestedArchives
+                .get('me.whish.emotify.catalog.builtin')
+                .get('assets/emotify/emotions.json')
+            def outerManifestBytes = archive.getInputStream(archive.getEntry('assets/emotify/emotions.json'))
+                .withCloseable { stream -> stream.readAllBytes() }
+            if (!Arrays.equals(catalogManifestBytes, outerManifestBytes)) {
+                throw new GradleException('Outer and embedded built-in emotion manifests differ')
+            }
+            def expectedEmotionAssets = [
+                'assets/emotify/emotions.json',
+                'assets/emotify/textures/emotions/animals.png',
+                'assets/emotify/textures/emotions/faces.png'
+            ] as Set
+            def actualEmotionAssets = entryNames.findAll { entry ->
+                !entry.endsWith('/') &&
+                    (entry == 'assets/emotify/emotions.json' || entry.startsWith('assets/emotify/textures/emotions/'))
+            }.toSet()
+            if (actualEmotionAssets != expectedEmotionAssets) {
+                throw new GradleException(
+                    "Release JAR emotion assets differ from the exact expected set: ${actualEmotionAssets.join(', ')}"
+                )
+            }
+            def catalogAssetEntries = nestedArchives
+                .get('me.whish.emotify.catalog.builtin')
+                .keySet()
+                .findAll { entry -> !entry.endsWith('/') && entry.startsWith('assets/emotify/') }
+                .toSet()
+            if (catalogAssetEntries != ['assets/emotify/emotions.json'] as Set) {
+                throw new GradleException(
+                    "Catalog library contains unexpected Emotify assets: ${catalogAssetEntries.join(', ')}"
+                )
+            }
+            def expectedClientAssets = [
+                'assets/emotify/icon.png',
+                'assets/emotify/lang/en_us.json',
+                'assets/emotify/lang/ru_ru.json',
+                'assets/emotify/textures/emotions/animals.png',
+                'assets/emotify/textures/emotions/faces.png'
+            ] as Set
+            def clientEntries = nestedArchives.get('me.whish.emotify.minecraft.client.v1_21_8')
+            def clientAssetEntries = clientEntries.keySet().findAll { entry ->
+                !entry.endsWith('/') && entry.startsWith('assets/')
+            }.toSet()
+            if (clientAssetEntries != expectedClientAssets) {
+                throw new GradleException(
+                    "Client library assets differ from the exact expected set: ${clientAssetEntries.join(', ')}"
+                )
+            }
+            expectedClientAssets.each { assetPath ->
+                def outerBytes = archive.getInputStream(archive.getEntry(assetPath)).withCloseable { stream ->
+                    stream.readAllBytes()
+                }
+                if (!Arrays.equals(clientEntries.get(assetPath), outerBytes)) {
+                    throw new GradleException("Outer and embedded client assets differ: ${assetPath}")
+                }
+            }
+
+            def pureModuleBoundaryViolations = nestedArchives.collectMany { moduleName, entries ->
+                def allowedReferences = nestedLibrarySpecifications.find { specification ->
+                    specification.moduleName == moduleName
+                }?.allowedReferences ?: []
+                entries.findAll { entry, bytes -> entry.endsWith('.class') }
+                    .collectMany { entry, bytes ->
+                        def constantPool = new String(bytes, StandardCharsets.ISO_8859_1)
+                        forbiddenPureModuleReferences.findAll { reference ->
+                            reference !in allowedReferences && constantPool.contains(reference)
+                        }
+                            .collect { reference -> "${moduleName}:${entry}->${reference}" }
+                    }
+            }
+            if (!pureModuleBoundaryViolations.isEmpty()) {
+                throw new GradleException(
+                    "Platform-neutral libraries reference forbidden APIs: ${pureModuleBoundaryViolations.join(', ')}"
+                )
+            }
+
+            def classEntriesByArchive = ['emotify-neoforge': entryNames.findAll { entry -> entry.endsWith('.class') }]
+            nestedArchives.each { moduleName, entries ->
+                classEntriesByArchive[moduleName] = entries.keySet().findAll { entry -> entry.endsWith('.class') }
+            }
+            def archiveNames = classEntriesByArchive.keySet().toList()
+            def duplicateClassPaths = []
+            def splitPackages = []
+            archiveNames.eachWithIndex { leftArchive, index ->
+                archiveNames.drop(index + 1).each { rightArchive ->
+                    def leftClasses = classEntriesByArchive[leftArchive].toSet()
+                    def rightClasses = classEntriesByArchive[rightArchive].toSet()
+                    leftClasses.intersect(rightClasses).each { classPath ->
+                        duplicateClassPaths.add("${leftArchive}<->${rightArchive}:${classPath}")
+                    }
+                    def leftPackages = leftClasses.collect { classPath ->
+                        def separator = classPath.lastIndexOf('/')
+                        separator < 0 ? '' : classPath.substring(0, separator)
+                    }.toSet()
+                    def rightPackages = rightClasses.collect { classPath ->
+                        def separator = classPath.lastIndexOf('/')
+                        separator < 0 ? '' : classPath.substring(0, separator)
+                    }.toSet()
+                    leftPackages.intersect(rightPackages).each { packagePath ->
+                        splitPackages.add("${leftArchive}<->${rightArchive}:${packagePath}")
+                    }
+                }
+            }
+            if (!duplicateClassPaths.isEmpty()) {
+                throw new GradleException(
+                    "Release JAR contains duplicate class paths: ${duplicateClassPaths.join(', ')}"
+                )
+            }
+            if (!splitPackages.isEmpty()) {
+                throw new GradleException("Release JAR contains split packages: ${splitPackages.join(', ')}")
+            }
+
+            def forbiddenEntries = entryNames.findAll { entry ->
+                entry.startsWith("${clientClassPrefix}ClientSelectionDebug") ||
+                    entry.startsWith('docs/') ||
+                    entry.startsWith('run-client/') ||
+                    entry.startsWith('run-server/') ||
+                    entry.contains('/test/') ||
+                    entry.endsWith('.bbmodel') ||
+                    entry.contains('/.cache/')
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                throw new GradleException("Release JAR contains forbidden entries: ${forbiddenEntries.join(', ')}")
+            }
+
+            def dedicatedServerBoundaryViolations = entryNames.findAll { entry ->
+                entry.startsWith(projectClassPrefix) &&
+                    entry.endsWith('.class') &&
+                    !entry.startsWith(clientClassPrefix) &&
+                    !entry.startsWith(clientMixinClassPrefix)
+            }.findAll { entry ->
+                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
+                    stream.readAllBytes()
+                }
+                def constantPool = new String(classBytes, StandardCharsets.ISO_8859_1)
+                constantPool.contains('net/minecraft/client/') ||
+                    constantPool.contains('net.minecraft.client.') ||
+                    constantPool.contains(clientClassPrefix) ||
+                    constantPool.contains(clientMixinClassPrefix) ||
+                    constantPool.contains('me.whish.emotify.client.')
+            }
+            if (!dedicatedServerBoundaryViolations.isEmpty()) {
+                throw new GradleException(
+                    "Dedicated-server classes reference client-only code: ${dedicatedServerBoundaryViolations.join(', ')}"
+                )
+            }
+
+            def metadataEntry = archive.getEntry('META-INF/neoforge.mods.toml')
+            def metadata = archive.getInputStream(metadataEntry).withCloseable { stream ->
+                stream.getText('UTF-8')
+            }
+            def missingMetadata = requiredReleaseMetadata.findAll { value -> !metadata.contains(value) }
+            if (!missingMetadata.isEmpty()) {
+                throw new GradleException("Release metadata is incomplete: ${missingMetadata.join(', ')}")
+            }
+
+            def mixinEntry = archive.getEntry('emotify.neoforge.client.mixins.json')
+            def mixinMetadata = archive.getInputStream(mixinEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream, 'UTF-8')
+            }
+            if (
+                mixinMetadata.required != true ||
+                mixinMetadata.package != 'me.whish.emotify.neoforge.mixin.client' ||
+                mixinMetadata.compatibilityLevel != 'JAVA_21' ||
+                mixinMetadata.client != ['EditBoxHintMixin1218'] ||
+                mixinMetadata.injectors != [defaultRequire: 1]
+            ) {
+                throw new GradleException("Unexpected NeoForge client mixin contract: ${mixinMetadata}")
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn ':emotify-core:check'
+    dependsOn ':emotify-wire-v1:check'
+    dependsOn ':emotify-server-core:check'
+    dependsOn ':emotify-catalog-builtin:check'
+    dependsOn ':minecraft-client-1.21.8:check'
+    dependsOn verifyDevRuntimeClasspath
+    dependsOn verifyReleaseJar
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

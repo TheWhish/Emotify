@@ -231,6 +231,7 @@ def embeddedProjectRuntime = configurations.named('runtimeClasspath').get().inco
 }.files
 def projectClassPrefix = 'me/whish/emotify/'
 def clientClassPrefix = "${projectClassPrefix}client/"
+def clientMixinClassPrefix = "${projectClassPrefix}neoforge/mixin/client/"
 def requiredReleaseMetadata = [
     'modLoader = "kotlinforforge"',
     "loaderVersion = \"${modMetadataProperties.loader_version_range}\"".toString(),
@@ -240,6 +241,8 @@ def requiredReleaseMetadata = [
     "displayName = \"${modMetadataProperties.mod_name}\"".toString(),
     "authors = \"${modMetadataProperties.mod_authors}\"".toString(),
     'logoFile = "assets/emotify/icon.png"',
+    '[[mixins]]',
+    'config = "emotify.neoforge.client.mixins.json"',
     'modId = "neoforge"',
     "versionRange = \"${modMetadataProperties.neo_version_range}\"".toString(),
     'modId = "minecraft"',
@@ -397,6 +400,7 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
         def requiredEntries = [
             'META-INF/MANIFEST.MF',
             'META-INF/neoforge.mods.toml',
+            'emotify.neoforge.client.mixins.json',
             'META-INF/jarjar/metadata.json',
             embeddedLicenseName.toString(),
             'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
@@ -410,6 +414,7 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
             'me/whish/emotify/Emotify.class',
             'me/whish/emotify/client/EmotifyClient.class',
             'me/whish/emotify/client/EmotifySettingsScreen.class',
+            'me/whish/emotify/neoforge/mixin/client/EditBoxHintMixin1211.class',
             'me/whish/emotify/network/payload/CustomEmojiAssetChunkPayload.class',
             'me/whish/emotify/server/EmotifyServerConfig.class'
         ]
@@ -687,7 +692,8 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
             def dedicatedServerBoundaryViolations = entryNames.findAll { entry ->
                 entry.startsWith(projectClassPrefix) &&
                     entry.endsWith('.class') &&
-                    !entry.startsWith(clientClassPrefix)
+                    !entry.startsWith(clientClassPrefix) &&
+                    !entry.startsWith(clientMixinClassPrefix)
             }.findAll { entry ->
                 def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
                     stream.readAllBytes()
@@ -696,6 +702,7 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
                 constantPool.contains('net/minecraft/client/') ||
                     constantPool.contains('net.minecraft.client.') ||
                     constantPool.contains(clientClassPrefix) ||
+                    constantPool.contains(clientMixinClassPrefix) ||
                     constantPool.contains('me.whish.emotify.client.')
             }
             if (!dedicatedServerBoundaryViolations.isEmpty()) {
@@ -711,6 +718,20 @@ def verifyReleaseJar = tasks.register('verifyReleaseJar') {
             def missingMetadata = requiredReleaseMetadata.findAll { value -> !metadata.contains(value) }
             if (!missingMetadata.isEmpty()) {
                 throw new GradleException("Release metadata is incomplete: ${missingMetadata.join(', ')}")
+            }
+
+            def mixinEntry = archive.getEntry('emotify.neoforge.client.mixins.json')
+            def mixinMetadata = archive.getInputStream(mixinEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream, 'UTF-8')
+            }
+            if (
+                mixinMetadata.required != true ||
+                mixinMetadata.package != 'me.whish.emotify.neoforge.mixin.client' ||
+                mixinMetadata.compatibilityLevel != 'JAVA_21' ||
+                mixinMetadata.client != ['EditBoxHintMixin1211'] ||
+                mixinMetadata.injectors != [defaultRequire: 1]
+            ) {
+                throw new GradleException("Unexpected NeoForge client mixin contract: ${mixinMetadata}")
             }
         }
     }

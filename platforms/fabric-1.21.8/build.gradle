@@ -1,0 +1,719 @@
+import java.nio.charset.StandardCharsets
+import java.util.Arrays
+import java.util.zip.ZipFile
+import groovy.json.JsonSlurper
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'net.fabricmc.fabric-loom-remap'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+base {
+    archivesName = 'emotify-fabric-1.21.8'
+}
+
+def targetMinecraftVersion = providers.gradleProperty('minecraft_version_1_21_8').get()
+def targetFabricApiVersion = providers.gradleProperty('fabric_api_version_1_21_8').get()
+def targetModMenuVersion = providers.gradleProperty('modmenu_version_1_21_8').get()
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'Fabric'
+        url = uri('https://maven.fabricmc.net/')
+    }
+    maven {
+        name = 'Modrinth'
+        url = uri('https://api.modrinth.com/maven')
+        content {
+            includeGroup 'maven.modrinth'
+        }
+        metadataSources {
+            mavenPom()
+            artifact()
+        }
+    }
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        emotify {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        client {
+            client()
+            displayName.set('Fabric Client 1.21.8')
+            runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-client-1.21.8'))
+        }
+        server {
+            server()
+            displayName.set('Fabric Server 1.21.8')
+            runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-server-1.21.8'))
+        }
+        configureEach {
+            generateRunConfig.set(false)
+        }
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+kotlin {
+    jvmToolchain(21)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_21)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+configurations {
+    modMenuIntegration {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${targetMinecraftVersion}"
+    mappings loom.officialMojangMappings()
+
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${targetFabricApiVersion}"
+    modImplementation "net.fabricmc:fabric-language-kotlin:${fabric_language_kotlin_version}"
+    modClientCompileOnly("maven.modrinth:modmenu:${targetModMenuVersion}") {
+        transitive = false
+    }
+    modMenuIntegration("maven.modrinth:modmenu:${targetModMenuVersion}") {
+        transitive = false
+    }
+
+    implementation project(':emotify-core')
+    implementation project(':emotify-wire-v1')
+    implementation project(':emotify-server-core')
+    implementation project(':emotify-catalog-builtin')
+    clientImplementation project(':minecraft-client-1.21.8')
+
+    testImplementation "io.kotest:kotest-runner-junit5:${kotest_version}"
+    testImplementation "io.kotest:kotest-assertions-core:${kotest_version}"
+    testImplementation testFixtures(project(':emotify-core'))
+    testImplementation testFixtures(project(':emotify-wire-v1'))
+}
+
+configurations {
+    testImplementation.extendsFrom clientImplementation
+    testRuntimeOnly.extendsFrom clientRuntimeOnly
+}
+
+sourceSets {
+    main {
+        resources.srcDir project(':emotify-catalog-builtin').layout.projectDirectory.dir('src/main/resources')
+    }
+    client {
+        java.srcDir project(':minecraft-client-1.21.8').layout.projectDirectory.dir('src/minecraft/java')
+        kotlin.srcDir project(':minecraft-client-1.21.8').layout.projectDirectory.dir('src/minecraft/kotlin')
+        resources.srcDir project(':minecraft-client-1.21.1').layout.projectDirectory.dir('src/main/resources')
+    }
+    test {
+        compileClasspath += sourceSets.client.output
+        runtimeClasspath += sourceSets.client.output
+    }
+}
+
+def modProperties = [
+    modId: providers.gradleProperty('mod_id').get(),
+    modName: providers.gradleProperty('mod_name').get(),
+    modVersion: project.version,
+    modLicense: providers.gradleProperty('mod_license').get(),
+    modAuthors: providers.gradleProperty('mod_authors').get(),
+    modDescription: providers.gradleProperty('mod_description').get(),
+    minecraftVersion: targetMinecraftVersion,
+    fabricLoaderVersion: providers.gradleProperty('fabric_loader_version').get(),
+    fabricApiVersion: targetFabricApiVersion,
+    fabricLanguageKotlinVersion: providers.gradleProperty('fabric_language_kotlin_version').get()
+]
+
+tasks.named('processResources', ProcessResources) {
+    inputs.properties(modProperties)
+    filteringCharset = 'UTF-8'
+    filesMatching('fabric.mod.json') {
+        expand(modProperties)
+    }
+    includeEmptyDirs = false
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def embeddedMainProjectPaths = [
+    ':emotify-core',
+    ':emotify-wire-v1',
+    ':emotify-server-core',
+    ':emotify-catalog-builtin'
+] as Set
+def embeddedClientProjectPaths = [
+    ':minecraft-client-1.21.8'
+] as Set
+def embeddedProjectPaths = embeddedMainProjectPaths + embeddedClientProjectPaths
+def embeddedMainProjectRuntime = configurations.named('runtimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedMainProjectPaths
+    }
+}.files
+def embeddedClientProjectRuntime = configurations.named('clientRuntimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedClientProjectPaths
+    }
+}.files
+def embeddedProjectRuntime = files(embeddedMainProjectRuntime, embeddedClientProjectRuntime)
+
+tasks.named('jar', Jar) {
+    dependsOn embeddedProjectPaths.collect { projectPath -> "${projectPath}:jar" }
+    inputs.files(embeddedProjectRuntime)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from({ embeddedProjectRuntime.collect { runtimeFile -> zipTree(runtimeFile) } }) {
+        include 'me/whish/emotify/**/*.class'
+    }
+    from(rootProject.layout.projectDirectory.file('LICENSE')) {
+        rename { 'LICENSE_emotify' }
+    }
+    manifest {
+        attributes(
+            'Implementation-Title': providers.gradleProperty('mod_name').get(),
+            'Implementation-Version': project.version
+        )
+    }
+}
+
+def fabricReleaseJar = tasks.named('remapJar').flatMap { task -> task.archiveFile }
+def fabricCommonClassDirectories = sourceSets.main.output.classesDirs
+def fabricCommonClassFiles = fabricCommonClassDirectories.asFileTree.matching {
+    include '**/*.class'
+}
+def expectedFabricResourceSources = [
+    'LICENSE_emotify': rootProject.layout.projectDirectory.file('LICENSE').asFile,
+    'emotify.mixins.json': layout.projectDirectory.file('src/main/resources/emotify.mixins.json').asFile,
+    'emotify.client.mixins.json': layout.projectDirectory.file('src/client/resources/emotify.client.mixins.json').asFile,
+    'assets/emotify/emotions.json': project(':emotify-catalog-builtin').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/emotions.json').asFile,
+    'assets/emotify/icon.png': project(':minecraft-client-1.21.1').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/icon.png').asFile,
+    'assets/emotify/lang/en_us.json': project(':minecraft-client-1.21.1').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/lang/en_us.json').asFile,
+    'assets/emotify/lang/ru_ru.json': project(':minecraft-client-1.21.1').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/lang/ru_ru.json').asFile,
+    'assets/emotify/textures/emotions/animals.png': project(':minecraft-client-1.21.1').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/textures/emotions/animals.png').asFile,
+    'assets/emotify/textures/emotions/faces.png': project(':minecraft-client-1.21.1').layout.projectDirectory
+        .file('src/main/resources/assets/emotify/textures/emotions/faces.png').asFile,
+    'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt': project(':emotify-catalog-builtin')
+        .layout.projectDirectory.file('src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt')
+        .asFile,
+    'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt': project(':emotify-catalog-builtin')
+        .layout.projectDirectory.file('src/main/resources/META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt')
+        .asFile
+]
+def fabricRuntimeClasspaths = [
+    common: configurations.named('runtimeClasspath'),
+    client: configurations.named('clientRuntimeClasspath')
+]
+def fabricRuntimeProperties = [
+    fabricLoaderVersion: providers.gradleProperty('fabric_loader_version').get(),
+    fabricLanguageKotlinVersion: providers.gradleProperty('fabric_language_kotlin_version').get(),
+    modMenuVersion: targetModMenuVersion,
+    kotlinVersion: providers.gradleProperty('kotlin_version').get(),
+    gsonVersion: providers.gradleProperty('gson_runtime_version_1_21_8').get(),
+    fastutilVersion: providers.gradleProperty('fastutil_runtime_version_1_21_8').get()
+]
+
+def verifyFabricDevRuntimeClasspath = tasks.register('verifyFabricDevRuntimeClasspath') {
+    group = 'verification'
+    description = 'Verifies Fabric development runtime loader, Kotlin and shared library dependencies.'
+    inputs.files(fabricRuntimeClasspaths.values())
+    inputs.properties(fabricRuntimeProperties)
+
+    doLast {
+        def expectedKotlinRuntimeJarNames = [
+            "kotlin-stdlib-${fabricRuntimeProperties.kotlinVersion}.jar".toString(),
+            "kotlin-stdlib-jdk7-${fabricRuntimeProperties.kotlinVersion}.jar".toString(),
+            "kotlin-stdlib-jdk8-${fabricRuntimeProperties.kotlinVersion}.jar".toString(),
+            "kotlin-reflect-${fabricRuntimeProperties.kotlinVersion}.jar".toString()
+        ] as Set
+        fabricRuntimeClasspaths.each { classpathName, classpathProvider ->
+            def runtimeFiles = classpathProvider.get().files.toList()
+            def requireSingleRuntimeJar = { String dependencyName, Closure<Boolean> predicate ->
+                def matchingFiles = runtimeFiles.findAll(predicate)
+                if (matchingFiles.size() != 1) {
+                    throw new GradleException(
+                        "Fabric ${classpathName} runtime requires exactly one ${dependencyName} JAR: " +
+                            matchingFiles.collect { runtimeFile -> runtimeFile.name }.join(', ')
+                    )
+                }
+                matchingFiles.first()
+            }
+            requireSingleRuntimeJar('Fabric Loader') { runtimeFile ->
+                runtimeFile.name == "fabric-loader-${fabricRuntimeProperties.fabricLoaderVersion}.jar"
+            }
+            def fabricLanguageKotlinJar = requireSingleRuntimeJar('Fabric Language Kotlin') { runtimeFile ->
+                runtimeFile.name.startsWith('fabric-language-kotlin-') &&
+                    runtimeFile.name.endsWith("-${fabricRuntimeProperties.fabricLanguageKotlinVersion}.jar")
+            }
+            def gsonRuntimeJar = requireSingleRuntimeJar('Gson') { runtimeFile ->
+                runtimeFile.name == "gson-${fabricRuntimeProperties.gsonVersion}.jar"
+            }
+            requireSingleRuntimeJar('Fastutil') { runtimeFile ->
+                runtimeFile.name == "fastutil-${fabricRuntimeProperties.fastutilVersion}.jar"
+            }
+            def modMenuRuntimeJars = runtimeFiles.findAll { runtimeFile ->
+                runtimeFile.name.startsWith('modmenu-') && runtimeFile.name.endsWith('.jar')
+            }
+            if (!modMenuRuntimeJars.isEmpty()) {
+                throw new GradleException(
+                    "Fabric ${classpathName} runtime must remain valid without Mod Menu: " +
+                        modMenuRuntimeJars.collect { runtimeFile -> runtimeFile.name }.join(', ')
+                )
+            }
+            def actualKotlinRuntimeJars = runtimeFiles.findAll { runtimeFile ->
+                runtimeFile.name.startsWith('kotlin-stdlib-') || runtimeFile.name.startsWith('kotlin-reflect-')
+            }
+            def actualKotlinRuntimeJarNames = actualKotlinRuntimeJars.collect { runtimeFile -> runtimeFile.name }.toSet()
+            if (
+                actualKotlinRuntimeJars.size() != expectedKotlinRuntimeJarNames.size() ||
+                actualKotlinRuntimeJarNames != expectedKotlinRuntimeJarNames
+            ) {
+                throw new GradleException(
+                    "Fabric ${classpathName} runtime Kotlin JARs differ: " +
+                        actualKotlinRuntimeJarNames.join(', ')
+                )
+            }
+            def forbiddenRuntimeArtifacts = runtimeFiles.findAll { runtimeFile ->
+                def artifactName = runtimeFile.name.toLowerCase(Locale.ROOT)
+                artifactName.contains('kotlinforforge') ||
+                    artifactName.startsWith('neoforge-') ||
+                    artifactName.startsWith('forge-') ||
+                    artifactName.startsWith('paper-api-') ||
+                    artifactName.startsWith('spigot-api-') ||
+                    artifactName.startsWith('bukkit-') ||
+                    artifactName.startsWith('quilt-loader-')
+            }
+            if (!forbiddenRuntimeArtifacts.isEmpty()) {
+                throw new GradleException(
+                    "Fabric ${classpathName} runtime contains foreign loader artifacts: " +
+                        forbiddenRuntimeArtifacts.collect { runtimeFile -> runtimeFile.name }.join(', ')
+                )
+            }
+            new ZipFile(fabricLanguageKotlinJar).withCloseable { archive ->
+                def nestedKotlinRuntimeJarNames = archive.entries().findAll { entry ->
+                    !entry.directory &&
+                        entry.name.startsWith('META-INF/jars/kotlin-') &&
+                        entry.name.endsWith('.jar')
+                }.collect { entry -> entry.name.substring('META-INF/jars/'.length()) }.toSet()
+                if (nestedKotlinRuntimeJarNames != expectedKotlinRuntimeJarNames) {
+                    throw new GradleException(
+                        "Fabric ${classpathName} runtime and Fabric Language Kotlin disagree on Kotlin JARs: " +
+                            nestedKotlinRuntimeJarNames.join(', ')
+                    )
+                }
+                def metadataEntry = archive.getEntry('fabric.mod.json')
+                if (metadataEntry == null) {
+                    throw new GradleException('Fabric Language Kotlin runtime has no fabric.mod.json')
+                }
+                def metadata = archive.getInputStream(metadataEntry).withCloseable { stream ->
+                    new JsonSlurper().parse(stream, 'UTF-8')
+                }
+                if (
+                    metadata.id != 'fabric-language-kotlin' ||
+                    metadata.version != fabricRuntimeProperties.fabricLanguageKotlinVersion
+                ) {
+                    throw new GradleException(
+                        "Unexpected Fabric Language Kotlin runtime identity: ${metadata.id} ${metadata.version}"
+                    )
+                }
+            }
+            new ZipFile(gsonRuntimeJar).withCloseable { archive ->
+                def requiredGsonClasses = [
+                    'com/google/gson/GsonBuilder.class',
+                    'com/google/gson/stream/JsonReader.class'
+                ]
+                def missingGsonClasses = requiredGsonClasses.findAll { entry -> archive.getEntry(entry) == null }
+                if (!missingGsonClasses.isEmpty()) {
+                    throw new GradleException(
+                        "Fabric ${classpathName} runtime Gson is incomplete: ${missingGsonClasses.join(', ')}"
+                    )
+                }
+            }
+        }
+    }
+}
+
+def modMenuIntegrationClasspath = configurations.named('modMenuIntegration')
+def expectedModMenuIntegrationVersion = fabricRuntimeProperties.modMenuVersion
+def verifyFabricModMenuIntegrationClasspath = tasks.register('verifyFabricModMenuIntegrationClasspath') {
+    group = 'verification'
+    description = 'Verifies the optional Fabric Mod Menu compile integration without adding it to normal runtime.'
+    inputs.files(modMenuIntegrationClasspath)
+    inputs.property('modMenuVersion', expectedModMenuIntegrationVersion)
+
+    doLast {
+        def integrationJars = inputs.files.files.toList()
+        if (
+            integrationJars.size() != 1 ||
+            !integrationJars.first().name.startsWith('modmenu-') ||
+            !integrationJars.first().name.endsWith("-${expectedModMenuIntegrationVersion}.jar")
+        ) {
+            throw new GradleException(
+                "Fabric Mod Menu integration requires exactly version ${expectedModMenuIntegrationVersion}: " +
+                    integrationJars.collect { runtimeFile -> runtimeFile.name }.join(', ')
+            )
+        }
+    }
+}
+
+def verifyFabricCommonBoundary = tasks.register('verifyFabricCommonBoundary') {
+    group = 'verification'
+    description = 'Verifies that Fabric common output contains no client-only references.'
+    dependsOn tasks.named('classes')
+    inputs.files(fabricCommonClassFiles)
+
+    doLast {
+        def forbiddenReferences = [
+            'net/minecraft/client/',
+            'net.minecraft.client.',
+            'net/fabricmc/fabric/api/client/',
+            'net.fabricmc.fabric.api.client.',
+            'com/mojang/blaze3d/',
+            'com.mojang.blaze3d.',
+            'org/lwjgl/',
+            'org.lwjgl.',
+            'com/terraformersmc/modmenu/',
+            'com.terraformersmc.modmenu.',
+            'me/whish/emotify/client/',
+            'me.whish.emotify.client.'
+        ]
+        def violations = fabricCommonClassFiles.files.findAll { classFile ->
+            def constantPool = new String(classFile.bytes, StandardCharsets.ISO_8859_1)
+            forbiddenReferences.any { reference -> constantPool.contains(reference) }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException(
+                "Fabric common classes reference client-only code: ${violations.take(20).join(', ')}"
+            )
+        }
+    }
+}
+
+def verifyFabricReleaseJar = tasks.register('verifyFabricReleaseJar') {
+    group = 'verification'
+    description = 'Verifies the Fabric release JAR metadata, assets, ownership and dependency boundary.'
+    dependsOn tasks.named('remapJar')
+    dependsOn tasks.named('test')
+    dependsOn verifyFabricCommonBoundary
+    inputs.file(fabricReleaseJar)
+    inputs.files(expectedFabricResourceSources.values())
+
+    doLast {
+        new ZipFile(fabricReleaseJar.get().asFile).withCloseable { archive ->
+            def entries = archive.entries().collect { entry -> entry.name }
+            def requiredEntries = [
+                'LICENSE_emotify',
+                'fabric.mod.json',
+                'emotify.mixins.json',
+                'emotify.client.mixins.json',
+                'assets/emotify/emotions.json',
+                'assets/emotify/icon.png',
+                'assets/emotify/lang/en_us.json',
+                'assets/emotify/lang/ru_ru.json',
+                'assets/emotify/textures/emotions/animals.png',
+                'assets/emotify/textures/emotions/faces.png',
+                'META-INF/licenses/emotify/Happy-Better-Emojis-LICENSE.txt',
+                'META-INF/licenses/emotify/Happy-Better-Emojis-NOTICE.txt',
+                'me/whish/emotify/fabric/EmotifyFabric.class',
+                'me/whish/emotify/fabric/client/EmotifyFabricClient.class',
+                'me/whish/emotify/fabric/client/EmotifyModMenu.class',
+                'me/whish/emotify/fabric/mixin/ConnectionAccessor.class',
+                'me/whish/emotify/fabric/mixin/ServerCommonPacketListenerAccessor.class',
+                'me/whish/emotify/fabric/mixin/client/EditBoxMixin.class',
+                'me/whish/emotify/fabric/mixin/client/GameRendererMixin.class',
+                'me/whish/emotify/fabric/mixin/client/LevelRendererMixin.class',
+                'me/whish/emotify/fabric/mixin/client/MinecraftMixin.class',
+                'me/whish/emotify/fabric/mixin/client/PlayerNameTagMixin.class',
+                'me/whish/emotify/fabric/mixin/client/PlayerRendererMixin.class',
+                'me/whish/emotify/client/EmotionPickerScreen.class',
+                'me/whish/emotify/client/CustomEmojiRegistry.class',
+                'me/whish/emotify/client/EmotifySettingsScreen.class',
+                'me/whish/emotify/client/EmotionBillboardRenderer.class',
+                'me/whish/emotify/client/state/ClientHandshakeSession.class',
+                'me/whish/emotify/client/state/ClientEmotionPlayCoordinator.class',
+                'me/whish/emotify/client/settings/ClientSettingsSnapshot.class',
+                'me/whish/emotify/client/sound/EmotionSoundPlayback.class',
+                'me/whish/emotify/domain/EmotionId.class',
+                'me/whish/emotify/domain/CustomEmojiAsset.class',
+                'me/whish/emotify/catalog/builtin/BuiltInEmotionCatalog.class',
+                'me/whish/emotify/server/core/EmotifyServerEngine.class',
+                'me/whish/emotify/server/core/ServerCustomAssetStore.class',
+                'me/whish/emotify/wire/v1/ProtocolV1Codecs.class',
+                'me/whish/emotify/wire/v1/CustomEmojiLosslessCodec.class',
+                'me/whish/emotify/fabric/config/FabricServerConfig.class',
+                'me/whish/emotify/fabric/network/payload/FabricCustomEmojiAssetChunkPayload.class'
+            ]
+            def missingEntries = requiredEntries.findAll { requiredEntry -> requiredEntry !in entries }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException("Fabric release JAR is missing entries: ${missingEntries.join(', ')}")
+            }
+
+            def duplicateEntries = entries.groupBy { entry -> entry }
+                .findAll { entry, occurrences -> occurrences.size() > 1 }
+                .keySet()
+            if (!duplicateEntries.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release JAR contains duplicate entries: ${duplicateEntries.join(', ')}"
+                )
+            }
+
+            expectedFabricResourceSources.each { entryName, sourceFile ->
+                def packagedBytes = archive.getInputStream(archive.getEntry(entryName)).withCloseable { stream ->
+                    stream.bytes
+                }
+                if (!Arrays.equals(packagedBytes, sourceFile.bytes)) {
+                    throw new GradleException("Fabric release resource differs from source: ${entryName}")
+                }
+            }
+
+            def expectedKotlinModules = [
+                'META-INF/me.whish_emotify-fabric-1.21.8.kotlin_module',
+                'META-INF/me.whish_emotify-fabric-1.21.8_client.kotlin_module'
+            ] as Set
+            def actualKotlinModules = entries.findAll { entry -> entry.endsWith('.kotlin_module') }.toSet()
+            if (actualKotlinModules != expectedKotlinModules) {
+                throw new GradleException("Unexpected Fabric Kotlin module metadata: ${actualKotlinModules}")
+            }
+            def expectedResourceEntries = (
+                expectedFabricResourceSources.keySet() +
+                    ['META-INF/MANIFEST.MF', 'fabric.mod.json'] +
+                    expectedKotlinModules
+                ) as Set
+            def unexpectedResources = archive.entries().findAll { entry ->
+                !entry.directory && !entry.name.endsWith('.class') && entry.name !in expectedResourceEntries
+            }.collect { entry -> entry.name }
+            if (!unexpectedResources.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release JAR contains unexpected resources: ${unexpectedResources.join(', ')}"
+                )
+            }
+
+            def forbiddenPrefixes = [
+                'com/google/gson/',
+                'com/terraformersmc/',
+                'io/netty/',
+                'kotlin/',
+                'kotlinx/',
+                'net/fabricmc/',
+                'net/minecraft/',
+                'org/intellij/',
+                'org/jetbrains/',
+                'org/slf4j/',
+                'org/spongepowered/'
+            ]
+            def forbiddenEntries = entries.findAll { entry ->
+                entry == 'META-INF/neoforge.mods.toml' ||
+                    entry == 'paper-plugin.yml' ||
+                    entry == 'plugin.yml' ||
+                    entry.startsWith('META-INF/jarjar/') ||
+                    entry.endsWith('.jar') ||
+                    entry.endsWith('Test.class') ||
+                    entry.contains('/test/') ||
+                    forbiddenPrefixes.any { prefix -> entry.startsWith(prefix) }
+            }
+            if (!forbiddenEntries.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release JAR contains forbidden bundled content: ${forbiddenEntries.take(30).join(', ')}"
+                )
+            }
+
+            def ownedClassPrefixes = [
+                'me/whish/emotify/catalog/builtin/',
+                'me/whish/emotify/client/',
+                'me/whish/emotify/domain/',
+                'me/whish/emotify/fabric/',
+                'me/whish/emotify/protocol/',
+                'me/whish/emotify/server/core/',
+                'me/whish/emotify/wire/v1/'
+            ]
+            def misplacedClasses = entries.findAll { entry ->
+                entry.endsWith('.class') && !ownedClassPrefixes.any { prefix -> entry.startsWith(prefix) }
+            }
+            if (!misplacedClasses.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release JAR contains classes outside owned packages: ${misplacedClasses.take(30).join(', ')}"
+                )
+            }
+
+            def forbiddenClassReferences = [
+                'cpw/mods/',
+                'cpw.mods.',
+                'net/neoforged/',
+                'net.neoforged.',
+                'net/minecraftforge/',
+                'net.minecraftforge.',
+                'org/bukkit/',
+                'org.bukkit.',
+                'io/papermc/',
+                'io.papermc.',
+                'thedarkcolour/',
+                'thedarkcolour.',
+                'org/quiltmc/',
+                'org.quiltmc.'
+            ]
+            def pollutedClassReferences = entries.findAll { entry -> entry.endsWith('.class') }.collectMany { entry ->
+                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
+                    stream.bytes
+                }
+                def constantPool = new String(classBytes, StandardCharsets.ISO_8859_1)
+                forbiddenClassReferences.findAll { reference -> constantPool.contains(reference) }
+                    .collect { reference -> "${entry}->${reference}" }
+            }
+            if (!pollutedClassReferences.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release classes reference foreign runtimes: " +
+                        pollutedClassReferences.take(30).join(', ')
+                )
+            }
+
+            def modMenuReferenceViolations = entries.findAll { entry ->
+                entry.endsWith('.class') && entry != 'me/whish/emotify/fabric/client/EmotifyModMenu.class'
+            }.findAll { entry ->
+                def classBytes = archive.getInputStream(archive.getEntry(entry)).withCloseable { stream ->
+                    stream.bytes
+                }
+                def constantPool = new String(classBytes, StandardCharsets.ISO_8859_1)
+                constantPool.contains('com/terraformersmc/modmenu/') ||
+                    constantPool.contains('com.terraformersmc.modmenu.')
+            }
+            if (!modMenuReferenceViolations.isEmpty()) {
+                throw new GradleException(
+                    "Fabric release references Mod Menu outside its optional adapter: " +
+                        modMenuReferenceViolations.join(', ')
+                )
+            }
+
+            def metadataEntry = archive.getEntry('fabric.mod.json')
+            def metadata = archive.getInputStream(metadataEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream, 'UTF-8')
+            }
+            if (metadata.id != modProperties.modId || metadata.version != modProperties.modVersion) {
+                throw new GradleException(
+                    "Unexpected Fabric metadata identity: ${metadata.id} ${metadata.version}"
+                )
+            }
+            if (metadata.environment != '*') {
+                throw new GradleException("Fabric release must be universal: ${metadata.environment}")
+            }
+            if (metadata.icon != 'assets/emotify/icon.png') {
+                throw new GradleException("Unexpected Fabric mod icon: ${metadata.icon}")
+            }
+            if (metadata.entrypoints?.keySet() != ['main', 'client', 'modmenu'] as Set) {
+                throw new GradleException("Unexpected Fabric entrypoint groups: ${metadata.entrypoints?.keySet()}")
+            }
+            if (metadata.entrypoints?.main != ['me.whish.emotify.fabric.EmotifyFabric']) {
+                throw new GradleException("Unexpected Fabric main entrypoint: ${metadata.entrypoints?.main}")
+            }
+            if (metadata.entrypoints?.client != ['me.whish.emotify.fabric.client.EmotifyFabricClient']) {
+                throw new GradleException("Unexpected Fabric client entrypoint: ${metadata.entrypoints?.client}")
+            }
+            if (metadata.entrypoints?.modmenu != ['me.whish.emotify.fabric.client.EmotifyModMenu']) {
+                throw new GradleException("Unexpected Fabric Mod Menu entrypoint: ${metadata.entrypoints?.modmenu}")
+            }
+            if (metadata.jars != null) {
+                throw new GradleException('Fabric release must not contain nested dependency declarations')
+            }
+            def expectedDependencies = [
+                fabricloader: ">=${modProperties.fabricLoaderVersion}",
+                'fabric-api': ">=${modProperties.fabricApiVersion}",
+                'fabric-language-kotlin': ">=${modProperties.fabricLanguageKotlinVersion}",
+                minecraft: "=${modProperties.minecraftVersion}",
+                java: '>=21'
+            ]
+            if (metadata.depends != expectedDependencies) {
+                throw new GradleException("Unexpected Fabric dependency metadata: ${metadata.depends}")
+            }
+            if (metadata.mixins != [
+                'emotify.mixins.json',
+                [config: 'emotify.client.mixins.json', environment: 'client']
+            ]) {
+                throw new GradleException("Unexpected Fabric mixin metadata: ${metadata.mixins}")
+            }
+
+            def commonMixinEntry = archive.getEntry('emotify.mixins.json')
+            def commonMixinMetadata = archive.getInputStream(commonMixinEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream, 'UTF-8')
+            }
+            def expectedCommonMixinKeys = ['required', 'package', 'compatibilityLevel', 'mixins'] as Set
+            if (commonMixinMetadata.keySet() != expectedCommonMixinKeys) {
+                throw new GradleException("Unexpected Fabric common mixin keys: ${commonMixinMetadata.keySet()}")
+            }
+            if (
+                commonMixinMetadata.required != true ||
+                commonMixinMetadata.package != 'me.whish.emotify.fabric.mixin' ||
+                commonMixinMetadata.compatibilityLevel != 'JAVA_21' ||
+                commonMixinMetadata.mixins != ['ConnectionAccessor', 'ServerCommonPacketListenerAccessor']
+            ) {
+                throw new GradleException("Unexpected Fabric common mixin contract: ${commonMixinMetadata}")
+            }
+
+            def clientMixinEntry = archive.getEntry('emotify.client.mixins.json')
+            def mixinMetadata = archive.getInputStream(clientMixinEntry).withCloseable { stream ->
+                new JsonSlurper().parse(stream, 'UTF-8')
+            }
+            def expectedMixinKeys = ['required', 'package', 'compatibilityLevel', 'client', 'injectors'] as Set
+            if (mixinMetadata.keySet() != expectedMixinKeys) {
+                throw new GradleException("Unexpected Fabric mixin keys: ${mixinMetadata.keySet()}")
+            }
+            if (
+                mixinMetadata.required != true ||
+                mixinMetadata.package != 'me.whish.emotify.fabric.mixin.client' ||
+                mixinMetadata.compatibilityLevel != 'JAVA_21' ||
+                mixinMetadata.client != ['EditBoxMixin', 'GameRendererMixin', 'LevelRendererMixin', 'MinecraftMixin', 'PlayerNameTagMixin', 'PlayerRendererMixin'] ||
+                mixinMetadata.injectors != [defaultRequire: 1]
+            ) {
+                throw new GradleException("Unexpected Fabric client mixin contract: ${mixinMetadata}")
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyFabricDevRuntimeClasspath
+    dependsOn verifyFabricModMenuIntegrationClasspath
+    dependsOn verifyFabricCommonBoundary
+    dependsOn verifyFabricReleaseJar
+}
