@@ -32,4 +32,25 @@ class EmotifySettingsBackgroundScreenTest : FunSpec({
             method.name == "renderBackground"
         } shouldBe true
     }
+
+    test("settings pages share focus and pause behavior") {
+        val backgroundOwner = EmotifySettingsBackgroundScreen::class.java
+        val ignoredPlayersScreen = Class.forName("me.whish.emotify.client.IgnoredPlayersScreen")
+        val mouseClicked = backgroundOwner.getDeclaredMethod(
+            "mouseClicked",
+            Double::class.javaPrimitiveType,
+            Double::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+        )
+        val isPauseScreen = backgroundOwner.getDeclaredMethod("isPauseScreen")
+
+        Modifier.isFinal(mouseClicked.modifiers) shouldBe true
+        Modifier.isFinal(isPauseScreen.modifiers) shouldBe true
+        EmotifySettingsScreen::class.java.declaredMethods.none { method ->
+            method.name == "mouseClicked" || method.name == "isPauseScreen"
+        } shouldBe true
+        ignoredPlayersScreen.declaredMethods.none { method ->
+            method.name == "mouseClicked" || method.name == "isPauseScreen"
+        } shouldBe true
+    }
 })

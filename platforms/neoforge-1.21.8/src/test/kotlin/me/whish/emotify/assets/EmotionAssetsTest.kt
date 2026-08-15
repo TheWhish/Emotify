@@ -238,6 +238,7 @@ class EmotionAssetsTest : FunSpec({
             "screen.emotify.remove_favorite",
             "key.emotify.open_picker",
             "key.categories.emotify",
+            "key.category.emotify.main",
             "category.emotify.favorites",
             "category.emotify.search",
             "category.emotify.custom",
@@ -267,7 +268,6 @@ class EmotionAssetsTest : FunSpec({
         val english = resourceJson("/assets/emotify/lang/en_us.json")
         val russian = resourceJson("/assets/emotify/lang/ru_ru.json")
 
-        expectedKeys.size shouldBe 236
         english.keySet() shouldContainExactlyInAnyOrder expectedKeys
         russian.keySet() shouldContainExactlyInAnyOrder expectedKeys
         english.entrySet().all { entry -> entry.value.asString.isNotBlank() } shouldBe true

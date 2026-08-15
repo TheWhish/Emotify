@@ -20,7 +20,7 @@ jobs:
   verify:
     name: Verify (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,7 @@ jobs:
     name: Package verified platform JARs
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -141,73 +141,48 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          release_jars=(platforms/neoforge-1.21.1/build/libs/emotify-neoforge-1.21.1-*.jar)
-          if (( ${#release_jars[@]} != 1 )); then
-            echo "Expected exactly one release JAR, found ${#release_jars[@]}."
-            exit 1
-          fi
-          first_jar="${release_jars[0]}"
-          first_hash="$(sha256sum "$first_jar" | cut -d ' ' -f 1)"
-          paper_jars=(platforms/paper-1.21/build/libs/emotify-paper-*.jar)
-          if (( ${#paper_jars[@]} != 1 )); then
-            echo "Expected exactly one Paper release JAR, found ${#paper_jars[@]}."
-            exit 1
-          fi
-          first_paper_jar="${paper_jars[0]}"
-          first_paper_hash="$(sha256sum "$first_paper_jar" | cut -d ' ' -f 1)"
-          fabric_jars=(platforms/fabric-1.21.1/build/libs/emotify-fabric-1.21.1-*.jar)
-          if (( ${#fabric_jars[@]} != 1 )); then
-            echo "Expected exactly one Fabric release JAR, found ${#fabric_jars[@]}."
-            exit 1
-          fi
-          first_fabric_jar="${fabric_jars[0]}"
-          first_fabric_hash="$(sha256sum "$first_fabric_jar" | cut -d ' ' -f 1)"
-          bash ./reproducibility-copy/gradlew -p ./reproducibility-copy :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar :fabric-1.21.1:remapJar :fabric-1.21.1:verifyFabricReleaseJar :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar --console=plain --no-build-cache
-          rebuilt_jars=(reproducibility-copy/platforms/neoforge-1.21.1/build/libs/emotify-neoforge-1.21.1-*.jar)
-          if (( ${#rebuilt_jars[@]} != 1 )); then
-            echo "Expected exactly one independently rebuilt release JAR, found ${#rebuilt_jars[@]}."
-            exit 1
-          fi
-          second_jar="${rebuilt_jars[0]}"
-          second_hash="$(sha256sum "$second_jar" | cut -d ' ' -f 1)"
-          if ! cmp --silent "$first_jar" "$second_jar"; then
-            echo "Release JAR is not reproducible: $first_hash != $second_hash"
-            exit 1
-          fi
-          echo "Verified reproducible release JAR: $second_hash"
-          rebuilt_paper_jars=(reproducibility-copy/platforms/paper-1.21/build/libs/emotify-paper-*.jar)
-          if (( ${#rebuilt_paper_jars[@]} != 1 )); then
-            echo "Expected exactly one independently rebuilt Paper release JAR, found ${#rebuilt_paper_jars[@]}."
-            exit 1
-          fi
-          second_paper_jar="${rebuilt_paper_jars[0]}"
-          second_paper_hash="$(sha256sum "$second_paper_jar" | cut -d ' ' -f 1)"
-          if ! cmp --silent "$first_paper_jar" "$second_paper_jar"; then
-            echo "Paper release JAR is not reproducible: $first_paper_hash != $second_paper_hash"
-            exit 1
-          fi
-          echo "Verified reproducible Paper release JAR: $second_paper_hash"
-          rebuilt_fabric_jars=(reproducibility-copy/platforms/fabric-1.21.1/build/libs/emotify-fabric-1.21.1-*.jar)
-          if (( ${#rebuilt_fabric_jars[@]} != 1 )); then
-            echo "Expected exactly one independently rebuilt Fabric release JAR, found ${#rebuilt_fabric_jars[@]}."
-            exit 1
-          fi
-          second_fabric_jar="${rebuilt_fabric_jars[0]}"
-          second_fabric_hash="$(sha256sum "$second_fabric_jar" | cut -d ' ' -f 1)"
-          if ! cmp --silent "$first_fabric_jar" "$second_fabric_jar"; then
-            echo "Fabric release JAR is not reproducible: $first_fabric_hash != $second_fabric_hash"
-            exit 1
-          fi
-          echo "Verified reproducible Fabric release JAR: $second_fabric_hash"
+          platform_tasks=(
+            :neoforge-1.21.1:jar :neoforge-1.21.1:verifyReleaseJar
+            :fabric-1.21.1:remapJar :fabric-1.21.1:verifyFabricReleaseJar
+            :neoforge-1.21.8:jar :neoforge-1.21.8:verifyReleaseJar
+            :fabric-1.21.8:remapJar :fabric-1.21.8:verifyFabricReleaseJar
+            :neoforge-1.21.11:jar :neoforge-1.21.11:verifyReleaseJar
+            :fabric-1.21.11:remapJar :fabric-1.21.11:verifyFabricReleaseJar
+            :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar
+          )
+          bash ./reproducibility-copy/gradlew -p ./reproducibility-copy "${platform_tasks[@]}" --console=plain --no-build-cache
           mkdir -p build/release/neoforge build/release/fabric build/release/paper
-          cp "$second_jar" build/release/neoforge/
-          cp "$second_fabric_jar" build/release/fabric/
-          cp "$second_paper_jar" build/release/paper/
+          release_specs=(
+            'neoforge|platforms/neoforge-1.21.1/build/libs/emotify-neoforge-1.21.1-*.jar'
+            'fabric|platforms/fabric-1.21.1/build/libs/emotify-fabric-1.21.1-*.jar'
+            'neoforge|platforms/neoforge-1.21.8/build/libs/emotify-neoforge-1.21.8-*.jar'
+            'fabric|platforms/fabric-1.21.8/build/libs/emotify-fabric-1.21.8-*.jar'
+            'neoforge|platforms/neoforge-1.21.11/build/libs/emotify-neoforge-1.21.11-*.jar'
+            'fabric|platforms/fabric-1.21.11/build/libs/emotify-fabric-1.21.11-*.jar'
+            'paper|platforms/paper-1.21/build/libs/emotify-paper-*.jar'
+          )
+          for specification in "${release_specs[@]}"; do
+            destination="${specification%%|*}"
+            pattern="${specification#*|}"
+            original=( $pattern )
+            rebuilt=( reproducibility-copy/$pattern )
+            if (( ${#original[@]} != 1 || ${#rebuilt[@]} != 1 )); then
+              echo "Expected one original and one rebuilt artifact for $pattern."
+              exit 1
+            fi
+            if ! cmp --silent "${original[0]}" "${rebuilt[0]}"; then
+              echo "Artifact is not reproducible: $pattern"
+              exit 1
+            fi
+            hash="$(sha256sum "${rebuilt[0]}" | cut -d ' ' -f 1)"
+            echo "Verified reproducible artifact: ${rebuilt[0]} $hash"
+            cp "${rebuilt[0]}" "build/release/$destination/"
+          done
 
       - name: Upload NeoForge release JAR
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: emotify-neoforge-1.21.1-${{ github.sha }}
+          name: emotify-neoforge-${{ github.sha }}
           path: build/release/neoforge/*.jar
           if-no-files-found: error
           retention-days: 14
@@ -225,7 +200,7 @@ jobs:
       - name: Upload Fabric release JAR
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: emotify-fabric-1.21.1-${{ github.sha }}
+          name: emotify-fabric-${{ github.sha }}
           path: build/release/fabric/*.jar
           if-no-files-found: error
           retention-days: 14

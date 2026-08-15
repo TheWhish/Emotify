@@ -1,5 +1,6 @@
 package me.whish.emotify.client.custom
 
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicReference
 import me.whish.emotify.domain.CustomEmojiId
 
@@ -9,4 +10,23 @@ class CustomEmojiCopyRequestGate {
     fun tryBegin(originId: CustomEmojiId): Boolean = activeOrigin.compareAndSet(null, originId)
 
     fun complete(originId: CustomEmojiId): Boolean = activeOrigin.compareAndSet(originId, null)
+}
+
+fun <T> beginCustomEmojiCopy(
+    requests: CustomEmojiCopyRequestGate,
+    originId: CustomEmojiId,
+    alreadyPresent: Boolean,
+    submit: () -> CompletableFuture<T>,
+): CompletableFuture<T>? {
+    if (alreadyPresent || !requests.tryBegin(originId)) {
+        return null
+    }
+    return try {
+        submit()
+    } catch (failure: RuntimeException) {
+        check(requests.complete(originId)) {
+            "Custom emoji copy request ownership was lost before scheduling"
+        }
+        throw failure
+    }
 }

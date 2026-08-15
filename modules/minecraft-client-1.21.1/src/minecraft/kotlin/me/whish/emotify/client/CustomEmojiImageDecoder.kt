@@ -180,7 +180,6 @@ object CustomEmojiImageDecoder {
         return true
     }
 
-    @Suppress("DEPRECATION")
     private fun ByteBuffer.toNativeImage(width: Int, height: Int, baseOffset: Int): NativeImage {
         val image = NativeImage(width, height, true)
         try {

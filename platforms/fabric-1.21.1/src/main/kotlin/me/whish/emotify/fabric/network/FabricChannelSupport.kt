@@ -9,7 +9,6 @@ import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
 import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
 import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetChunkPayload
 import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import net.minecraft.network.Connection
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.level.ServerPlayer
@@ -18,6 +17,9 @@ import net.minecraft.server.network.ServerConfigurationPacketListenerImpl
 object FabricChannelSupport {
     private val configurationChannels = AttributeKey.valueOf<Int>(
         "emotify:fabric_configuration_clientbound_channels",
+    )
+    private val playChannels = AttributeKey.valueOf<Int>(
+        "emotify:fabric_play_clientbound_channels",
     )
 
     fun registerConfigurationChannels(
@@ -34,30 +36,35 @@ object FabricChannelSupport {
             FabricClientboundChannelSet.unregister(current, channels)
         }
 
+    fun registerPlayChannels(
+        player: ServerPlayer,
+        channels: Collection<ResourceLocation>,
+    ): Boolean = updatePlayChannels(player) { current ->
+        FabricClientboundChannelSet.register(current, channels)
+    }
+
+    fun unregisterPlayChannels(
+        player: ServerPlayer,
+        channels: Collection<ResourceLocation>,
+    ): Boolean = updatePlayChannels(player) { current ->
+        FabricClientboundChannelSet.unregister(current, channels)
+    }
+
     fun clientCanReceiveServerPayloads(player: ServerPlayer): Boolean =
-        FabricClientboundChannelSet.supportsProtocol(
-            ServerPlayNetworking.getSendable(player),
-            configurationMask(player.connection as ServerCommonPacketListenerAccessor),
-        )
+        FabricClientboundChannelSet.supportsProtocol(clientboundMask(player))
 
     fun requiresDeferredOpen(player: ServerPlayer): Boolean {
-        val playChannels = ServerPlayNetworking.getSendable(player)
+        val playMask = playMask(player)
         val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
-        return FabricClientboundChannelSet.supportsProtocol(playChannels, configurationMask) &&
-            !FabricClientboundChannelSet.supportsProtocol(playChannels, FabricClientboundChannelSet.EMPTY)
+        return FabricClientboundChannelSet.supportsProtocol(playMask or configurationMask) &&
+            !FabricClientboundChannelSet.supportsProtocol(playMask)
     }
 
-    fun clientCanReceiveCustomEmojis(player: ServerPlayer): Boolean {
-        val playChannels = ServerPlayNetworking.getSendable(player)
-        val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
-        return FabricClientboundChannelSet.supportsCustomEmojis(playChannels, configurationMask)
-    }
+    fun clientCanReceiveCustomEmojis(player: ServerPlayer): Boolean =
+        FabricClientboundChannelSet.supportsCustomEmojis(clientboundMask(player))
 
-    fun clientCanReceiveLosslessCustomEmojis(player: ServerPlayer): Boolean {
-        val playChannels = ServerPlayNetworking.getSendable(player)
-        val configurationMask = configurationMask(player.connection as ServerCommonPacketListenerAccessor)
-        return FabricClientboundChannelSet.supportsLosslessCustomEmojis(playChannels, configurationMask)
-    }
+    fun clientCanReceiveLosslessCustomEmojis(player: ServerPlayer): Boolean =
+        FabricClientboundChannelSet.supportsLosslessCustomEmojis(clientboundMask(player))
 
     fun belongsToConfigurationConnection(
         handler: ServerConfigurationPacketListenerImpl,
@@ -67,9 +74,23 @@ object FabricChannelSupport {
     private fun updateConfigurationChannels(
         handler: ServerConfigurationPacketListenerImpl,
         update: (Int) -> Int,
+    ): Boolean = updateChannels(connection(handler), configurationChannels, update)
+
+    private fun updatePlayChannels(
+        player: ServerPlayer,
+        update: (Int) -> Int,
+    ): Boolean = updateChannels(
+        connection(player.connection as ServerCommonPacketListenerAccessor),
+        playChannels,
+        update,
+    )
+
+    private fun updateChannels(
+        connection: Connection,
+        key: AttributeKey<Int>,
+        update: (Int) -> Int,
     ): Boolean {
-        val connection = connection(handler)
-        val attribute = (connection as ConnectionAccessor).emotifyChannel.attr(configurationChannels)
+        val attribute = (connection as ConnectionAccessor).emotifyChannel.attr(key)
         val current = attribute.get() ?: FabricClientboundChannelSet.EMPTY
         val updated = update(current)
         if (updated == current) {
@@ -90,6 +111,13 @@ object FabricChannelSupport {
     private fun configurationMask(connection: Connection): Int =
         (connection as ConnectionAccessor).emotifyChannel.attr(configurationChannels).get()
             ?: FabricClientboundChannelSet.EMPTY
+
+    private fun playMask(player: ServerPlayer): Int =
+        (connection(player.connection as ServerCommonPacketListenerAccessor) as ConnectionAccessor)
+            .emotifyChannel.attr(playChannels).get() ?: FabricClientboundChannelSet.EMPTY
+
+    private fun clientboundMask(player: ServerPlayer): Int =
+        playMask(player) or configurationMask(player.connection as ServerCommonPacketListenerAccessor)
 }
 
 internal object FabricClientboundChannelSet {
@@ -111,27 +139,25 @@ internal object FabricClientboundChannelSet {
         return current and removed.inv()
     }
 
-    fun supportsProtocol(playChannels: Set<ResourceLocation>, configurationMask: Int): Boolean =
-        supports(FabricServerHelloPayload.TYPE.id(), playChannels, configurationMask) &&
-            supports(FabricEmotionPlayPayload.TYPE.id(), playChannels, configurationMask) &&
-            supports(FabricSelectionRejectedPayload.TYPE.id(), playChannels, configurationMask)
+    fun supportsProtocol(channels: Int): Boolean =
+        supports(FabricServerHelloPayload.TYPE.id(), channels) &&
+            supports(FabricEmotionPlayPayload.TYPE.id(), channels) &&
+            supports(FabricSelectionRejectedPayload.TYPE.id(), channels)
 
-    fun supportsCustomEmojis(playChannels: Set<ResourceLocation>, configurationMask: Int): Boolean =
-        supports(FabricCustomEmojiAssetPayload.TYPE.id(), playChannels, configurationMask) &&
-            supports(FabricCustomEmotionPlayPayload.TYPE.id(), playChannels, configurationMask)
+    fun supportsCustomEmojis(channels: Int): Boolean =
+        supports(FabricCustomEmojiAssetPayload.TYPE.id(), channels) &&
+            supports(FabricCustomEmotionPlayPayload.TYPE.id(), channels)
 
-    fun supportsLosslessCustomEmojis(playChannels: Set<ResourceLocation>, configurationMask: Int): Boolean =
-        supportsCustomEmojis(playChannels, configurationMask) &&
-            supports(FabricCustomEmojiAssetChunkPayload.TYPE.id(), playChannels, configurationMask)
+    fun supportsLosslessCustomEmojis(channels: Int): Boolean =
+        supportsCustomEmojis(channels) &&
+            supports(FabricCustomEmojiAssetChunkPayload.TYPE.id(), channels)
 
     fun supports(
         channel: ResourceLocation,
-        playChannels: Set<ResourceLocation>,
-        configurationMask: Int,
+        channels: Int,
     ): Boolean {
         val requiredFlag = flag(channel)
-        return requiredFlag != EMPTY &&
-            (channel in playChannels || configurationMask and requiredFlag != EMPTY)
+        return requiredFlag != EMPTY && channels and requiredFlag != EMPTY
     }
 
     private fun flag(channel: ResourceLocation): Int = when (channel) {

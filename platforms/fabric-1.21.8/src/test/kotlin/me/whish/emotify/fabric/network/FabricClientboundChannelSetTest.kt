@@ -17,7 +17,7 @@ class FabricClientboundChannelSetTest : FunSpec({
             requiredChannels,
         )
 
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), configurationMask) shouldBe true
+        FabricClientboundChannelSet.supportsProtocol(configurationMask) shouldBe true
     }
 
     test("configuration advertisements accumulate without allocating connection state") {
@@ -33,8 +33,8 @@ class FabricClientboundChannelSetTest : FunSpec({
             ),
         )
 
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), first) shouldBe false
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), complete) shouldBe true
+        FabricClientboundChannelSet.supportsProtocol(first) shouldBe false
+        FabricClientboundChannelSet.supportsProtocol(complete) shouldBe true
     }
 
     test("play and configuration advertisements form one directional capability set") {
@@ -42,12 +42,12 @@ class FabricClientboundChannelSetTest : FunSpec({
             FabricClientboundChannelSet.EMPTY,
             listOf(FabricSelectionRejectedPayload.TYPE.id()),
         )
-        val playChannels = setOf(
-            FabricServerHelloPayload.TYPE.id(),
-            FabricEmotionPlayPayload.TYPE.id(),
+        val playMask = FabricClientboundChannelSet.register(
+            FabricClientboundChannelSet.EMPTY,
+            listOf(FabricServerHelloPayload.TYPE.id(), FabricEmotionPlayPayload.TYPE.id()),
         )
 
-        FabricClientboundChannelSet.supportsProtocol(playChannels, configurationMask) shouldBe true
+        FabricClientboundChannelSet.supportsProtocol(playMask or configurationMask) shouldBe true
     }
 
     test("unregister removes only the declared channels") {
@@ -60,15 +60,13 @@ class FabricClientboundChannelSetTest : FunSpec({
             listOf(FabricEmotionPlayPayload.TYPE.id()),
         )
 
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), reduced) shouldBe false
+        FabricClientboundChannelSet.supportsProtocol(reduced) shouldBe false
         FabricClientboundChannelSet.supports(
             FabricServerHelloPayload.TYPE.id(),
-            emptySet(),
             reduced,
         ) shouldBe true
         FabricClientboundChannelSet.supports(
             FabricEmotionPlayPayload.TYPE.id(),
-            emptySet(),
             reduced,
         ) shouldBe false
     }
@@ -80,7 +78,7 @@ class FabricClientboundChannelSetTest : FunSpec({
         )
 
         configurationMask shouldBe FabricClientboundChannelSet.EMPTY
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), configurationMask) shouldBe false
+        FabricClientboundChannelSet.supportsProtocol(configurationMask) shouldBe false
     }
 
     test("custom emoji channels are tracked independently from base channels") {
@@ -89,8 +87,8 @@ class FabricClientboundChannelSetTest : FunSpec({
             listOf(FabricCustomEmojiAssetPayload.TYPE.id(), FabricCustomEmotionPlayPayload.TYPE.id()),
         )
 
-        FabricClientboundChannelSet.supportsCustomEmojis(emptySet(), customMask) shouldBe true
-        FabricClientboundChannelSet.supportsProtocol(emptySet(), customMask) shouldBe false
+        FabricClientboundChannelSet.supportsCustomEmojis(customMask) shouldBe true
+        FabricClientboundChannelSet.supportsProtocol(customMask) shouldBe false
     }
 })
 

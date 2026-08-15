@@ -4,12 +4,6 @@ import java.util.UUID
 import me.whish.emotify.fabric.EmotifyFabric
 import me.whish.emotify.fabric.config.FabricServerConfig
 import me.whish.emotify.fabric.network.FabricChannelSupport
-import me.whish.emotify.fabric.network.payload.FabricEmotionPlayPayload
-import me.whish.emotify.fabric.network.payload.FabricSelectionRejectedPayload
-import me.whish.emotify.fabric.network.payload.FabricServerHelloPayload
-import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetPayload
-import me.whish.emotify.fabric.network.payload.FabricCustomEmojiAssetChunkPayload
-import me.whish.emotify.fabric.network.payload.FabricCustomEmotionPlayPayload
 import me.whish.emotify.server.core.OutboundDeliveryStatus
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
@@ -22,14 +16,6 @@ import net.minecraft.server.network.ServerConfigurationPacketListenerImpl
 
 object FabricServerLifecycle {
     private val deferredConnectionOpens = FabricDeferredConnectionOpenQueue()
-    private val outboundChannels = setOf(
-        FabricServerHelloPayload.TYPE.id(),
-        FabricEmotionPlayPayload.TYPE.id(),
-        FabricSelectionRejectedPayload.TYPE.id(),
-        FabricCustomEmojiAssetPayload.TYPE.id(),
-        FabricCustomEmojiAssetChunkPayload.TYPE.id(),
-        FabricCustomEmotionPlayPayload.TYPE.id(),
-    )
 
     fun register() {
         ServerLifecycleEvents.SERVER_STARTING.register { server ->
@@ -58,12 +44,12 @@ object FabricServerLifecycle {
             close(server, handler.player.uuid, handler)
         }
         S2CPlayChannelEvents.REGISTER.register { handler, _, server, channels ->
-            if (channels.any(outboundChannels::contains)) {
+            if (FabricChannelSupport.registerPlayChannels(handler.player, channels)) {
                 openOrRefreshIfSupported(server, handler.player)
             }
         }
         S2CPlayChannelEvents.UNREGISTER.register { handler, _, server, channels ->
-            if (channels.any(outboundChannels::contains)) {
+            if (FabricChannelSupport.unregisterPlayChannels(handler.player, channels)) {
                 closeIfUnsupported(server, handler.player)
             }
         }

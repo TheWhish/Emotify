@@ -59,6 +59,12 @@ dependencies {
     testImplementation testFixtures(project(':emotify-wire-v1'))
 }
 
+sourceSets {
+    main {
+        resources.exclude 'plugin.yml'
+    }
+}
+
 def pluginProperties = [
     pluginVersion: project.version,
     kotlinVersion: providers.gradleProperty('kotlin_version').get(),
@@ -66,10 +72,48 @@ def pluginProperties = [
     fastutilVersion: providers.gradleProperty('fastutil_version').get()
 ]
 
-tasks.named('processResources', ProcessResources) {
+def generatedPluginDescriptor = tasks.register('generatePluginDescriptor') {
     inputs.properties(pluginProperties)
-    filteringCharset = 'UTF-8'
-    expand(pluginProperties)
+    def outputFile = layout.buildDirectory.file('generated/resources/plugin.yml')
+    outputs.file(outputFile)
+
+    doLast {
+        def lines = [
+            'name: Emotify',
+            "version: '${pluginProperties.pluginVersion}'".toString(),
+            'main: me.whish.emotify.paper.PaperEmotifyPlugin',
+            'description: Server-authoritative Emotify bridge for Paper and Purpur.',
+            'author: TheWhish',
+            "api-version: '1.21.1'",
+            'load: STARTUP',
+            'commands:',
+            '  emotify:',
+            '    description: Emotify administration command.',
+            '    usage: /emotify reload',
+            '    permission: emotify.admin.reload',
+            'permissions:',
+            '  emotify.use:',
+            '    description: Allows a player to publish Emotify emotions.',
+            '    default: true',
+            '  emotify.receive:',
+            '    description: Allows a player to receive emotions from other players.',
+            '    default: true',
+            '  emotify.admin.reload:',
+            '    description: Allows reloading the Emotify configuration.',
+            '    default: op',
+            'libraries:',
+            "  - org.jetbrains.kotlin:kotlin-stdlib:${pluginProperties.kotlinVersion}".toString(),
+            "  - com.google.code.gson:gson:${pluginProperties.gsonVersion}".toString(),
+            "  - it.unimi.dsi:fastutil:${pluginProperties.fastutilVersion}".toString()
+        ]
+        def target = outputFile.get().asFile
+        target.parentFile.mkdirs()
+        target.text = lines.join(System.lineSeparator()) + System.lineSeparator()
+    }
+}
+
+tasks.named('processResources', ProcessResources) {
+    from(generatedPluginDescriptor)
     includeEmptyDirs = false
 }
 
@@ -390,6 +434,10 @@ def paper1218SmokeDeployment = registerSmokePluginDeployment(
     'deployPaper1218SmokePlugin',
     'run-paper-smoke-1.21.8',
 )
+def paper12111SmokeDeployment = registerSmokePluginDeployment(
+    'deployPaper12111SmokePlugin',
+    'run-paper-smoke-1.21.11',
+)
 def purpurSmokeDeployment = registerSmokePluginDeployment('deployPurpurSmokePlugin', 'run-purpur-smoke')
 def serverJavaLauncher = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(21)
@@ -402,6 +450,13 @@ def paper1218ServerDirectory = layout.projectDirectory.dir('run-paper-smoke-1.21
 def paper1218ServerJar = paper1218ServerDirectory.file(paper1218JarName)
 def paper1218DownloadUrl =
     "https://fill-data.papermc.io/v1/objects/${paper1218Sha256}/${paper1218JarName}".toString()
+def paper12111Build = providers.gradleProperty('paper_1_21_11_build').get()
+def paper12111Sha256 = providers.gradleProperty('paper_1_21_11_sha256').get()
+def paper12111JarName = "paper-1.21.11-${paper12111Build}.jar".toString()
+def paper12111ServerDirectory = layout.projectDirectory.dir('run-paper-smoke-1.21.11')
+def paper12111ServerJar = paper12111ServerDirectory.file(paper12111JarName)
+def paper12111DownloadUrl =
+    "https://fill-data.papermc.io/v1/objects/${paper12111Sha256}/${paper12111JarName}".toString()
 def sha256 = { File file ->
     def digest = MessageDigest.getInstance('SHA-256')
     file.withInputStream { input ->
@@ -475,6 +530,65 @@ def preparePaper1218Eula = tasks.register('preparePaper1218Eula') {
     }
 }
 
+def downloadPaper12111Server = tasks.register('downloadPaper12111Server') {
+    group = 'development'
+    description = 'Downloads and verifies the pinned Paper 1.21.11 development server.'
+    inputs.property('downloadUrl', paper12111DownloadUrl)
+    inputs.property('sha256', paper12111Sha256)
+    outputs.file(paper12111ServerJar)
+    outputs.upToDateWhen {
+        def target = paper12111ServerJar.asFile
+        target.isFile() && sha256(target) == paper12111Sha256
+    }
+
+    doLast {
+        def target = paper12111ServerJar.asFile.toPath()
+        def temporary = target.resolveSibling("${paper12111JarName}.part")
+        Files.createDirectories(target.parent)
+        Files.deleteIfExists(temporary)
+        try {
+            def connection = new URI(paper12111DownloadUrl).toURL().openConnection()
+            connection.setRequestProperty(
+                'User-Agent',
+                'Emotify development launcher (https://github.com/TheWhish/Emotify)',
+            )
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 60_000
+            connection.inputStream.withCloseable { input ->
+                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING)
+            }
+            def actualSha256 = sha256(temporary.toFile())
+            if (actualSha256 != paper12111Sha256) {
+                throw new GradleException(
+                    "Paper 1.21.11 checksum differs: expected ${paper12111Sha256}, got ${actualSha256}",
+                )
+            }
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+}
+
+def preparePaper12111Eula = tasks.register('preparePaper12111Eula') {
+    group = 'development'
+    description = 'Carries the existing local Paper test EULA acceptance into the isolated 1.21.11 runtime.'
+    def acceptedEula = layout.projectDirectory.file('run-paper-smoke/eula.txt')
+    def targetEula = paper12111ServerDirectory.file('eula.txt')
+    inputs.file(acceptedEula).optional()
+    outputs.file(targetEula)
+    outputs.upToDateWhen {
+        targetEula.asFile.isFile() && targetEula.asFile.text.trim() == 'eula=true'
+    }
+
+    doLast {
+        if (acceptedEula.asFile.isFile() && acceptedEula.asFile.text.trim() == 'eula=true') {
+            Files.createDirectories(targetEula.asFile.toPath().parent)
+            Files.writeString(targetEula.asFile.toPath(), 'eula=true\n')
+        }
+    }
+}
+
 def registerSmokeServerRun = { String taskName, String serverDirectoryName, String serverJarName, deployment ->
     tasks.register(taskName, Exec) {
         group = 'application'
@@ -501,6 +615,16 @@ def runPaper1218SmokeServer = registerSmokeServerRun(
 runPaper1218SmokeServer.configure {
     dependsOn downloadPaper1218Server
     dependsOn preparePaper1218Eula
+}
+def runPaper12111SmokeServer = registerSmokeServerRun(
+    'runPaper12111SmokeServer',
+    'run-paper-smoke-1.21.11',
+    paper12111JarName,
+    paper12111SmokeDeployment,
+)
+runPaper12111SmokeServer.configure {
+    dependsOn downloadPaper12111Server
+    dependsOn preparePaper12111Eula
 }
 registerSmokeServerRun(
     'runPurpurSmokeServer',

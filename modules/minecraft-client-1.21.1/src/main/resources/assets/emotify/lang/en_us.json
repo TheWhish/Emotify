@@ -49,6 +49,7 @@
   "screen.emotify.remove_favorite": "Remove %s from favorites",
   "key.emotify.open_picker": "Open emoji menu",
   "key.categories.emotify": "Emotify",
+  "key.category.emotify.main": "Emotify",
   "category.emotify.favorites": "Favorites",
   "category.emotify.faces": "Faces",
   "category.emotify.animals": "Animals",

@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "me.whish.emotify.neoforge.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "EditBoxHintMixin12111",
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

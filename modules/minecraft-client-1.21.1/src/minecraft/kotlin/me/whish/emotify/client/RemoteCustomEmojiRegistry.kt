@@ -125,7 +125,6 @@ object RemoteCustomEmojiRegistry {
         Minecraft.getInstance().textureManager.release(entry.texture)
     }
 
-    @Suppress("DEPRECATION")
     private fun writePixels(image: NativeImage, asset: CustomEmojiAsset) {
         asset.frames.forEachIndexed { frameIndex, frame ->
             repeat(frame.pixels.pixelCount) { index ->

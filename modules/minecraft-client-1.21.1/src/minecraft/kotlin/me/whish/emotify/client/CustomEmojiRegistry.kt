@@ -6,7 +6,6 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.util.IdentityHashMap
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.client.custom.CustomEmojiFile
@@ -21,6 +20,7 @@ import me.whish.emotify.client.custom.CustomEmojiLibraryBudget
 import me.whish.emotify.client.custom.CustomEmojiReferenceIndex
 import me.whish.emotify.client.custom.CustomEmojiReloadCompletion
 import me.whish.emotify.client.custom.CustomEmojiReloadCoordinator
+import me.whish.emotify.client.custom.CustomEmojiRefreshScheduler
 import me.whish.emotify.client.custom.CustomEmojiSourceCacheEntry
 import me.whish.emotify.client.custom.customEmojiTextureIdsToRelease
 import me.whish.emotify.client.custom.planCustomEmojiSourceReuse
@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory
 object CustomEmojiRegistry {
     private val logger = LoggerFactory.getLogger("Emotify/CustomEmojis")
     private val reloadCoordinator = CustomEmojiReloadCoordinator()
-    private val refreshCheckInFlight = AtomicBoolean()
+    private val refreshScheduler = CustomEmojiRefreshScheduler()
     private val nextRefreshCheckNanos = AtomicLong()
     private val inspectionFailureLogNanos = AtomicLong()
     private val reloadFailureLogNanos = AtomicLong()
@@ -120,7 +120,7 @@ object CustomEmojiRegistry {
                     val completedLoad = checkNotNull(loaded)
                     if (!completedLoad.stable) {
                         completedLoad.close()
-                        nextRefreshCheckNanos.set(0L)
+                        nextRefreshCheckNanos.set(System.nanoTime() + UNSTABLE_RETRY_DELAY_NANOS)
                         finishReload(minecraft, success = false, retry = true)
                         return@execute
                     }
@@ -180,42 +180,59 @@ object CustomEmojiRegistry {
         if (now < nextCheck || !nextRefreshCheckNanos.compareAndSet(nextCheck, now + REFRESH_INTERVAL_NANOS)) {
             return
         }
-        if (!refreshCheckInFlight.compareAndSet(false, true)) {
-            return
-        }
-        CompletableFuture.supplyAsync(
-            { CustomEmojiFileScanner.fingerprint(directory(minecraft)) },
+        refreshScheduler.submit(
             Util.ioPool(),
-        ).whenComplete { fingerprint, failure ->
-            refreshCheckInFlight.set(false)
+            { CustomEmojiFileScanner.fingerprint(directory(minecraft)) },
+        ) completion@{ fingerprint, failure ->
             if (failure != null) {
                 if (shouldLogFailure(inspectionFailureLogNanos)) {
                     logger.error("Failed to inspect custom emoji directory {}", directory(minecraft), failure)
                 }
-                return@whenComplete
+                return@completion
             }
             if (reloadCoordinator.subscribe(onComplete)) {
-                return@whenComplete
+                return@completion
             }
             inspectionFailureLogNanos.set(0L)
-            if (fingerprint != snapshot.fingerprint) {
+            if (checkNotNull(fingerprint) != snapshot.fingerprint) {
                 reload(minecraft, onComplete)
             }
         }
     }
 
     fun openDirectory(minecraft: Minecraft, onFailure: () -> Unit = {}) {
-        CompletableFuture.runAsync(
-            {
-                Files.createDirectories(directory(minecraft))
-                Util.getPlatform().openPath(directory(minecraft))
-            },
-            Util.ioPool(),
-        ).whenComplete { _, failure ->
+        val opening = try {
+            CompletableFuture.runAsync(
+                {
+                    Files.createDirectories(directory(minecraft))
+                    Util.getPlatform().openPath(directory(minecraft))
+                },
+                Util.ioPool(),
+            )
+        } catch (failure: RuntimeException) {
+            handleOpenDirectoryFailure(minecraft, onFailure, failure)
+            return
+        }
+        opening.whenComplete { _, failure ->
             if (failure != null) {
-                logger.error("Failed to open custom emoji directory {}", directory(minecraft), failure)
-                minecraft.execute(onFailure)
+                handleOpenDirectoryFailure(minecraft, onFailure, failure)
             }
+        }
+    }
+
+    private fun handleOpenDirectoryFailure(minecraft: Minecraft, onFailure: () -> Unit, failure: Throwable) {
+        logger.error("Failed to open custom emoji directory {}", directory(minecraft), failure)
+        try {
+            minecraft.execute {
+                try {
+                    onFailure()
+                } catch (callbackFailure: RuntimeException) {
+                    logger.error("Custom emoji directory failure callback failed", callbackFailure)
+                }
+            }
+        } catch (schedulingFailure: RuntimeException) {
+            failure.addSuppressed(schedulingFailure)
+            logger.error("Failed to schedule custom emoji directory failure callback", schedulingFailure)
         }
     }
 
@@ -392,7 +409,6 @@ object CustomEmojiRegistry {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun DecodedCustomEmoji.toAtlas(): NativeImage {
         val frameWidth = frames.first().width
         val frameHeight = frames.first().height
@@ -414,7 +430,6 @@ object CustomEmojiRegistry {
         }
     }
 
-    @Suppress("DEPRECATION")
     private fun NativeImage.toCustomEmojiPixels(): CustomEmojiPixels = CustomEmojiPixels.of(
         width,
         IntArray(width * height) { index ->
@@ -582,6 +597,7 @@ object CustomEmojiRegistry {
     private const val CUSTOM_NAMESPACE = "emotify_custom"
     private const val CUSTOM_CATEGORY = "custom"
     private const val REFRESH_INTERVAL_NANOS = 500_000_000L
+    private const val UNSTABLE_RETRY_DELAY_NANOS = 2_000_000_000L
     private const val LEGACY_MAXIMUM_CUSTOM_EMOJI_SIZE = 16
     private const val FAILURE_LOG_INTERVAL_NANOS = 30_000_000_000L
 

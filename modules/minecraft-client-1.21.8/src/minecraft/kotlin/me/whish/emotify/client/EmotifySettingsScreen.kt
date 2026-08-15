@@ -30,6 +30,17 @@ abstract class EmotifySettingsBackgroundScreen(
         renderEmotifyBackground(guiGraphics, mouseX, mouseY, partialTick)
     }
 
+    final override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        val handled = super.mouseClicked(mouseX, mouseY, button)
+        if (EmotifySettingsFocusPolicy.shouldClear(handled, button, focused != null, focused is AbstractButton)) {
+            clearFocus()
+            return true
+        }
+        return handled
+    }
+
+    final override fun isPauseScreen(): Boolean = false
+
     protected abstract fun renderEmotifyBackground(
         guiGraphics: GuiGraphics,
         mouseX: Int,
@@ -156,20 +167,9 @@ class EmotifySettingsScreen(
         )
     }
 
-    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
-        val handled = super.mouseClicked(mouseX, mouseY, button)
-        if (EmotifySettingsFocusPolicy.shouldClear(handled, button, focused != null, focused is AbstractButton)) {
-            clearFocus()
-            return true
-        }
-        return handled
-    }
-
     override fun onClose() {
         minecraft?.setScreen(parent)
     }
-
-    override fun isPauseScreen(): Boolean = false
 
     internal fun acceptIgnoredPlayers(settings: ClientSettingsSnapshot) {
         draft = settings
@@ -366,20 +366,9 @@ private class IgnoredPlayersScreen(
         }
     }
 
-    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
-        val handled = super.mouseClicked(mouseX, mouseY, button)
-        if (EmotifySettingsFocusPolicy.shouldClear(handled, button, focused != null, focused is AbstractButton)) {
-            clearFocus()
-            return true
-        }
-        return handled
-    }
-
     override fun onClose() {
         minecraft?.setScreen(parent)
     }
-
-    override fun isPauseScreen(): Boolean = false
 
     private fun acceptAndClose() {
         parent.acceptIgnoredPlayers(draft)

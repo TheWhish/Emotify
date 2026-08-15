@@ -3,6 +3,8 @@ package me.whish.emotify.client.custom
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 import me.whish.emotify.domain.CustomEmojiId
 
 @Suppress("unused")
@@ -33,6 +35,53 @@ class CustomEmojiReloadCoordinatorTest : FunSpec({
         coordinator.complete(success = true).shouldBeInstanceOf<CustomEmojiReloadCompletion.Finished>()
             .callbacks.single().invoke()
         completed shouldBe true
+    }
+
+    test("automatic instability retry stops after one follow-up") {
+        val coordinator = CustomEmojiReloadCoordinator()
+
+        coordinator.request {} shouldBe true
+        coordinator.complete(success = false, retry = true) shouldBe CustomEmojiReloadCompletion.FollowUp
+        val completion = coordinator.complete(success = false, retry = true)
+            .shouldBeInstanceOf<CustomEmojiReloadCompletion.Finished>()
+
+        completion.success shouldBe false
+        coordinator.isInFlight() shouldBe false
+        coordinator.request {} shouldBe true
+        coordinator.complete(success = false, retry = true) shouldBe CustomEmojiReloadCompletion.FollowUp
+    }
+
+    test("synchronous executor rejection releases the refresh gate") {
+        val scheduler = CustomEmojiRefreshScheduler()
+        val rejection = RejectedExecutionException("closed")
+        var observedFailure: Throwable? = null
+
+        scheduler.submit(
+            { throw rejection },
+            { 1 },
+        ) { _, failure ->
+            observedFailure = failure
+        } shouldBe true
+
+        observedFailure shouldBe rejection
+        scheduler.submit(
+            { task -> task.run() },
+            { 2 },
+        ) { result, failure ->
+            result shouldBe 2
+            failure shouldBe null
+        } shouldBe true
+    }
+
+    test("only one refresh inspection can be queued at a time") {
+        val scheduler = CustomEmojiRefreshScheduler()
+        var queued: Runnable? = null
+        val executor = Executor { task -> queued = task }
+
+        scheduler.submit(executor, { 1 }) { _, _ -> } shouldBe true
+        scheduler.submit(executor, { 2 }) { _, _ -> } shouldBe false
+        requireNotNull(queued).run()
+        scheduler.submit(executor, { 3 }) { _, _ -> } shouldBe true
     }
 
     test("subscription observes the active load without scheduling another decode") {

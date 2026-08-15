@@ -16,6 +16,9 @@ def expectedProjectDirectories = [
     ':minecraft-client-1.21.8': 'modules/minecraft-client-1.21.8',
     ':neoforge-1.21.8': 'platforms/neoforge-1.21.8',
     ':fabric-1.21.8': 'platforms/fabric-1.21.8',
+    ':minecraft-client-1.21.11': 'modules/minecraft-client-1.21.11',
+    ':neoforge-1.21.11': 'platforms/neoforge-1.21.11',
+    ':fabric-1.21.11': 'platforms/fabric-1.21.11',
     ':paper-1.21': 'platforms/paper-1.21'
 ]
 def expectedProjectPaths = expectedProjectDirectories.keySet().toList().sort()
@@ -37,6 +40,10 @@ def neoForge1218SourceDirectory = project(':neoforge-1.21.8').file('src/main/kot
 def fabric1218SourceDirectory = project(':fabric-1.21.8').file('src/main/kotlin')
 def fabric1218ClientSourceDirectory = project(':fabric-1.21.8').file('src/client/kotlin')
 def minecraftClient1218AdapterSourceDirectory = project(':minecraft-client-1.21.8').file('src/minecraft/kotlin')
+def neoForge12111SourceDirectory = project(':neoforge-1.21.11').file('src/main/kotlin')
+def fabric12111SourceDirectory = project(':fabric-1.21.11').file('src/main/kotlin')
+def fabric12111ClientSourceDirectory = project(':fabric-1.21.11').file('src/client/kotlin')
+def minecraftClient12111AdapterSourceDirectory = project(':minecraft-client-1.21.11').file('src/minecraft/kotlin')
 def paperSourceDirectory = project(':paper-1.21').file('src/main/kotlin')
 def testReportDirectories = expectedProjectPaths.collectEntries { projectPath ->
     [(projectPath): project(projectPath).layout.buildDirectory.dir('test-results/test')]
@@ -122,6 +129,18 @@ def verifyProjectStructure = tasks.register('verifyProjectStructure') {
         if (!minecraftClient1218AdapterSourceDirectory.isDirectory()) {
             throw new GradleException('Minecraft 1.21.8 client adapter source tree is missing')
         }
+        if (!neoForge12111SourceDirectory.isDirectory()) {
+            throw new GradleException('NeoForge 1.21.11 platform source tree is missing')
+        }
+        if (!fabric12111SourceDirectory.isDirectory()) {
+            throw new GradleException('Fabric 1.21.11 common source tree is missing')
+        }
+        if (!fabric12111ClientSourceDirectory.isDirectory()) {
+            throw new GradleException('Fabric 1.21.11 client source tree is missing')
+        }
+        if (!minecraftClient12111AdapterSourceDirectory.isDirectory()) {
+            throw new GradleException('Minecraft 1.21.11 client adapter source tree is missing')
+        }
         if (!paperSourceDirectory.isDirectory()) {
             throw new GradleException('Paper platform source tree is missing')
         }
@@ -173,6 +192,8 @@ tasks.register('verifyReleaseJar') {
     dependsOn ':fabric-1.21.1:verifyFabricReleaseJar'
     dependsOn ':neoforge-1.21.8:verifyReleaseJar'
     dependsOn ':fabric-1.21.8:verifyFabricReleaseJar'
+    dependsOn ':neoforge-1.21.11:verifyReleaseJar'
+    dependsOn ':fabric-1.21.11:verifyFabricReleaseJar'
     dependsOn ':paper-1.21:verifyPaperReleaseJar'
 }
 
@@ -183,6 +204,8 @@ tasks.register('verifyDevRuntimeClasspath') {
     dependsOn ':fabric-1.21.1:verifyFabricDevRuntimeClasspath'
     dependsOn ':neoforge-1.21.8:verifyDevRuntimeClasspath'
     dependsOn ':fabric-1.21.8:verifyFabricDevRuntimeClasspath'
+    dependsOn ':neoforge-1.21.11:verifyDevRuntimeClasspath'
+    dependsOn ':fabric-1.21.11:verifyFabricDevRuntimeClasspath'
 }
 
 tasks.named('clean') {

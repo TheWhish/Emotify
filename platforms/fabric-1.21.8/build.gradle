@@ -1,6 +1,7 @@
 import java.nio.charset.StandardCharsets
 import java.util.Arrays
 import java.util.zip.ZipFile
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -123,6 +124,7 @@ configurations {
 sourceSets {
     main {
         resources.srcDir project(':emotify-catalog-builtin').layout.projectDirectory.dir('src/main/resources')
+        resources.exclude 'fabric.mod.json'
     }
     client {
         java.srcDir project(':minecraft-client-1.21.8').layout.projectDirectory.dir('src/minecraft/java')
@@ -148,12 +150,50 @@ def modProperties = [
     fabricLanguageKotlinVersion: providers.gradleProperty('fabric_language_kotlin_version').get()
 ]
 
-tasks.named('processResources', ProcessResources) {
+def generatedFabricModMetadata = tasks.register('generateFabricModMetadata') {
     inputs.properties(modProperties)
-    filteringCharset = 'UTF-8'
-    filesMatching('fabric.mod.json') {
-        expand(modProperties)
+    def outputFile = layout.buildDirectory.file('generated/resources/fabric.mod.json')
+    outputs.file(outputFile)
+
+    doLast {
+        def metadata = [
+            schemaVersion: 1,
+            id: modProperties.modId,
+            version: modProperties.modVersion,
+            name: modProperties.modName,
+            description: modProperties.modDescription,
+            authors: [modProperties.modAuthors],
+            license: modProperties.modLicense,
+            icon: 'assets/emotify/icon.png',
+            environment: '*',
+            entrypoints: [
+                main: ['me.whish.emotify.fabric.EmotifyFabric'],
+                client: ['me.whish.emotify.fabric.client.EmotifyFabricClient'],
+                modmenu: ['me.whish.emotify.fabric.client.EmotifyModMenu']
+            ],
+            mixins: [
+                'emotify.mixins.json',
+                [
+                    config: 'emotify.client.mixins.json',
+                    environment: 'client'
+                ]
+            ],
+            depends: [
+                fabricloader: ">=${modProperties.fabricLoaderVersion}".toString(),
+                'fabric-api': ">=${modProperties.fabricApiVersion}".toString(),
+                'fabric-language-kotlin': ">=${modProperties.fabricLanguageKotlinVersion}".toString(),
+                minecraft: "=${modProperties.minecraftVersion}".toString(),
+                java: '>=21'
+            ]
+        ]
+        def target = outputFile.get().asFile
+        target.parentFile.mkdirs()
+        target.text = JsonOutput.prettyPrint(JsonOutput.toJson(metadata)) + System.lineSeparator()
     }
+}
+
+tasks.named('processResources', ProcessResources) {
+    from(generatedFabricModMetadata)
     includeEmptyDirs = false
 }
 

@@ -31,14 +31,21 @@ object CustomEmojiEmbeddedDescriptor {
     }
 
     private fun readPng(bytes: ByteArray): CustomEmojiDescriptor? {
+        if (!bytes.startsWith(PNG_SIGNATURE)) {
+            return null
+        }
         var position = PNG_SIGNATURE_BYTES
-        while (position + PNG_CHUNK_OVERHEAD <= bytes.size) {
+        while (position.toLong() + PNG_CHUNK_OVERHEAD <= bytes.size) {
             val length = bytes.intBigEndian(position)
-            if (length < 0 || position + PNG_CHUNK_OVERHEAD + length > bytes.size) {
+            val nextPosition = position.toLong() + PNG_CHUNK_OVERHEAD + length
+            if (length < 0 || nextPosition > bytes.size) {
                 return null
             }
             val typeOffset = position + Int.SIZE_BYTES
             val dataOffset = typeOffset + PNG_TYPE_BYTES
+            if (bytes.matchesAscii(typeOffset, PNG_END_CHUNK)) {
+                return null
+            }
             if (bytes.matchesAscii(typeOffset, PNG_TEXT_CHUNK)) {
                 val separator = bytes.indexOf(0, dataOffset, dataOffset + length)
                 if (separator >= 0 && bytes.matchesAscii(dataOffset, PNG_KEYWORD) && separator == dataOffset + PNG_KEYWORD.length) {
@@ -47,7 +54,7 @@ object CustomEmojiEmbeddedDescriptor {
                     )
                 }
             }
-            position += PNG_CHUNK_OVERHEAD + length
+            position = nextPosition.toInt()
         }
         return null
     }
@@ -85,7 +92,10 @@ object CustomEmojiEmbeddedDescriptor {
             (this[offset + 3].toInt() and 0xFF)
 
     private fun ByteArray.matchesAscii(offset: Int, value: String): Boolean =
-        offset >= 0 && offset + value.length <= size && value.indices.all { index -> this[offset + index].toInt() == value[index].code }
+        offset >= 0 && offset <= size - value.length && value.indices.all { index -> this[offset + index].toInt() == value[index].code }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { index -> this[index] == prefix[index] }
 
     private fun ByteArray.indexOf(value: Int, start: Int, end: Int): Int {
         for (index in start until end.coerceAtMost(size)) {
@@ -107,6 +117,17 @@ object CustomEmojiEmbeddedDescriptor {
     private const val PNG_TYPE_BYTES = 4
     private const val PNG_CHUNK_OVERHEAD = 12
     private const val PNG_TEXT_CHUNK = "tEXt"
+    private const val PNG_END_CHUNK = "IEND"
     private const val PNG_KEYWORD = "emotify"
     private const val GIF_PREFIX = "emotify:"
+    private val PNG_SIGNATURE = byteArrayOf(
+        0x89.toByte(),
+        0x50,
+        0x4E,
+        0x47,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
+    )
 }

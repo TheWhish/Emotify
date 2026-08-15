@@ -34,6 +34,9 @@ include 'fabric-1.21.1'
 include 'minecraft-client-1.21.8'
 include 'neoforge-1.21.8'
 include 'fabric-1.21.8'
+include 'minecraft-client-1.21.11'
+include 'neoforge-1.21.11'
+include 'fabric-1.21.11'
 include 'paper-1.21'
 
 project(':emotify-core').projectDir = file('modules/emotify-core')
@@ -46,4 +49,7 @@ project(':fabric-1.21.1').projectDir = file('platforms/fabric-1.21.1')
 project(':minecraft-client-1.21.8').projectDir = file('modules/minecraft-client-1.21.8')
 project(':neoforge-1.21.8').projectDir = file('platforms/neoforge-1.21.8')
 project(':fabric-1.21.8').projectDir = file('platforms/fabric-1.21.8')
+project(':minecraft-client-1.21.11').projectDir = file('modules/minecraft-client-1.21.11')
+project(':neoforge-1.21.11').projectDir = file('platforms/neoforge-1.21.11')
+project(':fabric-1.21.11').projectDir = file('platforms/fabric-1.21.11')
 project(':paper-1.21').projectDir = file('platforms/paper-1.21')

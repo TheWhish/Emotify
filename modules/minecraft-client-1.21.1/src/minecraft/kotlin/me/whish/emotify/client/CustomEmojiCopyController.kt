@@ -2,6 +2,7 @@ package me.whish.emotify.client
 
 import java.util.concurrent.CompletableFuture
 import me.whish.emotify.client.custom.CustomEmojiCopyRequestGate
+import me.whish.emotify.client.custom.beginCustomEmojiCopy
 import me.whish.emotify.client.interaction.CustomEmotionCopyHitArea
 import me.whish.emotify.client.interaction.EmotionBillboardHitDetector
 import me.whish.emotify.client.interaction.EmotionInteractionRay
@@ -86,27 +87,21 @@ object CustomEmojiCopyController {
     }
 
     private fun save(minecraft: Minecraft, target: CustomEmojiCopyTarget): Boolean {
-        if (CustomEmojiRegistry.containsOrigin(target.descriptor.originId)) {
-            return false
-        }
-        if (!requests.tryBegin(target.descriptor.originId)) {
-            return false
-        }
         val export = try {
-            CompletableFuture.supplyAsync(
-                {
+            beginCustomEmojiCopy(
+                requests,
+                target.descriptor.originId,
+                CustomEmojiRegistry.containsOrigin(target.descriptor.originId),
+            ) {
+                CompletableFuture.supplyAsync({
                     CustomEmojiAssetExporter.export(
                         CustomEmojiRegistry.directory(minecraft),
                         target.asset,
                         target.descriptor,
                     )
-                },
-                Util.ioPool(),
-            )
+                }, Util.ioPool())
+            } ?: return false
         } catch (failure: RuntimeException) {
-            check(requests.complete(target.descriptor.originId)) {
-                "Custom emoji copy request ownership was lost before scheduling"
-            }
             logger.error("Failed to schedule custom emoji copy {}", target.asset.id, failure)
             return false
         }
