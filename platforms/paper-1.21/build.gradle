@@ -438,9 +438,16 @@ def paper12111SmokeDeployment = registerSmokePluginDeployment(
     'deployPaper12111SmokePlugin',
     'run-paper-smoke-1.21.11',
 )
+def paper262SmokeDeployment = registerSmokePluginDeployment(
+    'deployPaper262SmokePlugin',
+    'run-paper-smoke-26.2',
+)
 def purpurSmokeDeployment = registerSmokePluginDeployment('deployPurpurSmokePlugin', 'run-purpur-smoke')
 def serverJavaLauncher = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(21)
+}
+def serverJava25Launcher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(25)
 }
 
 def paper1218Build = providers.gradleProperty('paper_1_21_8_build').get()
@@ -457,6 +464,13 @@ def paper12111ServerDirectory = layout.projectDirectory.dir('run-paper-smoke-1.2
 def paper12111ServerJar = paper12111ServerDirectory.file(paper12111JarName)
 def paper12111DownloadUrl =
     "https://fill-data.papermc.io/v1/objects/${paper12111Sha256}/${paper12111JarName}".toString()
+def paper262Build = providers.gradleProperty('paper_26_2_build').get()
+def paper262Sha256 = providers.gradleProperty('paper_26_2_sha256').get()
+def paper262JarName = "paper-26.2-${paper262Build}.jar".toString()
+def paper262ServerDirectory = layout.projectDirectory.dir('run-paper-smoke-26.2')
+def paper262ServerJar = paper262ServerDirectory.file(paper262JarName)
+def paper262DownloadUrl =
+    "https://fill-data.papermc.io/v1/objects/${paper262Sha256}/${paper262JarName}".toString()
 def sha256 = { File file ->
     def digest = MessageDigest.getInstance('SHA-256')
     file.withInputStream { input ->
@@ -589,6 +603,65 @@ def preparePaper12111Eula = tasks.register('preparePaper12111Eula') {
     }
 }
 
+def downloadPaper262Server = tasks.register('downloadPaper262Server') {
+    group = 'development'
+    description = 'Downloads and verifies the pinned Paper 26.2 development server.'
+    inputs.property('downloadUrl', paper262DownloadUrl)
+    inputs.property('sha256', paper262Sha256)
+    outputs.file(paper262ServerJar)
+    outputs.upToDateWhen {
+        def target = paper262ServerJar.asFile
+        target.isFile() && sha256(target) == paper262Sha256
+    }
+
+    doLast {
+        def target = paper262ServerJar.asFile.toPath()
+        def temporary = target.resolveSibling("${paper262JarName}.part")
+        Files.createDirectories(target.parent)
+        Files.deleteIfExists(temporary)
+        try {
+            def connection = new URI(paper262DownloadUrl).toURL().openConnection()
+            connection.setRequestProperty(
+                'User-Agent',
+                'Emotify development launcher (https://github.com/TheWhish/Emotify)',
+            )
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 60_000
+            connection.inputStream.withCloseable { input ->
+                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING)
+            }
+            def actualSha256 = sha256(temporary.toFile())
+            if (actualSha256 != paper262Sha256) {
+                throw new GradleException(
+                    "Paper 26.2 checksum differs: expected ${paper262Sha256}, got ${actualSha256}",
+                )
+            }
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+}
+
+def preparePaper262Eula = tasks.register('preparePaper262Eula') {
+    group = 'development'
+    description = 'Carries the existing local Paper test EULA acceptance into the isolated 26.2 runtime.'
+    def acceptedEula = layout.projectDirectory.file('run-paper-smoke/eula.txt')
+    def targetEula = paper262ServerDirectory.file('eula.txt')
+    inputs.file(acceptedEula).optional()
+    outputs.file(targetEula)
+    outputs.upToDateWhen {
+        targetEula.asFile.isFile() && targetEula.asFile.text.trim() == 'eula=true'
+    }
+
+    doLast {
+        if (acceptedEula.asFile.isFile() && acceptedEula.asFile.text.trim() == 'eula=true') {
+            Files.createDirectories(targetEula.asFile.toPath().parent)
+            Files.writeString(targetEula.asFile.toPath(), 'eula=true\n')
+        }
+    }
+}
+
 def registerSmokeServerRun = { String taskName, String serverDirectoryName, String serverJarName, deployment ->
     tasks.register(taskName, Exec) {
         group = 'application'
@@ -625,6 +698,17 @@ def runPaper12111SmokeServer = registerSmokeServerRun(
 runPaper12111SmokeServer.configure {
     dependsOn downloadPaper12111Server
     dependsOn preparePaper12111Eula
+}
+def runPaper262SmokeServer = registerSmokeServerRun(
+    'runPaper262SmokeServer',
+    'run-paper-smoke-26.2',
+    paper262JarName,
+    paper262SmokeDeployment,
+)
+runPaper262SmokeServer.configure {
+    dependsOn downloadPaper262Server
+    dependsOn preparePaper262Eula
+    executable serverJava25Launcher.get().executablePath.asFile.absolutePath
 }
 registerSmokeServerRun(
     'runPurpurSmokeServer',

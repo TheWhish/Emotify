@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "package": "me.whish.emotify.fabric.mixin.client",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "AvatarNameTagMixin",
+    "EditBoxMixin",
+    "GameRendererMixin",
+    "LevelRendererMixin",
+    "LivingEntityRendererMixin",
+    "MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

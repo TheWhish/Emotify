@@ -1,0 +1,107 @@
+package me.whish.emotify.client
+
+import com.mojang.blaze3d.platform.InputConstants
+import me.whish.emotify.client.picker.EmotionPickerAccessDecision
+import me.whish.emotify.client.picker.EmotionPickerAccessPolicy
+import me.whish.emotify.client.picker.EmotionPickerModel
+import me.whish.emotify.client.picker.EmotionPickerOpenRequests
+import me.whish.emotify.client.picker.EmotionPickerToggleGuard
+import net.minecraft.client.KeyMapping
+import net.minecraft.client.Minecraft
+import net.minecraft.client.input.KeyEvent
+import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.network.chat.Component
+import net.minecraft.resources.Identifier
+import net.neoforged.bus.api.IEventBus
+import net.neoforged.neoforge.client.event.ClientTickEvent
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent
+import net.neoforged.neoforge.client.event.RenderFrameEvent
+import net.neoforged.neoforge.client.settings.KeyConflictContext
+import net.neoforged.neoforge.common.NeoForge
+import org.lwjgl.glfw.GLFW
+
+object EmotionPickerController {
+    private val pickerCategory = KeyMapping.Category(
+        Identifier.fromNamespaceAndPath("emotify", "main"),
+    )
+    private val openPickerKey = KeyMapping(
+        "key.emotify.open_picker",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.KEYSYM,
+        GLFW.GLFW_KEY_G,
+        pickerCategory,
+    )
+    private val openPickerRequests = EmotionPickerOpenRequests(openPickerKey::consumeClick)
+
+    fun register(modEventBus: IEventBus) {
+        modEventBus.addListener(::onRegisterKeyMappings)
+        NeoForge.EVENT_BUS.addListener(::onClientTickPre)
+        NeoForge.EVENT_BUS.addListener(::onRenderFrame)
+    }
+
+    private fun onRegisterKeyMappings(event: RegisterKeyMappingsEvent) {
+        event.registerCategory(pickerCategory)
+        event.register(openPickerKey)
+    }
+
+    internal fun matchesPickerKey(event: KeyEvent): Boolean = openPickerKey.matches(event)
+
+    @Suppress("unused")
+    internal fun matchesPickerMouse(event: MouseButtonEvent): Boolean = openPickerKey.matchesMouse(event)
+
+    @Suppress("unused")
+    internal fun shouldClosePicker(
+        event: KeyEvent,
+        textInputFocused: Boolean,
+    ): Boolean =
+        EmotionPickerToggleGuard.shouldClose(
+            matchesPickerKey(event),
+            openPickerKey.isDown,
+            textInputFocused,
+        )
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onClientTickPre(event: ClientTickEvent.Pre) {
+        EmotionPickerMovement.update(Minecraft.getInstance())
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onRenderFrame(event: RenderFrameEvent.Post) {
+        if (!openPickerRequests.drain()) {
+            return
+        }
+
+        val minecraft = Minecraft.getInstance()
+        val context = ClientHandshakeController.pickerContext()
+        val model = context?.let { available ->
+            EmotionPickerModel.from(
+                available.allowedEmotions,
+                customEmojis = CustomEmojiRegistry.presentations(),
+            )
+        }
+        val decision = EmotionPickerAccessPolicy.decide(
+            screenOpen = minecraft.gui.screen() != null,
+            worldAvailable = minecraft.level != null,
+            connectionAvailable = minecraft.connection != null,
+            playerAvailable = minecraft.player != null,
+            serverContextAvailable = context != null,
+            catalogAvailable = model?.initialState() != null,
+        )
+        when (decision) {
+            EmotionPickerAccessDecision.SCREEN_OCCUPIED,
+            EmotionPickerAccessDecision.GAME_CONTEXT_UNAVAILABLE,
+            -> return
+            EmotionPickerAccessDecision.SERVER_UNAVAILABLE -> {
+                minecraft.player?.sendOverlayMessage(Component.translatable("message.emotify.unavailable"))
+                return
+            }
+            EmotionPickerAccessDecision.EMPTY_CATALOG -> {
+                minecraft.player?.sendOverlayMessage(Component.translatable("message.emotify.no_emotions"))
+                return
+            }
+            EmotionPickerAccessDecision.OPEN -> Unit
+        }
+
+        minecraft.gui.setScreen(EmotionPickerScreen(checkNotNull(context)))
+    }
+}

@@ -1,0 +1,267 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.util.zip.ZipFile
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    id 'net.fabricmc.fabric-loom'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+version = providers.gradleProperty('mod_version').get()
+group = providers.gradleProperty('mod_group_id').get()
+
+base {
+    archivesName = 'emotify-fabric-26.2'
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'Fabric'
+        url = uri('https://maven.fabricmc.net/')
+    }
+    maven {
+        name = 'Modrinth'
+        url = uri('https://api.modrinth.com/maven')
+        content {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        emotify {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        client {
+            client()
+            displayName.set('Fabric Client 26.2')
+            runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-client-26.2'))
+        }
+        server {
+            server()
+            displayName.set('Fabric Server 26.2')
+            runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-server-26.2'))
+        }
+        configureEach {
+            generateRunConfig.set(false)
+        }
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+kotlin {
+    jvmToolchain(25)
+
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_25)
+        allWarningsAsErrors.set(true)
+        progressiveMode.set(true)
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version_26_2}"
+    implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version_26_2}"
+    implementation "net.fabricmc:fabric-language-kotlin:${fabric_language_kotlin_version}"
+    clientCompileOnly("maven.modrinth:modmenu:${modmenu_version_26_2}") {
+        transitive = false
+    }
+    implementation project(':emotify-core')
+    implementation project(':emotify-wire-v1')
+    implementation project(':emotify-server-core')
+    implementation project(':emotify-catalog-builtin')
+    clientImplementation project(':minecraft-client-26.2')
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.13.4'
+}
+
+configurations {
+    testImplementation.extendsFrom clientImplementation
+    testRuntimeOnly.extendsFrom clientRuntimeOnly
+}
+
+sourceSets.client.kotlin.srcDir project(':minecraft-client-26.2')
+    .layout.projectDirectory.dir('src/minecraft/kotlin')
+
+sourceSets {
+    main.resources.srcDir project(':emotify-catalog-builtin')
+        .layout.projectDirectory.dir('src/main/resources')
+    client.resources.srcDir project(':minecraft-client-1.21.1')
+        .layout.projectDirectory.dir('src/main/resources')
+    test {
+        compileClasspath += sourceSets.client.output
+        runtimeClasspath += sourceSets.client.output
+    }
+}
+
+def fabricModProperties = [
+    modId: providers.gradleProperty('mod_id').get(),
+    modName: providers.gradleProperty('mod_name').get(),
+    modVersion: project.version,
+    modLicense: providers.gradleProperty('mod_license').get(),
+    modAuthors: providers.gradleProperty('mod_authors').get(),
+    modDescription: providers.gradleProperty('mod_description').get(),
+    minecraftVersion: providers.gradleProperty('minecraft_version_26_2').get(),
+    fabricLoaderVersion: providers.gradleProperty('fabric_loader_version').get(),
+    fabricApiVersion: providers.gradleProperty('fabric_api_version_26_2').get(),
+    fabricLanguageKotlinVersion: providers.gradleProperty('fabric_language_kotlin_version').get(),
+]
+
+def generateFabricModMetadata = tasks.register('generateFabricModMetadata') {
+    inputs.properties(fabricModProperties)
+    def outputFile = layout.buildDirectory.file('generated/resources/fabric.mod.json')
+    outputs.file(outputFile)
+
+    doLast {
+        def metadata = [
+            schemaVersion: 1,
+            id: fabricModProperties.modId,
+            version: fabricModProperties.modVersion,
+            name: fabricModProperties.modName,
+            description: fabricModProperties.modDescription,
+            authors: [fabricModProperties.modAuthors],
+            license: fabricModProperties.modLicense,
+            icon: 'assets/emotify/icon.png',
+            environment: '*',
+            entrypoints: [
+                main: ['me.whish.emotify.fabric.EmotifyFabric'],
+                client: ['me.whish.emotify.fabric.client.EmotifyFabricClient'],
+                modmenu: ['me.whish.emotify.fabric.client.EmotifyModMenu'],
+            ],
+            mixins: [
+                'emotify.mixins.json',
+                [
+                    config: 'emotify.client.mixins.json',
+                    environment: 'client',
+                ],
+            ],
+            depends: [
+                fabricloader: ">=${fabricModProperties.fabricLoaderVersion}".toString(),
+                'fabric-api': ">=${fabricModProperties.fabricApiVersion}".toString(),
+                'fabric-language-kotlin': ">=${fabricModProperties.fabricLanguageKotlinVersion}".toString(),
+                minecraft: "=${fabricModProperties.minecraftVersion}".toString(),
+                java: '>=25',
+            ],
+        ]
+        def target = outputFile.get().asFile
+        target.parentFile.mkdirs()
+        target.text = JsonOutput.prettyPrint(JsonOutput.toJson(metadata)) + System.lineSeparator()
+    }
+}
+
+tasks.named('processResources', ProcessResources) {
+    from(generateFabricModMetadata)
+    includeEmptyDirs = false
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+    options.compilerArgs.add '-Werror'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.withType(Jar).configureEach {
+    includeEmptyDirs = false
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+def embeddedMainProjectPaths = [
+    ':emotify-core',
+    ':emotify-wire-v1',
+    ':emotify-server-core',
+    ':emotify-catalog-builtin',
+] as Set
+def embeddedClientProjectPaths = [':minecraft-client-26.2'] as Set
+def embeddedProjectPaths = embeddedMainProjectPaths + embeddedClientProjectPaths
+def embeddedMainProjectRuntime = configurations.named('runtimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedMainProjectPaths
+    }
+}.files
+def embeddedClientProjectRuntime = configurations.named('clientRuntimeClasspath').get().incoming.artifactView { view ->
+    view.componentFilter { componentIdentifier ->
+        componentIdentifier instanceof ProjectComponentIdentifier &&
+            componentIdentifier.projectPath in embeddedClientProjectPaths
+    }
+}.files
+def embeddedProjectRuntime = files(embeddedMainProjectRuntime, embeddedClientProjectRuntime)
+
+tasks.named('jar', Jar) {
+    dependsOn embeddedProjectPaths.collect { projectPath -> "${projectPath}:jar" }
+    inputs.files(embeddedProjectRuntime)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from({ embeddedProjectRuntime.collect { runtimeFile -> zipTree(runtimeFile) } }) {
+        include 'me/whish/emotify/**/*.class'
+    }
+    from(rootProject.layout.projectDirectory.file('LICENSE')) {
+        rename { 'LICENSE_emotify' }
+    }
+    manifest {
+        attributes(
+            'Implementation-Title': providers.gradleProperty('mod_name').get(),
+            'Implementation-Version': project.version,
+        )
+    }
+}
+
+def fabricReleaseJar = tasks.named('jar', Jar).flatMap { task -> task.archiveFile }
+def fabricReleaseVersion = project.version.toString()
+
+def verifyFabric262ReleaseJar = tasks.register('verifyFabric262ReleaseJar') {
+    group = 'verification'
+    dependsOn tasks.named('jar')
+    inputs.file(fabricReleaseJar)
+
+    doLast {
+        ZipFile archive = new ZipFile(fabricReleaseJar.get().asFile)
+        archive.withCloseable {
+            def requiredEntries = [
+                'fabric.mod.json',
+                'emotify.mixins.json',
+                'emotify.client.mixins.json',
+                'assets/emotify/emotions.json',
+                'assets/emotify/icon.png',
+                'me/whish/emotify/fabric/EmotifyFabric.class',
+                'me/whish/emotify/fabric/mixin/client/LevelRendererMixin.class',
+                'me/whish/emotify/client/EmotionBillboardDeferredBuffer.class',
+                'me/whish/emotify/client/EmotionBillboardRenderer.class',
+                'me/whish/emotify/client/EmotionBillboardRenderTypes.class',
+                'me/whish/emotify/domain/EmotionId.class',
+                'me/whish/emotify/server/core/EmotifyServerEngine.class',
+            ]
+            def missingEntries = requiredEntries.findAll { entry -> archive.getEntry(entry) == null }
+            if (!missingEntries.isEmpty()) {
+                throw new GradleException("Fabric 26.2 release JAR is missing: ${missingEntries.join(', ')}")
+            }
+            def metadata = new JsonSlurper().parse(archive.getInputStream(archive.getEntry('fabric.mod.json')))
+            if (metadata.version != fabricReleaseVersion || metadata.depends.minecraft != '=26.2') {
+                throw new GradleException('Fabric 26.2 release metadata does not match the target version.')
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyFabric262ReleaseJar
+}

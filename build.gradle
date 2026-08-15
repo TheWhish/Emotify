@@ -19,6 +19,9 @@ def expectedProjectDirectories = [
     ':minecraft-client-1.21.11': 'modules/minecraft-client-1.21.11',
     ':neoforge-1.21.11': 'platforms/neoforge-1.21.11',
     ':fabric-1.21.11': 'platforms/fabric-1.21.11',
+    ':minecraft-client-26.2': 'modules/minecraft-client-26.2',
+    ':neoforge-26.2': 'platforms/neoforge-26.2',
+    ':fabric-26.2': 'platforms/fabric-26.2',
     ':paper-1.21': 'platforms/paper-1.21'
 ]
 def expectedProjectPaths = expectedProjectDirectories.keySet().toList().sort()
