@@ -182,7 +182,7 @@ class PaperServerRuntime(
     }
 
     private fun requireMainThread() {
-        check(isMainThread()) { "Paper server state must be accessed on the primary server thread" }
+        check(isMainThread()) { "Paper server state must be accessed on the global server thread" }
     }
 
     private fun resumedSelection(commit: CustomAssetUploadCommit): ServerSelectionResult? = when (commit) {

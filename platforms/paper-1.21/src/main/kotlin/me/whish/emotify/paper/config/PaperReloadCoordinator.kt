@@ -50,7 +50,7 @@ class PaperReloadCoordinator(
         label: String,
         args: Array<out String>,
     ): Boolean {
-        if (!plugin.server.isPrimaryThread) {
+        if (!PaperGlobalTasks.isGlobalThread(plugin.server)) {
             PaperGlobalTasks.now(plugin) { executeReloadCommand(sender, label, args) }
             return true
         }
@@ -59,7 +59,7 @@ class PaperReloadCoordinator(
     }
 
     private fun executeReloadCommand(sender: CommandSender, label: String, args: Array<out String>) {
-        check(plugin.server.isPrimaryThread) { "Paper commands must run on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(plugin.server)) { "Paper commands must run on the global server thread" }
         if (args.size != 1 || !args[0].equals("reload", ignoreCase = true)) {
             sender.sendMessage("Usage: /$label reload")
             return

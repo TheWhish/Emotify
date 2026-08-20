@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 @Mixin(EditBox.class)
+@SuppressWarnings("unused")
 abstract class EditBoxMixin {
     @WrapOperation(
         method = "renderWidget",

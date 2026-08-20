@@ -11,17 +11,13 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 @Mixin(EditBox.class)
-@SuppressWarnings({
-    "unused",
-    "MixinAnnotationTarget",
-    "InvalidInjectorMethodSignature"
-})
+@SuppressWarnings("unused")
 abstract class EditBoxHintMixin1211 {
     @WrapOperation(
         method = "renderWidget",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;III)I"
+            target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)I"
         )
     )
     private int emotify$drawHint(
@@ -31,11 +27,12 @@ abstract class EditBoxHintMixin1211 {
         int x,
         int y,
         int color,
+        boolean dropShadow,
         Operation<Integer> original
     ) {
         if ((Object) this instanceof EmotionSearchBox) {
-            return graphics.drawString(font, text, x, y, color, false);
+            return original.call(graphics, font, text, x, y, color, false);
         }
-        return original.call(graphics, font, text, x, y, color);
+        return original.call(graphics, font, text, x, y, color, dropShadow);
     }
 }

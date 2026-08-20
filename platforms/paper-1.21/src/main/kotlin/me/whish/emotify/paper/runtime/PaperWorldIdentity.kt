@@ -4,21 +4,26 @@ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap
 import java.util.UUID
 
 class PaperDimensionOrdinalRegistry {
+    private val monitor = Any()
     private val ordinals = Object2IntOpenHashMap<UUID>().apply {
         defaultReturnValue(0)
     }
     private var nextOrdinal = 1
 
-    fun resolve(worldId: UUID): Int = ordinals.getInt(worldId).takeIf { ordinal -> ordinal != 0 } ?: run {
-        val ordinal = nextOrdinal
-        nextOrdinal = Math.incrementExact(nextOrdinal)
-        ordinals.put(worldId, ordinal)
-        ordinal
+    fun resolve(worldId: UUID): Int = synchronized(monitor) {
+        ordinals.getInt(worldId).takeIf { ordinal -> ordinal != 0 } ?: run {
+            val ordinal = nextOrdinal
+            nextOrdinal = Math.incrementExact(nextOrdinal)
+            ordinals.put(worldId, ordinal)
+            ordinal
+        }
     }
 
-    fun remove(worldId: UUID): Boolean = ordinals.removeInt(worldId) != 0
+    fun remove(worldId: UUID): Boolean = synchronized(monitor) {
+        ordinals.removeInt(worldId) != 0
+    }
 
-    fun clear() {
+    fun clear() = synchronized(monitor) {
         ordinals.clear()
         nextOrdinal = 1
     }

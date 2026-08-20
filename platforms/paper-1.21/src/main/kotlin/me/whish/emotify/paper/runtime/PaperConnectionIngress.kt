@@ -346,6 +346,15 @@ class PaperConnectionIngress(
         entries.remove(connection.playerId, active)
     }
 
+    fun close(playerId: UUID, connectionIdentity: Any): ConnectionKey? = synchronized(monitor) {
+        val active = entries[playerId] ?: return@synchronized null
+        if (!active.matchesOrCollected(connectionIdentity)) {
+            return@synchronized null
+        }
+        entries.remove(playerId)
+        active.connection
+    }
+
     fun clear(): Int = synchronized(monitor) {
         val cleared = entries.size
         entries.clear()
@@ -368,6 +377,11 @@ class PaperConnectionIngress(
         var protocolActive = false
 
         fun belongsTo(connectionIdentity: Any): Boolean = connectionReference.get() === connectionIdentity
+
+        fun matchesOrCollected(connectionIdentity: Any): Boolean {
+            val referent = connectionReference.get()
+            return referent == null || referent === connectionIdentity
+        }
 
         fun supportsAllOutgoingChannels(): Boolean =
             outgoingChannelsMask and ALL_OUTGOING_CHANNELS_MASK == ALL_OUTGOING_CHANNELS_MASK

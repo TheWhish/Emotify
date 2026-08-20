@@ -77,4 +77,4 @@ private const val WRAP_OPERATION_ANNOTATION =
     "Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;"
 private const val AT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/At;"
 private const val HINT_DRAW_CALL =
-    "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;III)I"
+    "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)I"

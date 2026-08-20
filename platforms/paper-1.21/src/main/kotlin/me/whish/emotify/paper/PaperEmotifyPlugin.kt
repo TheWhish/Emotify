@@ -83,113 +83,117 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     override fun onEnable() {
         check(server.isPrimaryThread) { "Emotify Paper must be enabled on the primary server thread" }
-        saveDefaultConfig()
-        val configurationLoader = BukkitPaperConfigLoader(
-            dataFolder.resolve("config.yml"),
-            BuiltInEmotionCatalog.catalog,
-        )
-        val configuration = loadInitialConfiguration(configurationLoader)
-        val serverConfiguration = serverConfiguration(configuration)
-        configurationState = PaperConfigurationState(configuration)
-        val ingressLimits = configuration.ingress.globalSelectionLimits
-        globalSelectionBudget = GlobalSelectionIngressBudget(
-            maxOutstanding = ingressLimits.maximumOutstanding,
-            requestBurstCapacity = ingressLimits.requestBurstCapacity,
-            requestRefillTokensPerSecond = ingressLimits.requestRefillTokensPerSecond,
-            timeSource = SystemMonotonicTimeSource,
-        )
-        ingressGate = PaperIngressGate(configuration.ingress.maximumQueuedMainThreadTasks)
-        connections = PaperConnectionIngress(
-            BuiltInEmotionCatalog.catalog,
-            SystemMonotonicTimeSource,
-            globalSelectionBudget,
-        )
-        dimensions = PaperDimensionOrdinalRegistry()
-        diagnosticGate = PaperDiagnosticGate(
-            DIAGNOSTIC_BURST_CAPACITY,
-            DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
-            SystemMonotonicTimeSource,
-        )
-        customAssetChunkPayloads = PaperCustomAssetChunkPayloadCache()
-        snapshotFactory = BukkitPaperPlayerSnapshotFactory(server, connections, dimensions)
-        val broadcastLimits = configuration.broadcast.budgetLimits
-        runtime = PaperServerRuntime(
-            serverConfiguration.serverHello,
-            serverConfiguration.selectionPolicy,
-            SystemMonotonicTimeSource,
-            BukkitPaperAudiencePort(server, connections),
-            BukkitPaperOutboundTransport(this, connections, customAssetChunkPayloads),
-            { server.isPrimaryThread },
-            globalSelectionBudget,
-            AudienceBudget(
-                globalCapacity = broadcastLimits.globalCapacity,
-                globalRefillTokensPerSecond = broadcastLimits.globalRefillTokensPerSecond,
-                regionCapacity = broadcastLimits.regionCapacity,
-                regionRefillTokensPerSecond = broadcastLimits.regionRefillTokensPerSecond,
-                maxRegions = broadcastLimits.maximumRegions,
+        PaperGlobalTasks.withGlobalContext {
+            saveDefaultConfig()
+            val configurationLoader = BukkitPaperConfigLoader(
+                dataFolder.resolve("config.yml"),
+                BuiltInEmotionCatalog.catalog,
+            )
+            val configuration = loadInitialConfiguration(configurationLoader)
+            val serverConfiguration = serverConfiguration(configuration)
+            configurationState = PaperConfigurationState(configuration)
+            val ingressLimits = configuration.ingress.globalSelectionLimits
+            globalSelectionBudget = GlobalSelectionIngressBudget(
+                maxOutstanding = ingressLimits.maximumOutstanding,
+                requestBurstCapacity = ingressLimits.requestBurstCapacity,
+                requestRefillTokensPerSecond = ingressLimits.requestRefillTokensPerSecond,
                 timeSource = SystemMonotonicTimeSource,
-            ),
-            configuration.broadcast.audience,
-            EmotifyProtocolFeatures.registry,
-            snapshotFactory::create,
-            ::reportSelectionResult,
-        )
-        PaperGlobalTasks.repeating(this, { runtime.drainCustomAssetVerifications() }, 1L)
-        policyRefreshDispatcher = PaperPolicyRefreshDispatcher(this, reportBatch = ::reportPolicyRefreshBatch)
-        policyRefreshDispatcher.start()
-        configurationApplyTransaction = PaperConfigurationApplyTransaction(
-            configurationState::current,
-            ::applyConfigurationUnsafe,
-        )
-        reloadCoordinator = PaperReloadCoordinator(
-            this,
-            configurationLoader,
-            configurationState,
-            PaperReloadGate(SystemMonotonicTimeSource),
-            ::applyConfiguration,
-        )
-        requireNotNull(getCommand("emotify")) { "Emotify command is missing from plugin.yml" }
-            .setExecutor(reloadCoordinator)
+            )
+            ingressGate = PaperIngressGate(configuration.ingress.maximumQueuedMainThreadTasks)
+            connections = PaperConnectionIngress(
+                BuiltInEmotionCatalog.catalog,
+                SystemMonotonicTimeSource,
+                globalSelectionBudget,
+            )
+            dimensions = PaperDimensionOrdinalRegistry()
+            diagnosticGate = PaperDiagnosticGate(
+                DIAGNOSTIC_BURST_CAPACITY,
+                DIAGNOSTIC_REFILL_TOKENS_PER_SECOND,
+                SystemMonotonicTimeSource,
+            )
+            customAssetChunkPayloads = PaperCustomAssetChunkPayloadCache()
+            snapshotFactory = BukkitPaperPlayerSnapshotFactory(server, connections, dimensions)
+            val broadcastLimits = configuration.broadcast.budgetLimits
+            runtime = PaperServerRuntime(
+                serverConfiguration.serverHello,
+                serverConfiguration.selectionPolicy,
+                SystemMonotonicTimeSource,
+                BukkitPaperAudiencePort(server, connections),
+                BukkitPaperOutboundTransport(this, connections, customAssetChunkPayloads),
+                { PaperGlobalTasks.isGlobalThread(server) },
+                globalSelectionBudget,
+                AudienceBudget(
+                    globalCapacity = broadcastLimits.globalCapacity,
+                    globalRefillTokensPerSecond = broadcastLimits.globalRefillTokensPerSecond,
+                    regionCapacity = broadcastLimits.regionCapacity,
+                    regionRefillTokensPerSecond = broadcastLimits.regionRefillTokensPerSecond,
+                    maxRegions = broadcastLimits.maximumRegions,
+                    timeSource = SystemMonotonicTimeSource,
+                ),
+                configuration.broadcast.audience,
+                EmotifyProtocolFeatures.registry,
+                snapshotFactory::create,
+                ::reportSelectionResult,
+            )
+            PaperGlobalTasks.repeating(this, { runtime.drainCustomAssetVerifications() }, 1L)
+            policyRefreshDispatcher = PaperPolicyRefreshDispatcher(this, reportBatch = ::reportPolicyRefreshBatch)
+            policyRefreshDispatcher.start()
+            configurationApplyTransaction = PaperConfigurationApplyTransaction(
+                configurationState::current,
+                ::applyConfigurationUnsafe,
+            )
+            reloadCoordinator = PaperReloadCoordinator(
+                this,
+                configurationLoader,
+                configurationState,
+                PaperReloadGate(SystemMonotonicTimeSource),
+                ::applyConfiguration,
+            )
+            requireNotNull(getCommand("emotify")) { "Emotify command is missing from plugin.yml" }
+                .setExecutor(reloadCoordinator)
 
-        PaperProtocolChannels.outgoing.forEach { channel ->
-            server.messenger.registerOutgoingPluginChannel(this, channel)
+            PaperProtocolChannels.outgoing.forEach { channel ->
+                server.messenger.registerOutgoingPluginChannel(this, channel)
+            }
+            PaperProtocolChannels.advertisedIncoming.forEach { channel ->
+                server.messenger.registerIncomingPluginChannel(this, channel, this)
+            }
+            server.pluginManager.registerEvents(this, this)
+            server.onlinePlayers.forEach(::beginConnection)
+            logger.info("Emotify Paper/Purpur Protocol 1 production adapter enabled")
         }
-        PaperProtocolChannels.advertisedIncoming.forEach { channel ->
-            server.messenger.registerIncomingPluginChannel(this, channel, this)
-        }
-        server.pluginManager.registerEvents(this, this)
-        server.onlinePlayers.forEach(::beginConnection)
-        logger.info("Emotify Paper/Purpur Protocol 1 production adapter enabled")
     }
 
     override fun onDisable() {
         check(server.isPrimaryThread) { "Emotify Paper must be disabled on the primary server thread" }
-        if (::reloadCoordinator.isInitialized) {
-            reloadCoordinator.shutdown()
+        PaperGlobalTasks.withGlobalContext {
+            if (::reloadCoordinator.isInitialized) {
+                reloadCoordinator.shutdown()
+            }
+            if (::policyRefreshDispatcher.isInitialized) {
+                policyRefreshDispatcher.clear()
+            }
+            server.globalRegionScheduler.cancelTasks(this)
+            server.asyncScheduler.cancelTasks(this)
+            if (::runtime.isInitialized) {
+                runtime.clear()
+            }
+            if (::customAssetChunkPayloads.isInitialized) {
+                customAssetChunkPayloads.clear()
+            }
+            if (::dimensions.isInitialized) {
+                dimensions.clear()
+            }
+            if (::connections.isInitialized) {
+                connections.clear()
+            }
+            if (::ingressGate.isInitialized) {
+                ingressGate.clear()
+            }
+            server.messenger.unregisterIncomingPluginChannel(this)
+            server.messenger.unregisterOutgoingPluginChannel(this)
+            HandlerList.unregisterAll(this as Listener)
         }
-        if (::policyRefreshDispatcher.isInitialized) {
-            policyRefreshDispatcher.clear()
-        }
-        server.globalRegionScheduler.cancelTasks(this)
-        server.asyncScheduler.cancelTasks(this)
-        if (::runtime.isInitialized) {
-            runtime.clear()
-        }
-        if (::customAssetChunkPayloads.isInitialized) {
-            customAssetChunkPayloads.clear()
-        }
-        if (::dimensions.isInitialized) {
-            dimensions.clear()
-        }
-        if (::connections.isInitialized) {
-            connections.clear()
-        }
-        if (::ingressGate.isInitialized) {
-            ingressGate.clear()
-        }
-        server.messenger.unregisterIncomingPluginChannel(this)
-        server.messenger.unregisterOutgoingPluginChannel(this)
-        HandlerList.unregisterAll(this as Listener)
     }
 
     @EventHandler
@@ -200,8 +204,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     @EventHandler
     fun onPlayerQuit(event: PlayerQuitEvent) {
         onGameThread {
-            val connection = connections.current(event.player.uniqueId, event.player) ?: return@onGameThread
-            connections.close(connection)
+            val connection = connections.close(event.player.uniqueId, event.player) ?: return@onGameThread
             runtime.close(connection)
         }
     }
@@ -315,7 +318,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     }
 
     private fun onGameThread(task: () -> Unit) {
-        if (server.isPrimaryThread) {
+        if (PaperGlobalTasks.isGlobalThread(server)) {
             task()
         } else {
             PaperGlobalTasks.now(this) { task() }
@@ -323,7 +326,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
     }
 
     private fun beginConnection(player: Player) {
-        check(server.isPrimaryThread) { "Paper connection lifecycle must run on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(server)) { "Paper connection lifecycle must run on the global server thread" }
         scheduleOpen(connections.begin(player.uniqueId, player, player.listeningPluginChannels))
     }
 
@@ -348,7 +351,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         refreshExisting: Boolean,
         attemptsRemaining: Int = MAX_SERVER_HELLO_ATTEMPTS,
     ) {
-        if (!server.isPrimaryThread) {
+        if (!PaperGlobalTasks.isGlobalThread(server)) {
             scheduleOpen(connection, attemptsRemaining)
             return
         }
@@ -493,7 +496,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         maximumForLane: Int = 1,
         task: () -> Unit,
     ) {
-        if (server.isPrimaryThread) {
+        if (PaperGlobalTasks.isGlobalThread(server)) {
             runInbound(connection, task, selectionLease, null)
             return
         }
@@ -568,7 +571,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         }
 
     private fun applyConfiguration(configuration: PaperRuntimeConfig): PaperConfigurationApplyResult {
-        check(server.isPrimaryThread) { "Emotify configuration must be applied on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(server)) { "Emotify configuration must be applied on the global server thread" }
         if (configurationState.current() == configuration) {
             return PaperConfigurationApplyResult(changed = false, queuedPolicyRefreshes = 0)
         }

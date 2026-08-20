@@ -322,4 +322,18 @@ class PaperConnectionIngressTest : FunSpec({
         ingress.isProtocolActive(connection) shouldBe false
         ingress.current(playerId, identity) shouldBe connection
     }
+
+    test("close by player id and identity atomically clears matching active entry") {
+        val ingress = PaperConnectionIngress(catalog, FakeMonotonicTimeSource())
+        val playerId = UUID.randomUUID()
+        val identity = Any()
+        val otherIdentity = Any()
+        val connection = ingress.begin(playerId, identity)
+
+        ingress.close(playerId, otherIdentity) shouldBe null
+        ingress.isActive(connection) shouldBe true
+        ingress.close(playerId, identity) shouldBe connection
+        ingress.isActive(connection) shouldBe false
+        ingress.close(playerId, identity) shouldBe null
+    }
 })

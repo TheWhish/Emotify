@@ -16,6 +16,7 @@ import me.whish.emotify.server.core.PreparedCustomEmojiAssetDelivery
 import me.whish.emotify.server.core.PreparedCustomEmotionDelivery
 import me.whish.emotify.server.core.PreparedEmotionDelivery
 import me.whish.emotify.server.core.PreparedServerHelloDelivery
+import me.whish.emotify.paper.runtime.PaperGlobalTasks
 import me.whish.emotify.wire.v1.ProtocolV1Channels
 import org.bukkit.plugin.Plugin
 
@@ -91,7 +92,7 @@ internal class BukkitPaperOutboundTransport(
         channel: String,
         body: ByteArray,
     ): OutboundDeliveryStatus {
-        check(plugin.server.isPrimaryThread) { "Paper payloads must be sent on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(plugin.server)) { "Paper payloads must be sent on the global server thread" }
         val player = plugin.server.getPlayer(connection.playerId)
             ?.takeIf { candidate -> candidate.isOnline }
             ?: return OutboundDeliveryStatus.UNAVAILABLE

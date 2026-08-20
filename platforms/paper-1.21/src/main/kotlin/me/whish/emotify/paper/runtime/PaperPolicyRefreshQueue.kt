@@ -23,67 +23,69 @@ class PaperPolicyRefreshQueue(
     private var plan: ServerHelloRefreshPlan? = null
 
     init {
-        require(maximumBatchSize > 0) { "Policy refresh batch size must be positive: $maximumBatchSize" }
+        require(maximumBatchSize > 0) {
+            "Maximum Paper policy refresh batch size must be positive: $maximumBatchSize"
+        }
     }
 
     val size: Int
         get() = pending.size
 
-    fun replace(connections: Collection<ConnectionKey>, replacementPlan: ServerHelloRefreshPlan): Int {
+    fun replace(connections: Collection<ConnectionKey>, plan: ServerHelloRefreshPlan): Int {
         pending.clear()
-        val unique = HashSet<ConnectionKey>(connections.size)
-        connections.forEach { connection ->
-            if (unique.add(connection)) {
+        this.plan = plan
+        val distinct = HashSet<ConnectionKey>(connections.size)
+        for (connection in connections) {
+            if (distinct.add(connection)) {
                 pending.addLast(connection)
             }
         }
-        plan = replacementPlan.takeIf { pending.isNotEmpty() }
         return pending.size
     }
 
     fun drain(): PaperPolicyRefreshBatchResult {
-        val activePlan = plan
-        if (activePlan == null || pending.isEmpty()) {
-            plan = null
-            return PaperPolicyRefreshBatchResult(0, 0, 0, 0, 0, null)
-        }
+        val activePlan = plan ?: return PaperPolicyRefreshBatchResult(0, 0, 0, 0, 0, null)
         var attempted = 0
         var sent = 0
         var unavailable = 0
         var failed = 0
         var firstFailure: RuntimeException? = null
+
         while (attempted < maximumBatchSize && pending.isNotEmpty()) {
-            val outbound = activePlan.send(pending.removeFirst())
-            attempted += 1
-            when (outbound.status) {
-                OutboundDeliveryStatus.SENT -> sent += 1
-                OutboundDeliveryStatus.UNAVAILABLE -> unavailable += 1
+            val connection = pending.removeFirst()
+            attempted++
+            val result = activePlan.send(connection)
+            when (result.status) {
+                OutboundDeliveryStatus.SENT -> sent++
+                OutboundDeliveryStatus.UNAVAILABLE -> unavailable++
                 OutboundDeliveryStatus.FAILED -> {
-                    failed += 1
-                    if (firstFailure == null) {
-                        firstFailure = outbound.failure
+                    failed++
+                    if (firstFailure == null && result.failure != null) {
+                        firstFailure = result.failure
                     }
                 }
             }
         }
+
         if (pending.isEmpty()) {
             plan = null
         }
+
         return PaperPolicyRefreshBatchResult(
-            attempted,
-            sent,
-            unavailable,
-            failed,
-            pending.size,
-            firstFailure,
+            attemptedSessions = attempted,
+            sentSessions = sent,
+            unavailableSessions = unavailable,
+            failedSessions = failed,
+            remainingSessions = pending.size,
+            firstFailure = firstFailure,
         )
     }
 
     fun clear(): Int {
-        val cleared = pending.size
+        val remaining = pending.size
         pending.clear()
         plan = null
-        return cleared
+        return remaining
     }
 
     companion object {
@@ -100,13 +102,13 @@ class PaperPolicyRefreshDispatcher(
     private var scheduledTask: ScheduledTask? = null
 
     fun start() {
-        check(plugin.server.isPrimaryThread) { "Policy refresh dispatcher must start on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(plugin.server)) { "Policy refresh dispatcher must start on the global server thread" }
         check(!started) { "Policy refresh dispatcher has already started" }
         started = true
     }
 
     fun replace(connections: Collection<ConnectionKey>, plan: ServerHelloRefreshPlan): Int {
-        check(plugin.server.isPrimaryThread) { "Policy refresh queue must be replaced on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(plugin.server)) { "Policy refresh queue must be replaced on the global server thread" }
         check(started) { "Policy refresh dispatcher has not started" }
         val queued = queue.replace(connections, plan)
         try {
@@ -124,7 +126,7 @@ class PaperPolicyRefreshDispatcher(
     }
 
     fun clear(): Int {
-        check(plugin.server.isPrimaryThread) { "Policy refresh queue must be cleared on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(plugin.server)) { "Policy refresh queue must be cleared on the global server thread" }
         cancelScheduledTask()
         started = false
         return queue.clear()

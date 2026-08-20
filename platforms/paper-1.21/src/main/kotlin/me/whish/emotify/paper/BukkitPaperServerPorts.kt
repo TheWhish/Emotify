@@ -2,6 +2,7 @@ package me.whish.emotify.paper
 
 import me.whish.emotify.paper.runtime.PaperConnectionIngress
 import me.whish.emotify.paper.runtime.PaperDimensionOrdinalRegistry
+import me.whish.emotify.paper.runtime.PaperGlobalTasks
 import me.whish.emotify.paper.runtime.PaperRegionKey
 import me.whish.emotify.protocol.RuntimeEntityId
 import me.whish.emotify.server.core.AudiencePort
@@ -19,7 +20,7 @@ internal class BukkitPaperPlayerSnapshotFactory(
     private val dimensions: PaperDimensionOrdinalRegistry,
 ) {
     fun create(connection: ConnectionKey): PlayerSnapshot? {
-        check(server.isPrimaryThread) { "Paper player snapshots must be created on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(server)) { "Paper player snapshots must be created on the global server thread" }
         val player = resolve(connection) ?: return null
         val entityId = RuntimeEntityId.parse(player.entityId) ?: return null
         return PlayerSnapshot(
@@ -53,7 +54,7 @@ internal class BukkitPaperAudiencePort(
         maxCandidates: Int,
         visitor: AudienceVisitor,
     ): AudienceVisitCompletion {
-        check(server.isPrimaryThread) { "Paper audience traversal must run on the primary server thread" }
+        check(PaperGlobalTasks.isGlobalThread(server)) { "Paper audience traversal must run on the global server thread" }
         require(maxCandidates > 0) { "Maximum audience candidate count must be positive: $maxCandidates" }
         val sourcePlayer = resolve(source.connection) ?: return AudienceVisitCompletion.EXHAUSTED
         var candidateCount = 0
