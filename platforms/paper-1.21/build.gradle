@@ -85,6 +85,7 @@ def generatedPluginDescriptor = tasks.register('generatePluginDescriptor') {
             'description: Server-authoritative Emotify bridge for Paper and Purpur.',
             'author: TheWhish',
             "api-version: '1.21.1'",
+            'folia-supported: true',
             'load: STARTUP',
             'commands:',
             '  emotify:',
@@ -195,6 +196,7 @@ def expectedPaperResourceEntries = ([
 def requiredPaperPluginMetadata = [
     'main: me.whish.emotify.paper.PaperEmotifyPlugin',
     "version: '${project.version}'".toString(),
+    'folia-supported: true',
     'commands:',
     'permissions:',
     'emotify.use:',
@@ -443,6 +445,14 @@ def paper262SmokeDeployment = registerSmokePluginDeployment(
     'run-paper-smoke-26.2',
 )
 def purpurSmokeDeployment = registerSmokePluginDeployment('deployPurpurSmokePlugin', 'run-purpur-smoke')
+def foliaSmokeDeployment = registerSmokePluginDeployment('deployFoliaSmokePlugin', 'run-folia-smoke')
+
+tasks.register('deploySmokePlugins') {
+    group = 'development'
+    description = 'Builds, verifies, and deploys the Emotify plugin into every smoke server folder.'
+    dependsOn paperSmokeDeployment, paper1218SmokeDeployment, paper12111SmokeDeployment,
+        paper262SmokeDeployment, purpurSmokeDeployment, foliaSmokeDeployment
+}
 def serverJavaLauncher = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(21)
 }
@@ -471,6 +481,13 @@ def paper262ServerDirectory = layout.projectDirectory.dir('run-paper-smoke-26.2'
 def paper262ServerJar = paper262ServerDirectory.file(paper262JarName)
 def paper262DownloadUrl =
     "https://fill-data.papermc.io/v1/objects/${paper262Sha256}/${paper262JarName}".toString()
+def folia262Build = providers.gradleProperty('folia_26_2_build').get()
+def folia262Sha256 = providers.gradleProperty('folia_26_2_sha256').get()
+def folia262JarName = "folia-26.2-${folia262Build}.jar".toString()
+def folia262ServerDirectory = layout.projectDirectory.dir('run-folia-smoke')
+def folia262ServerJar = folia262ServerDirectory.file(folia262JarName)
+def folia262DownloadUrl =
+    "https://fill-data.papermc.io/v1/objects/${folia262Sha256}/${folia262JarName}".toString()
 def sha256 = { File file ->
     def digest = MessageDigest.getInstance('SHA-256')
     file.withInputStream { input ->
@@ -662,6 +679,65 @@ def preparePaper262Eula = tasks.register('preparePaper262Eula') {
     }
 }
 
+def downloadFolia262Server = tasks.register('downloadFolia262Server') {
+    group = 'development'
+    description = 'Downloads and verifies the pinned Folia 26.2 development server.'
+    inputs.property('downloadUrl', folia262DownloadUrl)
+    inputs.property('sha256', folia262Sha256)
+    outputs.file(folia262ServerJar)
+    outputs.upToDateWhen {
+        def target = folia262ServerJar.asFile
+        target.isFile() && sha256(target) == folia262Sha256
+    }
+
+    doLast {
+        def target = folia262ServerJar.asFile.toPath()
+        def temporary = target.resolveSibling("${folia262JarName}.part")
+        Files.createDirectories(target.parent)
+        Files.deleteIfExists(temporary)
+        try {
+            def connection = new URI(folia262DownloadUrl).toURL().openConnection()
+            connection.setRequestProperty(
+                'User-Agent',
+                'Emotify development launcher (https://github.com/TheWhish/Emotify)',
+            )
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 60_000
+            connection.inputStream.withCloseable { input ->
+                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING)
+            }
+            def actualSha256 = sha256(temporary.toFile())
+            if (actualSha256 != folia262Sha256) {
+                throw new GradleException(
+                    "Folia 26.2 checksum differs: expected ${folia262Sha256}, got ${actualSha256}",
+                )
+            }
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+}
+
+def prepareFolia262Eula = tasks.register('prepareFolia262Eula') {
+    group = 'development'
+    description = 'Carries the existing local Paper test EULA acceptance into the isolated Folia runtime.'
+    def acceptedEula = layout.projectDirectory.file('run-paper-smoke/eula.txt')
+    def targetEula = folia262ServerDirectory.file('eula.txt')
+    inputs.file(acceptedEula).optional()
+    outputs.file(targetEula)
+    outputs.upToDateWhen {
+        targetEula.asFile.isFile() && targetEula.asFile.text.trim() == 'eula=true'
+    }
+
+    doLast {
+        if (acceptedEula.asFile.isFile() && acceptedEula.asFile.text.trim() == 'eula=true') {
+            Files.createDirectories(targetEula.asFile.toPath().parent)
+            Files.writeString(targetEula.asFile.toPath(), 'eula=true\n')
+        }
+    }
+}
+
 def registerSmokeServerRun = { String taskName, String serverDirectoryName, String serverJarName, deployment ->
     tasks.register(taskName, Exec) {
         group = 'application'
@@ -708,6 +784,17 @@ def runPaper262SmokeServer = registerSmokeServerRun(
 runPaper262SmokeServer.configure {
     dependsOn downloadPaper262Server
     dependsOn preparePaper262Eula
+    executable serverJava25Launcher.get().executablePath.asFile.absolutePath
+}
+def runFolia262SmokeServer = registerSmokeServerRun(
+    'runFoliaSmokeServer',
+    'run-folia-smoke',
+    folia262JarName,
+    foliaSmokeDeployment,
+)
+runFolia262SmokeServer.configure {
+    dependsOn downloadFolia262Server
+    dependsOn prepareFolia262Eula
     executable serverJava25Launcher.get().executablePath.asFile.absolutePath
 }
 registerSmokeServerRun(

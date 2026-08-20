@@ -20,6 +20,7 @@ import me.whish.emotify.paper.runtime.PaperConnectionIngress
 import me.whish.emotify.paper.runtime.PaperCustomSelectionIngress
 import me.whish.emotify.paper.runtime.PaperDiagnosticGate
 import me.whish.emotify.paper.runtime.PaperDimensionOrdinalRegistry
+import me.whish.emotify.paper.runtime.PaperGlobalTasks
 import me.whish.emotify.paper.runtime.PaperIngressGate
 import me.whish.emotify.paper.runtime.PaperIngressLane
 import me.whish.emotify.paper.runtime.PaperIngressLease
@@ -133,7 +134,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             snapshotFactory::create,
             ::reportSelectionResult,
         )
-        server.scheduler.runTaskTimer(this, Runnable { runtime.drainCustomAssetVerifications() }, 1L, 1L)
+        PaperGlobalTasks.repeating(this, { runtime.drainCustomAssetVerifications() }, 1L)
         policyRefreshDispatcher = PaperPolicyRefreshDispatcher(this, reportBatch = ::reportPolicyRefreshBatch)
         policyRefreshDispatcher.start()
         configurationApplyTransaction = PaperConfigurationApplyTransaction(
@@ -169,7 +170,8 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         if (::policyRefreshDispatcher.isInitialized) {
             policyRefreshDispatcher.clear()
         }
-        server.scheduler.cancelTasks(this)
+        server.globalRegionScheduler.cancelTasks(this)
+        server.asyncScheduler.cancelTasks(this)
         if (::runtime.isInitialized) {
             runtime.clear()
         }
@@ -192,19 +194,21 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        beginConnection(event.player)
+        onGameThread { beginConnection(event.player) }
     }
 
     @EventHandler
     fun onPlayerQuit(event: PlayerQuitEvent) {
-        val connection = connections.current(event.player.uniqueId, event.player) ?: return
-        connections.close(connection)
-        runtime.close(connection)
+        onGameThread {
+            val connection = connections.current(event.player.uniqueId, event.player) ?: return@onGameThread
+            connections.close(connection)
+            runtime.close(connection)
+        }
     }
 
     @EventHandler
     fun onWorldUnload(event: WorldUnloadEvent) {
-        dimensions.remove(event.world.uid)
+        onGameThread { dimensions.remove(event.world.uid) }
     }
 
     @EventHandler
@@ -213,9 +217,11 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             event.channel in PaperProtocolChannels.outgoing &&
             PaperProtocolChannels.requiresBukkitSubscription(event.channel)
         ) {
-            val connection = connections.current(event.player.uniqueId, event.player) ?: return
-            connections.registerOutgoingChannel(connection, event.channel)
-            tryOpen(event.player, connection, refreshExisting = true)
+            onGameThread {
+                val connection = connections.current(event.player.uniqueId, event.player) ?: return@onGameThread
+                connections.registerOutgoingChannel(connection, event.channel)
+                tryOpen(event.player, connection, refreshExisting = true)
+            }
         }
     }
 
@@ -225,8 +231,10 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             event.channel in PaperProtocolChannels.outgoing &&
             PaperProtocolChannels.requiresBukkitSubscription(event.channel)
         ) {
-            val connection = connections.current(event.player.uniqueId, event.player) ?: return
-            connections.unregisterOutgoingChannel(connection, event.channel)
+            onGameThread {
+                val connection = connections.current(event.player.uniqueId, event.player) ?: return@onGameThread
+                connections.unregisterOutgoingChannel(connection, event.channel)
+            }
         }
     }
 
@@ -306,6 +314,14 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         }
     }
 
+    private fun onGameThread(task: () -> Unit) {
+        if (server.isPrimaryThread) {
+            task()
+        } else {
+            PaperGlobalTasks.now(this) { task() }
+        }
+    }
+
     private fun beginConnection(player: Player) {
         check(server.isPrimaryThread) { "Paper connection lifecycle must run on the primary server thread" }
         scheduleOpen(connections.begin(player.uniqueId, player, player.listeningPluginChannels))
@@ -316,7 +332,7 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
         attemptsRemaining: Int = MAX_SERVER_HELLO_ATTEMPTS,
     ) {
         require(attemptsRemaining > 0) { "Paper server hello attempts must be positive: $attemptsRemaining" }
-        server.scheduler.runTask(this, Runnable {
+        PaperGlobalTasks.now(this, Runnable {
             if (!connections.isActive(connection)) {
                 return@Runnable
             }
@@ -487,9 +503,9 @@ class PaperEmotifyPlugin : JavaPlugin(), Listener, PluginMessageListener {
             return
         }
         try {
-            server.scheduler.runTask(this, Runnable {
+            PaperGlobalTasks.now(this) {
                 runInbound(connection, task, selectionLease, ingressLease)
-            })
+            }
         } catch (exception: RuntimeException) {
             ingressLease.release()
             selectionLease?.release()

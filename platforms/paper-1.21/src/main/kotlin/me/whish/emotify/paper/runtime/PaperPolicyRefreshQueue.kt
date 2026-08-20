@@ -1,11 +1,11 @@
 package me.whish.emotify.paper.runtime
 
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask
 import java.util.ArrayDeque
 import me.whish.emotify.server.core.ConnectionKey
 import me.whish.emotify.server.core.OutboundDeliveryStatus
 import me.whish.emotify.server.core.ServerHelloRefreshPlan
 import org.bukkit.plugin.java.JavaPlugin
-import org.bukkit.scheduler.BukkitTask
 
 data class PaperPolicyRefreshBatchResult(
     val attemptedSessions: Int,
@@ -97,7 +97,7 @@ class PaperPolicyRefreshDispatcher(
     private val reportBatch: (PaperPolicyRefreshBatchResult) -> Unit,
 ) {
     private var started = false
-    private var scheduledTask: BukkitTask? = null
+    private var scheduledTask: ScheduledTask? = null
 
     fun start() {
         check(plugin.server.isPrimaryThread) { "Policy refresh dispatcher must start on the primary server thread" }
@@ -134,7 +134,7 @@ class PaperPolicyRefreshDispatcher(
         if (scheduledTask != null) {
             return
         }
-        scheduledTask = plugin.server.scheduler.runTaskTimer(plugin, Runnable(::drain), 1L, 1L)
+        scheduledTask = PaperGlobalTasks.repeating(plugin, Runnable(::drain), 1L)
     }
 
     private fun drain() {

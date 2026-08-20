@@ -4,6 +4,7 @@ main: me.whish.emotify.paper.PaperEmotifyPlugin
 description: Server-authoritative Emotify bridge for Paper and Purpur.
 author: TheWhish
 api-version: '1.21.1'
+folia-supported: true
 load: STARTUP
 commands:
   emotify:

@@ -3,6 +3,7 @@ package me.whish.emotify.paper.config
 import java.util.UUID
 import java.util.logging.Level
 import me.whish.emotify.paper.PaperPermissions
+import me.whish.emotify.paper.runtime.PaperGlobalTasks
 import me.whish.emotify.paper.runtime.PaperReloadAdmission
 import me.whish.emotify.paper.runtime.PaperReloadGate
 import me.whish.emotify.paper.runtime.PaperReloadTicket
@@ -49,14 +50,23 @@ class PaperReloadCoordinator(
         label: String,
         args: Array<out String>,
     ): Boolean {
+        if (!plugin.server.isPrimaryThread) {
+            PaperGlobalTasks.now(plugin) { executeReloadCommand(sender, label, args) }
+            return true
+        }
+        executeReloadCommand(sender, label, args)
+        return true
+    }
+
+    private fun executeReloadCommand(sender: CommandSender, label: String, args: Array<out String>) {
         check(plugin.server.isPrimaryThread) { "Paper commands must run on the primary server thread" }
         if (args.size != 1 || !args[0].equals("reload", ignoreCase = true)) {
             sender.sendMessage("Usage: /$label reload")
-            return true
+            return
         }
         if (!sender.hasPermission(PaperPermissions.ADMIN_RELOAD)) {
             sender.sendMessage("You do not have permission to reload Emotify.")
-            return true
+            return
         }
         val requester = ReloadRequester.from(sender)
         when (val admission = gate.tryBegin()) {
@@ -64,7 +74,6 @@ class PaperReloadCoordinator(
             PaperReloadAdmission.Pending -> sender.sendMessage("An Emotify reload is already in progress.")
             PaperReloadAdmission.RateLimited -> sender.sendMessage("Wait one second before reloading Emotify again.")
         }
-        return true
     }
 
     fun shutdown() {
@@ -73,17 +82,17 @@ class PaperReloadCoordinator(
 
     private fun beginReload(requester: ReloadRequester, ticket: PaperReloadTicket) {
         try {
-            plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            PaperGlobalTasks.async(plugin) {
                 val result = loader.load()
                 try {
-                    plugin.server.scheduler.runTask(plugin, Runnable {
+                    PaperGlobalTasks.now(plugin) {
                         completeReload(requester, ticket, result)
-                    })
+                    }
                 } catch (exception: RuntimeException) {
                     gate.complete(ticket)
                     plugin.logger.log(Level.SEVERE, "Failed to schedule Emotify configuration apply", exception)
                 }
-            })
+            }
         } catch (exception: RuntimeException) {
             gate.complete(ticket)
             plugin.logger.log(Level.SEVERE, "Failed to schedule Emotify configuration load", exception)
