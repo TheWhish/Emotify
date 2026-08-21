@@ -193,6 +193,8 @@ class EmotionAssetsTest : FunSpec({
             "screen.emotify.settings.show_others.description",
             "screen.emotify.settings.show_custom",
             "screen.emotify.settings.show_custom.description",
+            "screen.emotify.settings.show_hotbar_feedback",
+            "screen.emotify.settings.show_hotbar_feedback.description",
             "screen.emotify.settings.ignored_players",
             "screen.emotify.settings.ignored_players.description",
             "screen.emotify.settings.manage_ignored",

@@ -33,6 +33,7 @@ class FabricClientConfigCodecTest : FunSpec({
                 35,
                 listOf(ignored),
                 showCustomEmotions = false,
+                showHotbarFeedback = false,
             ),
             listOf(first, second),
             listOf(second, custom, first),
@@ -58,6 +59,7 @@ class FabricClientConfigCodecTest : FunSpec({
         decoded.migrationRequired shouldBe true
         decoded.snapshot.settings.showOtherPlayers shouldBe true
         decoded.snapshot.settings.showCustomEmotions shouldBe true
+        decoded.snapshot.settings.showHotbarFeedback shouldBe true
         decoded.snapshot.settings.reducedMotion shouldBe true
         decoded.snapshot.settings.soundVolumePercent shouldBe 100
         decoded.snapshot.settings.ignoredPlayers shouldBe emptyList()

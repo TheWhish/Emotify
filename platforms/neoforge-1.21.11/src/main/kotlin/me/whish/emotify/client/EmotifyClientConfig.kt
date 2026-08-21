@@ -40,6 +40,7 @@ object EmotifyClientConfig {
     )
     private val showOtherPlayersEmotions = builder.define("showOtherPlayersEmotions", true)
     private val showCustomEmotions = builder.define("showCustomEmotions", true)
+    private val showHotbarFeedback = builder.define("showHotbarFeedback", true)
     private val customCopyHintDismissed = builder.define("customCopyHintDismissed", false)
     private val reducedMotion = builder.define("reducedMotion", false)
     private val soundVolumePercent = builder.defineInRange(
@@ -215,6 +216,7 @@ object EmotifyClientConfig {
                 soundVolumePercent.get(),
                 loadIgnoredPlayers(),
                 showCustomEmotions.get(),
+                showHotbarFeedback.get(),
             ),
             favorites = favorites,
             quickSlots = decodeNeoForgeQuickSlotIds(quickSlotIds.get()),
@@ -248,6 +250,7 @@ object EmotifyClientConfig {
         configVersion.set(snapshot.schemaVersion)
         showOtherPlayersEmotions.set(snapshot.settings.showOtherPlayers)
         showCustomEmotions.set(snapshot.settings.showCustomEmotions)
+        showHotbarFeedback.set(snapshot.settings.showHotbarFeedback)
         reducedMotion.set(snapshot.settings.reducedMotion)
         soundVolumePercent.set(snapshot.settings.soundVolumePercent)
         ignoredPlayers.set(snapshot.settings.ignoredPlayers.map(IgnoredPlayerIdentityCodec::encode))

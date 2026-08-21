@@ -4,6 +4,8 @@
   "screen.emotify.settings.show_others.description": "Your own emotions remain visible and available to send.",
   "screen.emotify.settings.show_custom": "Custom emotions",
   "screen.emotify.settings.show_custom.description": "Hide custom emotions from other players without affecting built-ins or your own emotions.",
+  "screen.emotify.settings.show_hotbar_feedback": "Hotbar emoji indicator",
+  "screen.emotify.settings.show_hotbar_feedback.description": "Shows the sent emoji above your hotbar.",
   "screen.emotify.settings.ignored_players": "Ignored players",
   "screen.emotify.settings.ignored_players.description": "Hide selected players' emotions and keep the list between sessions.",
   "screen.emotify.settings.manage_ignored": "List (%s)",

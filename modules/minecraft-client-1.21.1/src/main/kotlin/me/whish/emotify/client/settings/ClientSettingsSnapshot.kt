@@ -52,6 +52,7 @@ data class IgnoredPlayerIdentity private constructor(
 class ClientSettingsSnapshot private constructor(
     val showOtherPlayers: Boolean,
     val showCustomEmotions: Boolean,
+    val showHotbarFeedback: Boolean,
     val reducedMotion: Boolean,
     val soundVolumePercent: Int,
     val ignoredPlayers: List<IgnoredPlayerIdentity>,
@@ -75,6 +76,9 @@ class ClientSettingsSnapshot private constructor(
     fun withShowCustomEmotions(enabled: Boolean): ClientSettingsSnapshot =
         copy(showCustomEmotions = enabled)
 
+    fun withShowHotbarFeedback(enabled: Boolean): ClientSettingsSnapshot =
+        copy(showHotbarFeedback = enabled)
+
     fun withReducedMotion(enabled: Boolean): ClientSettingsSnapshot =
         copy(reducedMotion = enabled)
 
@@ -91,6 +95,7 @@ class ClientSettingsSnapshot private constructor(
                 soundVolumePercent,
                 retained,
                 showCustomEmotions,
+                showHotbarFeedback,
             )
         }
         if (retained.size >= MAXIMUM_IGNORED_PLAYERS) {
@@ -102,17 +107,20 @@ class ClientSettingsSnapshot private constructor(
             soundVolumePercent,
             retained + identity,
             showCustomEmotions,
+            showHotbarFeedback,
         )
     }
 
     private fun copy(
         showOtherPlayers: Boolean = this.showOtherPlayers,
         showCustomEmotions: Boolean = this.showCustomEmotions,
+        showHotbarFeedback: Boolean = this.showHotbarFeedback,
         reducedMotion: Boolean = this.reducedMotion,
         soundVolumePercent: Int = this.soundVolumePercent,
     ): ClientSettingsSnapshot = ClientSettingsSnapshot(
         showOtherPlayers,
         showCustomEmotions,
+        showHotbarFeedback,
         reducedMotion,
         soundVolumePercent,
         ignoredPlayers,
@@ -125,6 +133,7 @@ class ClientSettingsSnapshot private constructor(
             other is ClientSettingsSnapshot &&
             showOtherPlayers == other.showOtherPlayers &&
             showCustomEmotions == other.showCustomEmotions &&
+            showHotbarFeedback == other.showHotbarFeedback &&
             reducedMotion == other.reducedMotion &&
             soundVolumePercent == other.soundVolumePercent &&
             ignoredPlayers == other.ignoredPlayers
@@ -132,6 +141,7 @@ class ClientSettingsSnapshot private constructor(
     override fun hashCode(): Int {
         var result = showOtherPlayers.hashCode()
         result = 31 * result + showCustomEmotions.hashCode()
+        result = 31 * result + showHotbarFeedback.hashCode()
         result = 31 * result + reducedMotion.hashCode()
         result = 31 * result + soundVolumePercent
         result = 31 * result + ignoredPlayers.hashCode()
@@ -140,6 +150,7 @@ class ClientSettingsSnapshot private constructor(
 
     override fun toString(): String =
         "ClientSettingsSnapshot(showOtherPlayers=$showOtherPlayers, showCustomEmotions=$showCustomEmotions, " +
+            "showHotbarFeedback=$showHotbarFeedback, " +
             "reducedMotion=$reducedMotion, " +
             "soundVolumePercent=$soundVolumePercent, ignoredPlayers=$ignoredPlayers)"
 
@@ -154,6 +165,7 @@ class ClientSettingsSnapshot private constructor(
             soundVolumePercent = MAXIMUM_SOUND_VOLUME_PERCENT,
             ignoredPlayers = emptyList(),
             showCustomEmotions = true,
+            showHotbarFeedback = true,
         )
 
         fun create(
@@ -162,6 +174,7 @@ class ClientSettingsSnapshot private constructor(
             soundVolumePercent: Int,
             ignoredPlayers: Collection<IgnoredPlayerIdentity>,
             showCustomEmotions: Boolean = true,
+            showHotbarFeedback: Boolean = true,
         ): ClientSettingsSnapshot {
             validatedSoundVolume(soundVolumePercent)
             val normalizedPlayers = ArrayList<IgnoredPlayerIdentity>(
@@ -179,6 +192,7 @@ class ClientSettingsSnapshot private constructor(
             return ClientSettingsSnapshot(
                 showOtherPlayers,
                 showCustomEmotions,
+                showHotbarFeedback,
                 reducedMotion,
                 soundVolumePercent,
                 java.util.List.copyOf(normalizedPlayers),

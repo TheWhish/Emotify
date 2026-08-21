@@ -81,8 +81,19 @@ class EmotifySettingsScreen(
                 draft = draft.withShowCustomEmotions(!draft.showCustomEmotions)
             },
         )
+        addRenderableWidget(
+            settingRow(
+                rows[2],
+                "screen.emotify.settings.show_hotbar_feedback",
+                "screen.emotify.settings.show_hotbar_feedback.description",
+                { CommonComponents.optionStatus(draft.showHotbarFeedback) },
+                { draft.showHotbarFeedback },
+            ) {
+                draft = draft.withShowHotbarFeedback(!draft.showHotbarFeedback)
+            },
+        )
         ignoredPlayersButton = settingRow(
-            rows[2],
+            rows[3],
             "screen.emotify.settings.ignored_players",
             "screen.emotify.settings.ignored_players.description",
             ::ignoredPlayersButtonMessage,
@@ -93,7 +104,7 @@ class EmotifySettingsScreen(
         addRenderableWidget(ignoredPlayersButton)
         addRenderableWidget(
             settingRow(
-                rows[3],
+                rows[4],
                 "screen.emotify.settings.reduced_motion",
                 "screen.emotify.settings.reduced_motion.description",
                 { CommonComponents.optionStatus(draft.reducedMotion) },
@@ -104,10 +115,10 @@ class EmotifySettingsScreen(
         )
         addRenderableWidget(
             EmotifyVolumeSlider(
-                rows[4].x,
-                rows[4].y,
-                rows[4].width,
-                rows[4].height,
+                rows[5].x,
+                rows[5].y,
+                rows[5].width,
+                rows[5].height,
                 draft.soundVolumePercent,
             ) { volume ->
                 draft = draft.withSoundVolumePercent(volume)

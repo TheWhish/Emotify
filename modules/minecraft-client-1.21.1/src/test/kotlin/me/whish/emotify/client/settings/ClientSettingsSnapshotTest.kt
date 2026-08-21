@@ -21,6 +21,15 @@ class ClientSettingsSnapshotTest : FunSpec({
         hidden.withShowCustomEmotions(true) shouldBe defaults
     }
 
+    test("hotbar feedback visibility defaults on and updates immutably") {
+        val defaults = ClientSettingsSnapshot.defaults()
+        val disabled = defaults.withShowHotbarFeedback(false)
+
+        defaults.showHotbarFeedback shouldBe true
+        disabled.showHotbarFeedback shouldBe false
+        disabled.withShowHotbarFeedback(true) shouldBe defaults
+    }
+
     test("ignored identity follows a stable UUID across a rename") {
         val settings = ClientSettingsSnapshot.create(
             true,

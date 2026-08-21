@@ -7,20 +7,21 @@ import me.whish.emotify.client.picker.EmotionPickerLayoutMetrics
 
 @Suppress("unused")
 class EmotifySettingsLayoutTest : FunSpec({
-    test("main settings panel expands symmetrically and packs five rows") {
+    test("main settings panel expands symmetrically and packs six rows") {
         val layout = EmotifySettingsLayout.main(300, 300)
 
-        layout.panel shouldBe EmotifyUiBounds(27, 52, 246, 195)
-        layout.list shouldBe EmotifyUiBounds(33, 69, 234, 148)
+        layout.panel shouldBe EmotifyUiBounds(27, 38, 246, 223)
+        layout.list shouldBe EmotifyUiBounds(33, 55, 234, 176)
         layout.rows shouldContainExactly listOf(
-            EmotifyUiBounds(39, 75, 222, 24),
-            EmotifyUiBounds(39, 103, 222, 24),
-            EmotifyUiBounds(39, 131, 222, 24),
-            EmotifyUiBounds(39, 159, 222, 24),
-            EmotifyUiBounds(39, 187, 222, 24),
+            EmotifyUiBounds(39, 61, 222, 24),
+            EmotifyUiBounds(39, 89, 222, 24),
+            EmotifyUiBounds(39, 117, 222, 24),
+            EmotifyUiBounds(39, 145, 222, 24),
+            EmotifyUiBounds(39, 173, 222, 24),
+            EmotifyUiBounds(39, 201, 222, 24),
         )
-        layout.cancel shouldBe EmotifyUiBounds(33, 221, 115, 20)
-        layout.done shouldBe EmotifyUiBounds(152, 221, 115, 20)
+        layout.cancel shouldBe EmotifyUiBounds(33, 235, 115, 20)
+        layout.done shouldBe EmotifyUiBounds(152, 235, 115, 20)
         layout.cancel.right + 4 shouldBe layout.done.x
         layout.done.right shouldBe layout.list.right
         layout.panel.y shouldBe (300 - layout.panel.height) / 2
@@ -88,14 +89,14 @@ class EmotifySettingsLayoutTest : FunSpec({
 
         main.panel.width shouldBe 196
         main.panel shouldBe EmotifyUiBounds(2, 2, 196, 176)
-        main.rows.size shouldBe 5
+        main.rows.size shouldBe 6
         main.rows.forEach { row ->
             (row.x >= main.panel.x) shouldBe true
             (row.right <= main.panel.right) shouldBe true
             (row.y >= main.list.y) shouldBe true
             (row.bottom <= main.list.bottom) shouldBe true
         }
-        main.rows.map(EmotifyUiBounds::height).distinct() shouldBe listOf(20)
+        main.rows.map(EmotifyUiBounds::height).distinct() shouldBe listOf(16)
         main.rows.zipWithNext().forEach { (current, next) ->
             next.y - current.bottom shouldBe EmotifySettingsVisualMetrics.GAP
         }

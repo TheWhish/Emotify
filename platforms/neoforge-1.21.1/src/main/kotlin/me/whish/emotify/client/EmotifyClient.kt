@@ -13,6 +13,7 @@ import net.neoforged.bus.api.IEventBus
 import net.neoforged.fml.ModContainer
 import net.neoforged.fml.config.ModConfig
 import net.neoforged.fml.common.Mod
+import net.neoforged.neoforge.client.event.RenderGuiEvent
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory
 import net.neoforged.neoforge.common.NeoForge
 import net.neoforged.neoforge.event.GameShuttingDownEvent
@@ -29,6 +30,9 @@ class EmotifyClient(modEventBus: IEventBus, modContainer: ModContainer) {
             IConfigScreenFactory { _, parent -> EmotifySettingsScreen(parent) },
         )
         NeoForge.EVENT_BUS.addListener<GameShuttingDownEvent> { EmotifyClientConfig.flush() }
+        NeoForge.EVENT_BUS.addListener<RenderGuiEvent.Post> { event ->
+            EmotionHotbarFeedbackRenderer.render(event.guiGraphics)
+        }
         ClientPayloadReceiver.install(
             ServerHelloReceiver(ClientHandshakeController::receive),
             SelectionRejectedReceiver(ClientHandshakeController::receive),

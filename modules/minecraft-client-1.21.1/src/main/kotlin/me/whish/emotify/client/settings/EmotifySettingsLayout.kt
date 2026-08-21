@@ -53,7 +53,7 @@ object EmotifySettingsVisualMetrics {
     const val CONTENT_PADDING = EmotionPickerLayoutMetrics.PANEL_EDGE_PADDING
     const val CONTENT_WIDTH = 234
     const val PANEL_WIDTH = CONTENT_WIDTH + CONTENT_PADDING * 2
-    const val PANEL_HEIGHT = 195
+    const val PANEL_HEIGHT = 223
     const val IGNORED_PLAYERS_PANEL_HEIGHT = 167
     const val TITLE_AREA_TOP = EmotionPickerLayoutMetrics.TITLE_AREA_TOP
     const val TITLE_AREA_HEIGHT = EmotionPickerLayoutMetrics.TITLE_AREA_HEIGHT
@@ -61,7 +61,7 @@ object EmotifySettingsVisualMetrics {
     const val ACTION_HEIGHT = 20
     const val ACTION_GAP = EmotionPickerLayoutMetrics.CONTROL_GAP
     const val SETTINGS_ROW_HEIGHT = 24
-    const val SETTINGS_ROW_COUNT = 5
+    const val SETTINGS_ROW_COUNT = 6
     const val SEARCH_HEIGHT = EmotionPickerLayoutMetrics.SEARCH_FIELD_HEIGHT
     const val PLAYER_LIST_TOP = CONTENT_TOP + SEARCH_HEIGHT + GAP
     const val PLAYER_ROW_HEIGHT = 20

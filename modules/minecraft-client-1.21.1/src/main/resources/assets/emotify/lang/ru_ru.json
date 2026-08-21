@@ -4,6 +4,8 @@
   "screen.emotify.settings.show_others.description": "Свои эмоции по-прежнему можно видеть и отправлять.",
   "screen.emotify.settings.show_custom": "Кастомные эмоции",
   "screen.emotify.settings.show_custom.description": "Скрывает кастомные эмоции других игроков, не затрагивая встроенные эмоции и ваши собственные.",
+  "screen.emotify.settings.show_hotbar_feedback": "Индикатор над хотбаром",
+  "screen.emotify.settings.show_hotbar_feedback.description": "Отображает отправленное эмодзи над панелью хотбара.",
   "screen.emotify.settings.ignored_players": "Игнорируемые игроки",
   "screen.emotify.settings.ignored_players.description": "Скрывает эмоции выбранных игроков и сохраняет список между запусками.",
   "screen.emotify.settings.manage_ignored": "Список (%s)",

@@ -1,5 +1,6 @@
 package me.whish.emotify.fabric.config
 
+import java.util.UUID
 import me.whish.emotify.client.settings.ClientConfigurationMigration
 import me.whish.emotify.client.settings.ClientConfigurationSchema
 import me.whish.emotify.client.settings.ClientConfigurationSnapshot
@@ -65,6 +66,9 @@ object FabricClientConfigCodec {
         append("showCustomEmotions=")
         append(snapshot.settings.showCustomEmotions)
         append('\n')
+        append("showHotbarFeedback=")
+        append(snapshot.settings.showHotbarFeedback)
+        append('\n')
         append("reducedMotion=")
         append(snapshot.settings.reducedMotion)
         append('\n')
@@ -119,11 +123,12 @@ object FabricClientConfigCodec {
         val unknownKeys = entries.keys - allowedKeys
         require(unknownKeys.isEmpty()) { "Unknown Emotify client config key: ${unknownKeys.first()}" }
         return ClientSettingsSnapshot.create(
-            entries[SHOW_OTHER_PLAYERS_KEY]?.toBooleanStrict() ?: defaults.showOtherPlayers,
-            entries[REDUCED_MOTION_KEY]?.toBooleanStrict() ?: defaults.reducedMotion,
-            entries[SOUND_VOLUME_KEY]?.let(::decodeSoundVolume) ?: defaults.soundVolumePercent,
-            entries[IGNORED_PLAYERS_KEY]?.let(::decodeIgnoredPlayers) ?: defaults.ignoredPlayers,
-            entries[SHOW_CUSTOM_EMOTIONS_KEY]?.toBooleanStrict() ?: defaults.showCustomEmotions,
+            showOtherPlayers = entries[SHOW_OTHER_PLAYERS_KEY]?.toBooleanStrict() ?: defaults.showOtherPlayers,
+            reducedMotion = entries[REDUCED_MOTION_KEY]?.toBooleanStrict() ?: defaults.reducedMotion,
+            soundVolumePercent = entries[SOUND_VOLUME_KEY]?.let(::decodeSoundVolume) ?: defaults.soundVolumePercent,
+            ignoredPlayers = entries[IGNORED_PLAYERS_KEY]?.let(::decodeIgnoredPlayers) ?: defaults.ignoredPlayers,
+            showCustomEmotions = entries[SHOW_CUSTOM_EMOTIONS_KEY]?.toBooleanStrict() ?: defaults.showCustomEmotions,
+            showHotbarFeedback = entries[SHOW_HOTBAR_FEEDBACK_KEY]?.toBooleanStrict() ?: defaults.showHotbarFeedback,
         )
     }
 
@@ -143,15 +148,17 @@ object FabricClientConfigCodec {
         if (value.isEmpty()) {
             return emptyList()
         }
-        val entries = value.split(',')
-        require(entries.size <= ClientSettingsSnapshot.MAXIMUM_IGNORED_PLAYERS) {
-            "Too many ignored players: ${entries.size}"
+        val rawEntries = value.split(',')
+        require(rawEntries.size <= ClientSettingsSnapshot.MAXIMUM_IGNORED_PLAYERS) {
+            "Too many ignored players: ${rawEntries.size}"
         }
-        val uuids = HashSet<java.util.UUID>(entries.size)
-        val names = HashSet<String>(entries.size)
+        val uuids = HashSet<UUID>(rawEntries.size)
+        val names = HashSet<String>(rawEntries.size)
         return java.util.List.copyOf(
-            entries.map { encoded ->
-                val identity = IgnoredPlayerIdentityCodec.decode(encoded.trim())
+            rawEntries.map { encoded ->
+                val identity = requireNotNull(IgnoredPlayerIdentityCodec.decodeOrNull(encoded.trim())) {
+                    "Invalid ignored player entry: $encoded"
+                }
                 require(uuids.add(identity.uuid)) { "Duplicate ignored player UUID: ${identity.uuid}" }
                 require(names.add(identity.normalizedName)) { "Duplicate ignored player name: ${identity.name}" }
                 identity
@@ -166,13 +173,22 @@ object FabricClientConfigCodec {
         if (value.isEmpty()) {
             return emptyList()
         }
-        return value.splitToSequence(',')
-            .map(String::trim)
-            .onEach { entry -> require(entry.isNotEmpty()) { "Empty favorite emotion ID" } }
-            .map { entry -> requireNotNull(EmotionId.parse(entry)) { "Invalid favorite emotion ID: $entry" } }
-            .distinct()
-            .take(EmotionCatalog.MAX_SIZE)
-            .toList()
+        val entries = value.split(',')
+        require(entries.size <= EmotionCatalog.MAX_SIZE) {
+            "Favorites list exceeds maximum of ${EmotionCatalog.MAX_SIZE}: ${entries.size}"
+        }
+        val favorites = ArrayList<EmotionId>(entries.size)
+        for (rawEntry in entries) {
+            val candidate = rawEntry.trim()
+            if (candidate.isEmpty()) {
+                continue
+            }
+            val emotionId = requireNotNull(EmotionId.parse(candidate)) { "Invalid favorite emotion ID: $candidate" }
+            if (emotionId !in favorites) {
+                favorites.add(emotionId)
+            }
+        }
+        return favorites
     }
 
     private fun decodeQuickSlots(value: String?, defaults: List<EmotionId?>): List<EmotionId?> {
@@ -196,6 +212,7 @@ object FabricClientConfigCodec {
     private const val CONFIG_VERSION_KEY = "configVersion"
     private const val SHOW_OTHER_PLAYERS_KEY = "showOtherPlayersEmotions"
     private const val SHOW_CUSTOM_EMOTIONS_KEY = "showCustomEmotions"
+    private const val SHOW_HOTBAR_FEEDBACK_KEY = "showHotbarFeedback"
     private const val REDUCED_MOTION_KEY = "reducedMotion"
     private const val SOUND_VOLUME_KEY = "soundVolumePercent"
     private const val IGNORED_PLAYERS_KEY = "ignoredPlayers"
@@ -212,6 +229,5 @@ object FabricClientConfigCodec {
         FAVORITES_KEY,
     )
     private val PREVIOUS_KEYS = LEGACY_KEYS + QUICK_SLOTS_KEY
-    private val CURRENT_KEYS = PREVIOUS_KEYS + CUSTOM_COPY_HINT_DISMISSED_KEY
+    private val CURRENT_KEYS = PREVIOUS_KEYS + CUSTOM_COPY_HINT_DISMISSED_KEY + SHOW_HOTBAR_FEEDBACK_KEY
 }
-
