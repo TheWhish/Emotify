@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "me.whish.emotify.fabric.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "ConnectionAccessor",
+    "ServerCommonPacketListenerAccessor"
+  ]
+}

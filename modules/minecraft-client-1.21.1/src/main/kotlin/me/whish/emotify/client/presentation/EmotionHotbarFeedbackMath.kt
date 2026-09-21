@@ -23,7 +23,7 @@ object EmotionHotbarFeedbackMath {
     )
 
     fun evaluate(elapsedMillis: Double, durationMillis: Double = EmotionAnimation.DURATION_MILLIS): EmotionHotbarFeedbackState {
-        if (elapsedMillis < 0.0 || elapsedMillis >= durationMillis) {
+        if (elapsedMillis !in 0.0..<durationMillis) {
             return INVISIBLE_STATE
         }
 

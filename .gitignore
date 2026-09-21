@@ -129,3 +129,4 @@ Desktop.ini
 /server.jar
 
 # Do not ignore *.jar globally: gradle/wrapper/gradle-wrapper.jar is required
+/README-modrinth.md

@@ -57,7 +57,9 @@ loom {
             runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-server'))
         }
         configureEach {
-            generateRunConfig.set(false)
+            generateRunConfig.set(true)
+            preferGradleTask.set(false)
+            appendProjectPathToDisplayName.set(false)
         }
     }
 }

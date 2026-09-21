@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" factoryName="Application" name="NeoForge Server 1.21.8" type="Application">
+    <option name="MAIN_CLASS_NAME" value="net.neoforged.devlaunch.Main"/>
+    <module name="Emotify.neoforge-1.21.8.main"/>
+    <option name="PROGRAM_PARAMETERS" value="@E:\Programming\IdeaProjects\Emotify\platforms\neoforge-1.21.8\build\moddev\serverRunProgramArgs.txt"/>
+    <option name="VM_PARAMETERS" value="@E:\Programming\IdeaProjects\Emotify\platforms\neoforge-1.21.8\build\moddev\serverRunVmArgs.txt -Dfml.modFolders=emotify%%E:\Programming\IdeaProjects\Emotify\platforms\neoforge-1.21.8\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\platforms\neoforge-1.21.8\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\platforms\neoforge-1.21.8\build\resources\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-core\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-core\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-core\build\resources\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-wire-v1\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-wire-v1\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-wire-v1\build\resources\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-server-core\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-server-core\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-server-core\build\resources\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-catalog-builtin\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-catalog-builtin\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\emotify-catalog-builtin\build\resources\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\minecraft-client-1.21.8\build\classes\java\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\minecraft-client-1.21.8\build\classes\kotlin\main;emotify%%E:\Programming\IdeaProjects\Emotify\modules\minecraft-client-1.21.8\build\resources\main"/>
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/run-neoforge-server-1.21.8/"/>
+    <method v="2">
+      <option enabled="true" name="Make"/>
+    </method>
+  </configuration>
+</component>

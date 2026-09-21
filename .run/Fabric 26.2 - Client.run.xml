@@ -1,27 +1,16 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Fabric 26.2 - Client" type="GradleRunConfiguration" factoryName="Gradle">
-    <ExternalSystemSettings>
-      <option name="executionName" />
-      <option name="externalProjectPath" value="$PROJECT_DIR$" />
-      <option name="externalSystemIdString" value="GRADLE" />
-      <option name="scriptParameters" value="" />
-      <option name="taskDescriptions">
-        <list />
-      </option>
-      <option name="taskNames">
-        <list>
-          <option value=":fabric-26.2:runClient" />
-        </list>
-      </option>
-      <option name="vmOptions" />
-    </ExternalSystemSettings>
-    <ExternalSystemDebugServerProcess>true</ExternalSystemDebugServerProcess>
-    <ExternalSystemReattachDebugProcess>true</ExternalSystemReattachDebugProcess>
-    <ExternalSystemDebugDisabled>false</ExternalSystemDebugDisabled>
-    <DebugAllEnabled>false</DebugAllEnabled>
-    <RunAsTest>false</RunAsTest>
-    <GradleProfilingDisabled>false</GradleProfilingDisabled>
-    <GradleCoverageDisabled>false</GradleCoverageDisabled>
-    <method v="2" />
-  </configuration>
+  <configuration default="false" factoryName="Application" name="Fabric Client 26.2" type="Application">
+    <option name="MAIN_CLASS_NAME" value="net.fabricmc.devlaunchinjector.Main"/>
+    <module name="Emotify.fabric-26.2.client"/>
+    <option name="PROGRAM_PARAMETERS" value=""/>
+    <option name="VM_PARAMETERS" value="-Dfabric.dli.config=E:\Programming\IdeaProjects\Emotify\.gradle\loom-cache\projects\fabric-26.2\launch.cfg -Dfabric.dli.env=client -Dfabric.dli.main=net.fabricmc.loader.impl.launch.knot.KnotClient --sun-misc-unsafe-memory-access=allow --enable-native-access=ALL-UNNAMED"/>
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/run-fabric-client-26.2/"/>
+    <method v="2">
+      <option enabled="true" name="Make"/>
+    </method>
+    <envs>
+
+    </envs>
+    <shortenClasspath name="ARGS_FILE"/>
+  <classpathModifications/></configuration>
 </component>

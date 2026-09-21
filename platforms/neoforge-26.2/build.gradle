@@ -70,7 +70,6 @@ neoForge {
             programArgument '--nogui'
         }
         configureEach {
-            disableIdeRun()
             logLevel = org.slf4j.event.Level.INFO
             loadedMods = [mods.named('emotify').get()]
         }
