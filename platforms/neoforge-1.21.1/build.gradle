@@ -89,6 +89,7 @@ neoForge {
         }
 
         configureEach {
+            systemProperty 'neoforge.warnings.logofile.hide', 'true'
             logLevel = org.slf4j.event.Level.INFO
             loadedMods = [mods.named(mod_id).get()]
         }

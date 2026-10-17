@@ -450,12 +450,14 @@ def paper263SmokeDeployment = registerSmokePluginDeployment(
 )
 def purpurSmokeDeployment = registerSmokePluginDeployment('deployPurpurSmokePlugin', 'run-purpur-smoke')
 def foliaSmokeDeployment = registerSmokePluginDeployment('deployFoliaSmokePlugin', 'run-folia-smoke')
+def folia263SmokeDeployment = registerSmokePluginDeployment('deployFolia263SmokePlugin', 'run-folia-smoke-26.3')
 
 tasks.register('deploySmokePlugins') {
     group = 'development'
     description = 'Builds, verifies, and deploys the Emotify plugin into every smoke server folder.'
     dependsOn paperSmokeDeployment, paper1218SmokeDeployment, paper12111SmokeDeployment,
-        paper262SmokeDeployment, paper263SmokeDeployment, purpurSmokeDeployment, foliaSmokeDeployment
+        paper262SmokeDeployment, paper263SmokeDeployment, purpurSmokeDeployment, foliaSmokeDeployment,
+        folia263SmokeDeployment
 }
 def serverJavaLauncher = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(21)
@@ -570,6 +572,9 @@ def paper263Smoke = registerSmokeServer(
 def folia262Smoke = registerSmokeServer(
     'Folia262', 'Folia 26.2', 'run-folia-smoke', 'folia-26.2', 'folia_26_2',
 )
+def folia263Smoke = registerSmokeServer(
+    'Folia263', 'Folia 26.3', 'run-folia-smoke-26.3', 'folia-26.3', 'folia_26_3',
+)
 
 def registerSmokeServerRun = { String taskName, String serverDirectoryName, String serverJarName, deployment ->
     tasks.register(taskName, Exec) {
@@ -639,6 +644,17 @@ def runFolia262SmokeServer = registerSmokeServerRun(
 runFolia262SmokeServer.configure {
     dependsOn folia262Smoke.download
     dependsOn folia262Smoke.prepareEula
+    executable serverJava25Launcher.get().executablePath.asFile.absolutePath
+}
+def runFolia263SmokeServer = registerSmokeServerRun(
+    'runFolia263SmokeServer',
+    'run-folia-smoke-26.3',
+    folia263Smoke.jarName,
+    folia263SmokeDeployment,
+)
+runFolia263SmokeServer.configure {
+    dependsOn folia263Smoke.download
+    dependsOn folia263Smoke.prepareEula
     executable serverJava25Launcher.get().executablePath.asFile.absolutePath
 }
 registerSmokeServerRun(

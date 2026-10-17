@@ -53,7 +53,7 @@ loom {
             runDirectory.set(rootProject.layout.projectDirectory.dir('run-fabric-server-26.3'))
         }
         configureEach {
-            generateRunConfig.set(true)
+            generateRunConfig.set(false)
             preferGradleTask.set(false)
             appendProjectPathToDisplayName.set(false)
         }
@@ -103,6 +103,8 @@ sourceSets.client.kotlin.srcDir project(':minecraft-client-26.3')
 sourceSets {
     main.resources.srcDir project(':emotify-catalog-builtin')
         .layout.projectDirectory.dir('src/main/resources')
+    client.resources.srcDir project(':minecraft-client-26.3')
+        .layout.projectDirectory.dir('src/minecraft/resources')
     client.resources.srcDir project(':minecraft-client-1.21.1')
         .layout.projectDirectory.dir('src/main/resources')
     test {
@@ -244,6 +246,8 @@ def verifyFabric263ReleaseJar = tasks.register('verifyFabric263ReleaseJar') {
                 'emotify.client.mixins.json',
                 'assets/emotify/emotions.json',
                 'assets/emotify/icon.png',
+                'assets/emotify/shaders/core/emotion_billboard.vsh',
+                'assets/emotify/shaders/core/emotion_billboard.fsh',
                 'me/whish/emotify/fabric/EmotifyFabric.class',
                 'me/whish/emotify/fabric/mixin/client/LivingEntityRendererMixin.class',
                 'me/whish/emotify/client/EmotionBillboardGeometry.class',

@@ -35,7 +35,7 @@ abstract class EmotifySettingsBackgroundScreen(
         val handled = super.mouseClicked(event, doubleClick)
         if (EmotifySettingsFocusPolicy.shouldClear(
                 handled,
-                event.button(),
+                PointerButtons.portableIndex(event),
                 focused != null,
                 focused is AbstractButton,
             )

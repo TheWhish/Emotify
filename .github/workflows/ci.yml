@@ -47,20 +47,20 @@ jobs:
 
       - name: Run verification on Linux
         if: runner.os == 'Linux'
-        run: bash ./gradlew check --console=plain
+        run: bash ./gradlew check --configuration-cache-problems=fail --console=plain
 
       - name: Run verification on Windows
         if: runner.os == 'Windows'
-        run: .\gradlew.bat check --console=plain
+        run: .\gradlew.bat check --configuration-cache-problems=fail --console=plain
 
       - name: Verify configuration cache reuse on Linux
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          output="$(bash ./gradlew check --console=plain)"
+          output="$(bash ./gradlew check --configuration-cache-problems=fail --console=plain)"
           printf '%s\n' "$output"
           if ! grep -Fq 'Reusing configuration cache.' <<< "$output"; then
-            output="$(bash ./gradlew check --console=plain)"
+            output="$(bash ./gradlew check --configuration-cache-problems=fail --console=plain)"
             printf '%s\n' "$output"
           fi
           if ! grep -Fq 'Reusing configuration cache.' <<< "$output"; then
@@ -72,14 +72,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $output = .\gradlew.bat check --console=plain | Out-String
+          $output = .\gradlew.bat check --configuration-cache-problems=fail --console=plain | Out-String
           $exitCode = $LASTEXITCODE
           Write-Output $output
           if ($exitCode -ne 0) {
             throw "Gradle verification failed with exit code $exitCode."
           }
           if ($output -notmatch 'Reusing configuration cache\.') {
-            $output = .\gradlew.bat check --console=plain | Out-String
+            $output = .\gradlew.bat check --configuration-cache-problems=fail --console=plain | Out-String
             $exitCode = $LASTEXITCODE
             Write-Output $output
             if ($exitCode -ne 0) {
@@ -130,7 +130,7 @@ jobs:
           validate-wrappers: true
 
       - name: Build verified platform JARs
-        run: bash ./gradlew check --console=plain
+        run: bash ./gradlew check --configuration-cache-problems=fail --console=plain
 
       - name: Check out independent reproducibility copy
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -148,6 +148,10 @@ jobs:
             :fabric-1.21.8:remapJar :fabric-1.21.8:verifyFabricReleaseJar
             :neoforge-1.21.11:jar :neoforge-1.21.11:verifyReleaseJar
             :fabric-1.21.11:remapJar :fabric-1.21.11:verifyFabricReleaseJar
+            :neoforge-26.2:jar :neoforge-26.2:verifyNeoForge262ReleaseJar
+            :fabric-26.2:jar :fabric-26.2:verifyFabric262ReleaseJar
+            :neoforge-26.3:jar :neoforge-26.3:verifyNeoForge263ReleaseJar
+            :fabric-26.3:jar :fabric-26.3:verifyFabric263ReleaseJar
             :paper-1.21:jar :paper-1.21:verifyPaperReleaseJar
           )
           bash ./reproducibility-copy/gradlew -p ./reproducibility-copy "${platform_tasks[@]}" --console=plain --no-build-cache
@@ -159,6 +163,10 @@ jobs:
             'fabric|platforms/fabric-1.21.8/build/libs/emotify-fabric-1.21.8-*.jar'
             'neoforge|platforms/neoforge-1.21.11/build/libs/emotify-neoforge-1.21.11-*.jar'
             'fabric|platforms/fabric-1.21.11/build/libs/emotify-fabric-1.21.11-*.jar'
+            'neoforge|platforms/neoforge-26.2/build/libs/emotify-neoforge-26.2-*.jar'
+            'fabric|platforms/fabric-26.2/build/libs/emotify-fabric-26.2-*.jar'
+            'neoforge|platforms/neoforge-26.3/build/libs/emotify-neoforge-26.3-*.jar'
+            'fabric|platforms/fabric-26.3/build/libs/emotify-fabric-26.3-*.jar'
             'paper|platforms/paper-1.21/build/libs/emotify-paper-*.jar'
           )
           for specification in "${release_specs[@]}"; do

@@ -39,13 +39,13 @@ Emotify keeps its visual language close to Minecraft: readable pixel sprites, sm
 | Component | Supported version |
 | --- | --- |
 | Minecraft | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3** |
-| NeoForge | **21.1.234+** on 1.21.1; **21.8.54+** on 1.21.8; **21.11.45+** on 1.21.11; **26.2.0.59+** on 26.2; **26.3.0.6-beta+** on 26.3 |
+| NeoForge | **21.1.234+** on 1.21.1; **21.8.54+** on 1.21.8; **21.11.45+** on 1.21.11; **26.2.0.59+** on 26.2; **26.3.0.88+** on 26.3 |
 | Fabric Loader | **0.19.3 or newer** |
-| Fabric API | **0.116.15+1.21.1** on 1.21.1; **0.129.0+1.21.8** on 1.21.8; **0.141.6+1.21.11** on 1.21.11; **0.157.0+26.2** on 26.2; **0.161.0+26.3** on 26.3, or newer compatible releases |
+| Fabric API | **0.116.15+1.21.1** on 1.21.1; **0.129.0+1.21.8** on 1.21.8; **0.141.6+1.21.11** on 1.21.11; **0.157.0+26.2** on 26.2; **0.163.0+26.3** on 26.3, or newer compatible releases |
 | Fabric Language Kotlin | **1.13.12+kotlin.2.4.0 or newer compatible release** |
-| Paper / Purpur | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3** (26.3 is on Paper's alpha channel upstream) |
+| Paper / Purpur | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3** |
 | Java | **21** on 1.21.1–1.21.11; **25** on 26.2 and 26.3 |
-| Kotlin for Forge | **5.12.0 or a newer compatible 5.x release** on 1.21.1 and 1.21.8; **6.3.0 or a newer compatible 6.x release** on 1.21.11, 26.2, and 26.3 |
+| Kotlin for Forge | **5.12.0 or a newer compatible 5.x release** on 1.21.1 and 1.21.8; **6.3.0 or a newer compatible 6.x release** on 1.21.11 and 26.2; **6.4.0 or a newer compatible 6.x release** on 26.3 |
 
 All supported platforms use the same Emotify protocol. NeoForge and Fabric clients can connect to either modded server platform or to Paper and Purpur servers running the plugin. Players without the client mod can still join normally, but they do not send or see emotions.
 
@@ -56,17 +56,17 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 | Platform | Artifact | Location and requirements |
 | --- | --- | --- |
-| NeoForge 1.21.1 | `emotify-neoforge-1.21.1-0.8.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric 1.21.1 | `emotify-fabric-1.21.1-0.8.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 1.21.8 | `emotify-neoforge-1.21.8-0.8.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric 1.21.8 | `emotify-fabric-1.21.8-0.8.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 1.21.11 | `emotify-neoforge-1.21.11-0.8.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
-| Fabric 1.21.11 | `emotify-fabric-1.21.11-0.8.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 26.2 | `emotify-neoforge-26.2-0.8.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
-| Fabric 26.2 | `emotify-fabric-26.2-0.8.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 26.3 | `emotify-neoforge-26.3-0.8.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
-| Fabric 26.3 | `emotify-fabric-26.3-0.8.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur 1.21.1, 1.21.8, 1.21.11, 26.2, 26.3 | `emotify-paper-1.21-0.8.1.jar` | `plugins`; has no additional server dependencies |
+| NeoForge 1.21.1 | `emotify-neoforge-1.21.1-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric 1.21.1 | `emotify-fabric-1.21.1-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| NeoForge 1.21.8 | `emotify-neoforge-1.21.8-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric 1.21.8 | `emotify-fabric-1.21.8-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| NeoForge 1.21.11 | `emotify-neoforge-1.21.11-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
+| Fabric 1.21.11 | `emotify-fabric-1.21.11-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| NeoForge 26.2 | `emotify-neoforge-26.2-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
+| Fabric 26.2 | `emotify-fabric-26.2-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| NeoForge 26.3 | `emotify-neoforge-26.3-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.4.0` or a newer compatible 6.x release |
+| Fabric 26.3 | `emotify-fabric-26.3-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
+| Paper / Purpur 1.21.1, 1.21.8, 1.21.11, 26.2, 26.3 | `emotify-paper-1.21-0.9.0-beta.1.jar` | `plugins`; has no additional server dependencies |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 
@@ -84,7 +84,8 @@ Custom emoji sharing is enabled by default and can be disabled independently fro
 
 | Platform | Server configuration |
 | --- | --- |
-| NeoForge | `<world>/serverconfig/emotify-server.toml` |
+| NeoForge 1.21.1–26.2 | `<world>/serverconfig/emotify-server.toml` |
+| NeoForge 26.3 | `config/emotify-server.toml`, overridable per world through `<world>/syncedconfig/emotify-server.toml` |
 | Fabric | `config/emotify-server.properties` |
 | Paper / Purpur | `plugins/Emotify/config.yml` |
 

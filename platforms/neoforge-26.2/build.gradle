@@ -70,6 +70,7 @@ neoForge {
             programArgument '--nogui'
         }
         configureEach {
+            systemProperty 'neoforge.warnings.logofile.hide', 'true'
             logLevel = org.slf4j.event.Level.INFO
             loadedMods = [mods.named('emotify').get()]
         }

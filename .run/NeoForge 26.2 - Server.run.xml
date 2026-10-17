@@ -1,5 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" factoryName="Application" name="NeoForge Server 26.2" type="Application">
+    <option name="ALTERNATIVE_JRE_PATH" value="C:/Program Files/Java/jdk-25.0.3"/>
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true"/>
     <option name="MAIN_CLASS_NAME" value="net.neoforged.devlaunch.Main"/>
     <module name="Emotify.neoforge-26.2.main"/>
     <option name="PROGRAM_PARAMETERS" value="@E:\Programming\IdeaProjects\Emotify\platforms\neoforge-26.2\build\moddev\serverRunProgramArgs.txt"/>

@@ -1,10 +1,6 @@
 import groovy.json.JsonSlurper
-
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
-import java.util.zip.ZipOutputStream
 
 plugins {
     id 'java-library'
@@ -77,60 +73,15 @@ neoForge {
             programArgument '--nogui'
         }
         configureEach {
+            systemProperty 'neoforge.warnings.logofile.hide', 'true'
             logLevel = org.slf4j.event.Level.INFO
             loadedMods = [mods.named('emotify').get()]
         }
     }
 }
 
-def kffmodOriginal = configurations.detachedConfiguration(
-    dependencies.create("thedarkcolour:kffmod-neoforge:${kotlin_for_forge_version_26_3}")
-)
-
-def kffUnsupportedMinecraftRange = 'versionRange="[1.21.9,26.3)"'
-
-def patchKffmodMinecraftVersionRange = tasks.register('patchKffmodMinecraftVersionRange') {
-    def input = kffmodOriginal
-    def output = layout.buildDirectory.file("patched-libs/kffmod-neoforge-${kotlin_for_forge_version_26_3}.jar")
-    inputs.files(input)
-    outputs.file(output)
-    doLast {
-        def outputFile = output.get().asFile
-        outputFile.parentFile.mkdirs()
-        outputFile.delete()
-        def patchApplied = false
-        new ZipFile(input.singleFile).withCloseable { zip ->
-            new ZipOutputStream(new FileOutputStream(outputFile)).withCloseable { out ->
-                zip.entries().each { entry ->
-                    def bytes = zip.getInputStream(entry).bytes
-                    if (entry.name == 'META-INF/neoforge.mods.toml') {
-                        def metadata = new String(bytes, 'UTF-8')
-                        patchApplied = metadata.contains(kffUnsupportedMinecraftRange)
-                        bytes = metadata
-                            .replace(kffUnsupportedMinecraftRange, 'versionRange="[1.21.9,)"')
-                            .getBytes('UTF-8')
-                    }
-                    out.putNextEntry(new ZipEntry(entry.name))
-                    out.write(bytes)
-                    out.closeEntry()
-                }
-            }
-        }
-        if (!patchApplied) {
-            throw new GradleException(
-                "KotlinForForge ${kotlin_for_forge_version_26_3} no longer excludes Minecraft 26.3. " +
-                    'Delete patchKffmodMinecraftVersionRange, depend on the unmodified artifact and ' +
-                    'raise kotlin_for_forge_version_range_26_3 to the first release that supports 26.3.',
-            )
-        }
-    }
-}
-
 dependencies {
-    implementation("thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version_26_3}") {
-        exclude group: 'thedarkcolour', module: 'kffmod-neoforge'
-    }
-    implementation files(patchKffmodMinecraftVersionRange)
+    implementation "thedarkcolour:kotlinforforge-neoforge:${kotlin_for_forge_version_26_3}"
     compileOnly project(':emotify-core')
     compileOnly project(':emotify-wire-v1')
     compileOnly project(':emotify-server-core')
@@ -183,6 +134,7 @@ def generateNeoForgeModMetadata = tasks.register('generateNeoForgeModMetadata', 
 sourceSets.main.resources {
     srcDir generateNeoForgeModMetadata
     srcDir project(':emotify-catalog-builtin').layout.projectDirectory.dir('src/main/resources')
+    srcDir project(':minecraft-client-26.3').layout.projectDirectory.dir('src/minecraft/resources')
     srcDir project(':minecraft-client-1.21.1').layout.projectDirectory.dir('src/main/resources')
     exclude '**/*.bbmodel', '**/.cache/**'
 }
@@ -226,6 +178,8 @@ def verifyNeoForge263ReleaseJar = tasks.register('verifyNeoForge263ReleaseJar') 
                 'emotify.neoforge.client.mixins.json',
                 'assets/emotify/emotions.json',
                 'assets/emotify/icon.png',
+                'assets/emotify/shaders/core/emotion_billboard.vsh',
+                'assets/emotify/shaders/core/emotion_billboard.fsh',
                 'me/whish/emotify/Emotify.class',
                 'me/whish/emotify/client/EmotionBillboardGeometry.class',
                 'me/whish/emotify/client/EmotionBillboardRenderer.class',

@@ -1,5 +1,6 @@
 package me.whish.emotify.client
 
+import com.mojang.blaze3d.platform.InputConstants
 import kotlin.math.abs
 import me.whish.emotify.client.picker.EmotionLabelTruncation
 import me.whish.emotify.client.picker.EmotionPickerEdgeFade
@@ -224,7 +225,7 @@ internal class EmotionGridList(
     }
 
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        if (event.button() == 0 && isOverScrollbar(event.x(), event.y())) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && isOverScrollbar(event.x(), event.y())) {
             draggingScrollbar = true
             setDragging(true)
             return true
@@ -240,7 +241,7 @@ internal class EmotionGridList(
         dragX: Double,
         dragY: Double,
     ): Boolean {
-        if (event.button() == 0 && draggingScrollbar) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && draggingScrollbar) {
             val travel = scrollbarTravel().coerceAtLeast(1)
             snapToScroll(
                 EmotionPickerScrollMath.draggedAmount(
@@ -256,7 +257,7 @@ internal class EmotionGridList(
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        if (event.button() == 0 && draggingScrollbar) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && draggingScrollbar) {
             draggingScrollbar = false
             setDragging(false)
             return true
@@ -870,7 +871,7 @@ internal class ExtractedEmotionQuickSlotButton(
             EmotionPickerQuickSlotMouseRouting.click(
                 assigned(),
                 active && visible && isMouseOver(event.x(), event.y()),
-                event.button(),
+                PointerButtons.portableIndex(event),
             )
         ) {
             EmotionPickerQuickSlotMouseDecision.DISPATCH -> false

@@ -24,9 +24,6 @@ object EmotionBillboardRenderer {
         if (player === minecraft.cameraEntity && minecraft.options.cameraType.isFirstPerson) {
             return
         }
-        if (minecraft.gameRenderer.useImprovedTransparency()) {
-            return
-        }
 
         val camera = minecraft.gameRenderer.mainCamera()
         val cameraPosition = camera.position()

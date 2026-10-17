@@ -6,7 +6,9 @@ import me.whish.emotify.catalog.builtin.EmotionSpriteRegion
 import me.whish.emotify.domain.AnimationMotion
 import me.whish.emotify.domain.EmotionAnimation
 import me.whish.emotify.domain.EmotionAnimationFrameBuffer
+import net.minecraft.client.renderer.SubmitNodeCollection
 import net.minecraft.client.renderer.SubmitNodeCollector
+import net.minecraft.client.renderer.feature.CustomFeatureRenderer
 
 object EmotionBillboardGeometry {
     private val animationFrame = EmotionAnimationFrameBuffer()
@@ -20,13 +22,17 @@ object EmotionBillboardGeometry {
         motion: AnimationMotion,
         animationSeed: Long,
     ) {
-        collector.submitCustomGeometry(
-            poseStack,
-            EmotionBillboardRenderTypes.resolve(textureId),
-        ) { pose, consumer ->
+        val renderType = EmotionBillboardRenderTypes.resolve(textureId)
+        val geometry = SubmitNodeCollector.CustomGeometryRenderer { pose, consumer ->
             EmotionAnimation.sampleInto(elapsedMillis, motion, animationSeed, animationFrame)
             renderSprites(consumer, pose, region)
         }
+        val ordered = collector.order(0)
+        if (ordered is SubmitNodeCollection) {
+            ordered.afterTerrain.submit(CustomFeatureRenderer.Submit(poseStack.last().copy(), renderType, geometry))
+            return
+        }
+        ordered.submitCustomGeometry(poseStack, renderType, geometry)
     }
 
     private fun renderSprites(
