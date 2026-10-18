@@ -143,7 +143,7 @@ class EmotionPickerScreen(
         ).also { field ->
             field.setMaxLength(MAXIMUM_SEARCH_LENGTH)
             field.setHint(Component.translatable("screen.emotify.search_hint"))
-            field.setValue(state.query)
+            field.value = state.query
             field.setResponder(::onSearchChanged)
         }
         addRenderableWidget(searchBox)
@@ -161,7 +161,7 @@ class EmotionPickerScreen(
             ::beginEmotionPointerPress,
             ::isDragging,
         )
-        grid.setX(geometry.listX)
+        grid.x = geometry.listX
         grid.replaceItems(displayedGridItems)
         addRenderableWidget(grid)
         configureSearchMode()
@@ -313,7 +313,7 @@ class EmotionPickerScreen(
             EmotionPickerMovement.release(minecraft)
         }
         if (shouldClearSearchFocus && searchBox.isFocused) {
-            setFocused(null)
+            focused = null
             return true
         }
         return handled
@@ -597,7 +597,7 @@ class EmotionPickerScreen(
         )
         if (!searching) {
             if (searchBox.isFocused) {
-                setFocused(null)
+                focused = null
             }
         }
     }
@@ -999,7 +999,7 @@ class EmotionPickerScreen(
         }
         grid.restoreScrollAmount(widgetState.scrollAmount)
         if (widgetState.searchFocused && isSearching()) {
-            setFocused(searchBox)
+            focused = searchBox
             EmotionPickerMovement.release(minecraft)
         }
     }

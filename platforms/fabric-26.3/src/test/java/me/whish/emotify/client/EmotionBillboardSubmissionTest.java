@@ -18,6 +18,7 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,8 +31,8 @@ final class EmotionBillboardSubmissionTest {
     }
 
     @Test
-    void keepsDepthAndReusesTheCachedRenderType() {
-        assertKeepsDepthWithoutCulling(EmotionBillboardRenderTypes.INSTANCE.pipeline());
+    void writesDepthSoLaterTranslucentPassesCannotOverdrawAndReusesTheCachedRenderType() {
+        assertDepthContract(EmotionBillboardRenderTypes.INSTANCE.pipeline(), true);
 
         RenderType first = EmotionBillboardRenderTypes.INSTANCE.resolve("emotify:textures/emotions/faces.png");
         RenderType second = EmotionBillboardRenderTypes.INSTANCE.resolve("emotify:textures/emotions/faces.png");
@@ -44,7 +45,7 @@ final class EmotionBillboardSubmissionTest {
     void providesEveryImprovedTransparencyPipelineWithTheSameDepthContract() {
         OitPipelineSet pipelines = EmotionBillboardRenderTypes.INSTANCE.oitPipelines();
         List.of(pipelines.depthBoundsPipeline(), pipelines.transmittancePipeline(), pipelines.accumulatePipeline())
-            .forEach(EmotionBillboardSubmissionTest::assertKeepsDepthWithoutCulling);
+            .forEach(pipeline -> assertDepthContract(pipeline, false));
     }
 
     @Test
@@ -67,10 +68,10 @@ final class EmotionBillboardSubmissionTest {
         assertTrue(collection.translucentCustomGeometry.isEmpty());
     }
 
-    private static void assertKeepsDepthWithoutCulling(RenderPipeline pipeline) {
+    private static void assertDepthContract(RenderPipeline pipeline, boolean writesDepth) {
         DepthStencilState depth = Objects.requireNonNull(pipeline.getDepthStencilState());
         assertSame(CompareOp.GREATER_THAN_OR_EQUAL, depth.depthTest());
-        assertFalse(depth.writeDepth());
+        assertEquals(writesDepth, depth.writeDepth());
         assertFalse(pipeline.isCull());
     }
 }

@@ -33,6 +33,7 @@ object EmotionBillboardRenderTypes {
         .builder(RenderPipelines.GLOBALS_SNIPPET, baseSnippet)
         .withBindGroupLayout(BindGroupLayouts.PROJECTION)
         .withColorTargetState(ColorTargetState(BlendFunction.TRANSLUCENT))
+        .withDepthStencilState(DepthStencilState.DEFAULT)
         .withLocation(location)
         .build()
     @Suppress("DEPRECATION")

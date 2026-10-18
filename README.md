@@ -24,7 +24,7 @@ Emotify adds animated emotions above players: a fast, quiet alternative to anoth
 - **World-aware rendering** that follows player poses, stays behind blocks, and respects first-person and visibility rules.
 - **Hotbar emoji indicator** — a lightweight, smoothly animated 16×16 preview appears right above your hotbar when sending an emoji, synchronized with your overhead emotion lifecycle.
 - **Movement-friendly picker** that does not take control away from the player while it is open.
-- **Nine quick slots** assigned by drag and drop, activated with the top-row or Numpad `1–9` keys while the picker is open, and saved independently from favorites for both built-in and custom emojis.
+- **Nine quick slots** assigned by drag and drop, activated with the top-row or Numpad `1–9` keys while the picker is open, and saved independently of favorites for both built-in and custom emojis.
 - **Reduced Motion** mode with a static fade-only presentation.
 - **Server-authoritative multiplayer** with cooldowns, permissions, visibility filtering, bounded payloads, and abuse protection.
 - **Custom emojis shared in multiplayer** from local PNG, JPG, JPEG, and animated GIF files, with lossless decoded-frame transfer and connection-local caching.
@@ -36,16 +36,16 @@ Emotify keeps its visual language close to Minecraft: readable pixel sprites, sm
 
 ## 🌐 Compatibility
 
-| Component | Supported version |
-| --- | --- |
-| Minecraft | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3** |
-| NeoForge | **21.1.234+** on 1.21.1; **21.8.54+** on 1.21.8; **21.11.45+** on 1.21.11; **26.2.0.59+** on 26.2; **26.3.0.88+** on 26.3 |
-| Fabric Loader | **0.19.3 or newer** |
-| Fabric API | **0.116.15+1.21.1** on 1.21.1; **0.129.0+1.21.8** on 1.21.8; **0.141.6+1.21.11** on 1.21.11; **0.157.0+26.2** on 26.2; **0.163.0+26.3** on 26.3, or newer compatible releases |
-| Fabric Language Kotlin | **1.13.12+kotlin.2.4.0 or newer compatible release** |
-| Paper / Purpur | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3** |
-| Java | **21** on 1.21.1–1.21.11; **25** on 26.2 and 26.3 |
-| Kotlin for Forge | **5.12.0 or a newer compatible 5.x release** on 1.21.1 and 1.21.8; **6.3.0 or a newer compatible 6.x release** on 1.21.11 and 26.2; **6.4.0 or a newer compatible 6.x release** on 26.3 |
+| Component              | Supported version                                                                                                                                                                       |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Minecraft              | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3**                                                                                                                             |
+| NeoForge               | **21.1.234+** on 1.21.1; **21.8.54+** on 1.21.8; **21.11.45+** on 1.21.11; **26.2.0.59+** on 26.2; **26.3.0.88+** on 26.3                                                               |
+| Fabric Loader          | **0.19.3 or newer**                                                                                                                                                                     |
+| Fabric API             | **0.116.15+1.21.1** on 1.21.1; **0.129.0+1.21.8** on 1.21.8; **0.141.6+1.21.11** on 1.21.11; **0.157.0+26.2** on 26.2; **0.163.0+26.3** on 26.3, or newer compatible releases           |
+| Fabric Language Kotlin | **1.13.12+kotlin.2.4.0 or newer compatible release**                                                                                                                                    |
+| Paper / Purpur         | **1.21.1**, **1.21.8**, **1.21.11**, **26.2**, and **26.3**                                                                                                                             |
+| Java                   | **21** on 1.21.1–1.21.11; **25** on 26.2 and 26.3                                                                                                                                       |
+| Kotlin for Forge       | **5.12.0 or a newer compatible 5.x release** on 1.21.1 and 1.21.8; **6.3.0 or a newer compatible 6.x release** on 1.21.11 and 26.2; **6.4.0 or a newer compatible 6.x release** on 26.3 |
 
 All supported platforms use the same Emotify protocol. NeoForge and Fabric clients can connect to either modded server platform or to Paper and Purpur servers running the plugin. Players without the client mod can still join normally, but they do not send or see emotions.
 
@@ -54,25 +54,25 @@ All supported platforms use the same Emotify protocol. NeoForge and Fabric clien
 
 ## 📦 Installation
 
-| Platform | Artifact | Location and requirements |
-| --- | --- | --- |
-| NeoForge 1.21.1 | `emotify-neoforge-1.21.1-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric 1.21.1 | `emotify-fabric-1.21.1-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 1.21.8 | `emotify-neoforge-1.21.8-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
-| Fabric 1.21.8 | `emotify-fabric-1.21.8-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 1.21.11 | `emotify-neoforge-1.21.11-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
-| Fabric 1.21.11 | `emotify-fabric-1.21.11-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 26.2 | `emotify-neoforge-26.2-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release |
-| Fabric 26.2 | `emotify-fabric-26.2-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| NeoForge 26.3 | `emotify-neoforge-26.3-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.4.0` or a newer compatible 6.x release |
-| Fabric 26.3 | `emotify-fabric-26.3-0.9.0-beta.1.jar` | `mods`; requires Fabric API and Fabric Language Kotlin |
-| Paper / Purpur 1.21.1, 1.21.8, 1.21.11, 26.2, 26.3 | `emotify-paper-1.21-0.9.0-beta.1.jar` | `plugins`; has no additional server dependencies |
+| Platform                                           | Artifact                                    | Location and requirements                                                    |
+|----------------------------------------------------|---------------------------------------------|------------------------------------------------------------------------------|
+| NeoForge 1.21.1                                    | `emotify-neoforge-1.21.1-0.9.0-beta.1.jar`  | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric 1.21.1                                      | `emotify-fabric-1.21.1-0.9.0-beta.1.jar`    | `mods`; requires Fabric API and Fabric Language Kotlin                       |
+| NeoForge 1.21.8                                    | `emotify-neoforge-1.21.8-0.9.0-beta.1.jar`  | `mods`; requires Kotlin for Forge `5.12.0` or a newer compatible 5.x release |
+| Fabric 1.21.8                                      | `emotify-fabric-1.21.8-0.9.0-beta.1.jar`    | `mods`; requires Fabric API and Fabric Language Kotlin                       |
+| NeoForge 1.21.11                                   | `emotify-neoforge-1.21.11-0.9.0-beta.1.jar` | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release  |
+| Fabric 1.21.11                                     | `emotify-fabric-1.21.11-0.9.0-beta.1.jar`   | `mods`; requires Fabric API and Fabric Language Kotlin                       |
+| NeoForge 26.2                                      | `emotify-neoforge-26.2-0.9.0-beta.1.jar`    | `mods`; requires Kotlin for Forge `6.3.0` or a newer compatible 6.x release  |
+| Fabric 26.2                                        | `emotify-fabric-26.2-0.9.0-beta.1.jar`      | `mods`; requires Fabric API and Fabric Language Kotlin                       |
+| NeoForge 26.3                                      | `emotify-neoforge-26.3-0.9.0-beta.1.jar`    | `mods`; requires Kotlin for Forge `6.4.0` or a newer compatible 6.x release  |
+| Fabric 26.3                                        | `emotify-fabric-26.3-0.9.0-beta.1.jar`      | `mods`; requires Fabric API and Fabric Language Kotlin                       |
+| Paper / Purpur 1.21.1, 1.21.8, 1.21.11, 26.2, 26.3 | `emotify-paper-1.21-0.9.0-beta.1.jar`       | `plugins`; has no additional server dependencies                             |
 
 Players on Paper or Purpur can use either the NeoForge or Fabric client mod. Do not install multiple Emotify platform artifacts in the same game or server instance.
 
 ### Client settings
 
-Favorites and the nine quick slots are managed directly in the picker. Drag an emoji card onto a slot, press its number while the picker is open to use it, or right-click a filled slot to clear it. Built-in and custom assignments persist independently from favorites. After a complete stable custom-library refresh, a slot is cleared automatically if its local custom-emoji file no longer exists. Incomplete scans and decode or capacity failures preserve existing assignments. The shared client screen can hide all other players' emotions, hide only their custom emotions, toggle the hotbar emoji indicator, manage an ignored-player list, enable Reduced Motion, and adjust the saved-emoji feedback and future emotion-sound volume. Your own emotions remain visible. Preferences, favorite order, and quick slots are stored in `config/emotify-client.toml` on NeoForge and `config/emotify-client.properties` on Fabric. The two loaders use different file formats but expose the same client behavior.
+Favorites and the nine quick slots are managed directly in the picker. Drag an emoji card onto a slot, press its number while the picker is open to use it, or right-click a filled slot to clear it. Built-in and custom assignments persist independently of favorites. After a complete stable custom-library refresh, a slot is cleared automatically if its local custom-emoji file no longer exists. Incomplete scans and decode or capacity failures preserve existing assignments. The shared client screen can hide all other players' emotions, hide only their custom emotions, toggle the hotbar emoji indicator, manage an ignored-player list, enable Reduced Motion, and adjust the saved-emoji feedback and future emotion-sound volume. Your own emotions remain visible. Preferences, favorite order, and quick slots are stored in `config/emotify-client.toml` on NeoForge and `config/emotify-client.properties` on Fabric. The two loaders use different file formats but expose the same client behavior.
 
 Custom emojis are loaded from direct PNG, JPG, JPEG, and GIF files in `<game directory>/emoji`. Static images support exact `8×8`, `16×16`, `32×32`, `64×64`, and `128×128` dimensions; GIF files support exact `8×8`, `16×16`, `32×32`, and `64×64` dimensions. GIF timing is normalized automatically: redundant frames are merged, high-frame-rate sources are sampled across their visible timeline, and content after the `3` second emotion lifecycle is clipped without accelerating the retained animation. The resulting asset remains bounded to 30 frames and 15 FPS without resizing the image or inventing frames for low-FPS sources. Source GIFs may contain up to 300 frames, and every image file is limited to `512 KiB`. The picker refreshes automatically after changes, and lossless transfer is prepared outside the render thread. Compatible Emotify peers receive content-addressed decoded pixels, frame durations, a bounded display name, and a stable origin ID; paths and original image files never leave the client.
 
@@ -80,14 +80,14 @@ Hold Shift and right-click the stable `0.9×0.95` block area above a player whil
 
 ## 🛡️ Server administration
 
-Custom emoji sharing is enabled by default and can be disabled independently from built-in emotions. Server settings are stored in:
+Custom emoji sharing is enabled by default and can be disabled independently of built-in emotions. Server settings are stored in:
 
-| Platform | Server configuration |
-| --- | --- |
-| NeoForge 1.21.1–26.2 | `<world>/serverconfig/emotify-server.toml` |
-| NeoForge 26.3 | `config/emotify-server.toml`, overridable per world through `<world>/syncedconfig/emotify-server.toml` |
-| Fabric | `config/emotify-server.properties` |
-| Paper / Purpur | `plugins/Emotify/config.yml` |
+| Platform             | Server configuration                                                                                   |
+|----------------------|--------------------------------------------------------------------------------------------------------|
+| NeoForge 1.21.1–26.2 | `<world>/serverconfig/emotify-server.toml`                                                             |
+| NeoForge 26.3        | `config/emotify-server.toml`, overridable per world through `<world>/syncedconfig/emotify-server.toml` |
+| Fabric               | `config/emotify-server.properties`                                                                     |
+| Paper / Purpur       | `plugins/Emotify/config.yml`                                                                           |
 
 All server formats use configuration schema `1`. A valid versionless file is treated as legacy schema `0`, backed up, and migrated once without changing platform format. Legacy cooldown values from `2200` to `2999` milliseconds are raised to the current safe minimum of `3000` during that migration. Fabric and Paper/Purpur create a fixed `.v0.bak`; NeoForge uses its bounded numbered `ModConfigSpec` backup. A future schema is never rewritten by an older build.
 
@@ -101,26 +101,26 @@ Fabric rejects invalid configuration at startup. NeoForge uses its standard `Mod
 
 ### Permissions
 
-| Permission | Default | Purpose |
-| --- | --- | --- |
-| `emotify.use` | Everyone | Send emotions |
-| `emotify.receive` | Everyone | Receive emotions from other players |
-| `emotify.admin.reload` | Operators | Reload the plugin configuration |
+| Permission             | Default   | Purpose                             |
+|------------------------|-----------|-------------------------------------|
+| `emotify.use`          | Everyone  | Send emotions                       |
+| `emotify.receive`      | Everyone  | Receive emotions from other players |
+| `emotify.admin.reload` | Operators | Reload the plugin configuration     |
 
 The plugin uses the standard Bukkit permission API and does not require a direct LuckPerms integration.
 
 ### Main configuration
 
-| Setting | Default | Purpose |
-| --- | ---: | --- |
-| `enabled` | `true` | Enables emotion publishing |
-| `custom-emojis.enabled` | `true` | Allows players to publish custom emojis |
-| `custom-emojis.maximum-static-resolution` | `128` | Maximum accepted static custom-emoji resolution |
-| `custom-emojis.maximum-animated-resolution` | `64` | Maximum accepted animated custom-emoji resolution |
-| `cooldown-millis` | `3000` | Delay between emotions |
-| `emotions.allow` | `[]` | Optional allow-list; empty enables the full catalog |
-| `emotions.deny` | `[]` | Emojis excluded from the catalog |
-| `broadcast.radius-blocks` | `64.0` | Maximum visibility radius |
+| Setting                                     | Default | Purpose                                             |
+|---------------------------------------------|--------:|-----------------------------------------------------|
+| `enabled`                                   |  `true` | Enables emotion publishing                          |
+| `custom-emojis.enabled`                     |  `true` | Allows players to publish custom emojis             |
+| `custom-emojis.maximum-static-resolution`   |   `128` | Maximum accepted static custom-emoji resolution     |
+| `custom-emojis.maximum-animated-resolution` |    `64` | Maximum accepted animated custom-emoji resolution   |
+| `cooldown-millis`                           |  `3000` | Delay between emotions                              |
+| `emotions.allow`                            |    `[]` | Optional allow-list; empty enables the full catalog |
+| `emotions.deny`                             |    `[]` | Emojis excluded from the catalog                    |
+| `broadcast.radius-blocks`                   |  `64.0` | Maximum visibility radius                           |
 
 The remaining `broadcast` and `ingress` values are server safety limits and should normally remain at their defaults.
 

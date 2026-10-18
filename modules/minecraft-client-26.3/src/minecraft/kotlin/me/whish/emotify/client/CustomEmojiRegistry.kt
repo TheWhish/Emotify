@@ -346,7 +346,7 @@ object CustomEmojiRegistry {
             "Custom emoji dimensions or format changed during load: ${file.path}"
         }
         val decoded = CustomEmojiImageDecoder.decode(file, bytes)
-        try {
+        decoded.use { decoded ->
             require(decoded.frames.all { image -> image.width == file.sourceSize && image.height == file.sourceSize }) {
                 "Decoded custom emoji frame dimensions changed during load: ${file.path}"
             }
@@ -405,8 +405,6 @@ object CustomEmojiRegistry {
                 atlas.close()
                 throw failure
             }
-        } finally {
-            decoded.close()
         }
     }
 
